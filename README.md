@@ -1,5 +1,16 @@
 # replay
+A macOS tool to execute a list of declared actions, primarily file operations like clone, move, create, delete
+Key features:
+- tiny binary
+- concurrent file operations for fastest execution
+- serial file operations supported if a sequence is required
+- designed to replace custom shell scripts serially moving/copying files around
+- self contained code - not calling external binaries to preform file operations
+- supports cloning on APFS so duplicates don't take unnecessary space on disk
 
+If it sounds a bit like an installer or package extractor it's becuase that's what it's designed to be used for.
+
+Type `replay --help` in Terminal to learn more:
 ```
 replay -- execute a declarative script of actions, aka a playlist
 
