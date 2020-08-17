@@ -1,0 +1,72 @@
+{
+  "setup": [
+    {
+      "action": "delete",
+      "items": [
+      	"${HOME}/${REPLAY_TEST}",
+      	],
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/${REPLAY_TEST}",
+    },
+    {
+      "action": "create",
+      "content": "to be deleted",
+      "file": "${HOME}/${REPLAY_TEST}/test-delete.txt",
+    },
+    {
+      "action": "create",
+      "content": "to be moved",
+      "file": "${HOME}/${REPLAY_TEST}/test-move.txt",
+    },
+  ],
+  "tests": [
+    {
+      "action": "clone",
+      "from": "${REPLAY_TEST_FILES_DIR}/test-clone.txt",
+      "to": "/Users/${USER}/${REPLAY_TEST}/test-clone.txt",
+    },
+    {
+      "action": "move",
+      "from": "/Users/${USER}/${REPLAY_TEST}/test-move.txt",
+      "to": "/Users/${USER}/${REPLAY_TEST}/test-moved.txt",
+    },
+    {
+      "action": "hardlink",
+      "from": "${REPLAY_TEST_FILES_DIR}/test-hardlink.txt",
+      "to": "/Users/${USER}/${REPLAY_TEST}/test-hardlink.txt",
+    },
+    {
+      "action": "symlink",
+      "from": "${REPLAY_TEST_FILES_DIR}/test-symlink.txt",
+      "to": "/Users/${USER}/${REPLAY_TEST}/test-symlink.txt",
+    },
+    {
+      "action": "clone",
+      "items": [
+      	"${REPLAY_TEST_FILES_DIR}/test-clone-bulk1.txt",
+      	"${REPLAY_TEST_FILES_DIR}/test-clone-bulk2.txt",
+     	"${REPLAY_TEST_FILES_DIR}/test-clone-bulk3.txt",
+      	],
+      "destination directory": "${HOME}/${REPLAY_TEST}",
+    },
+    {
+      "action": "create",
+      "content": "This is test file 7 at ${HOME}/${REPLAY_TEST} with expanded env vars",
+      "file": "${HOME}/${REPLAY_TEST}/test-create-expanded.txt",
+    },
+    {
+      "action": "create",
+      "content": "This is test file 8 at ${HOME}/${REPLAY_TEST} with unexpanded env vars",
+      "raw content": true,
+      "file": "${HOME}/${REPLAY_TEST}/test-create-unexpanded.txt",
+    },
+    {
+      "action": "delete",
+      "items": [
+      	"${HOME}/${REPLAY_TEST}/test-delete.txt",
+      	],
+    },
+  ],
+}
