@@ -21,13 +21,23 @@ typedef enum
 	kPlaylistFormatCount
 } PlaylistFormat;
 
+@interface AtomicError : NSObject
+	@property(atomic, strong) NSError *error;
+@end
+
+@implementation AtomicError
+
+@end
+
 typedef struct
 {
 	NSDictionary<NSString *,NSString *> *environment;
+	AtomicError *lastError;
 	bool concurrent;
 	bool verbose;
 	bool dryRun;
-} PlaylistSettings;
+	bool stopOnError;
+} ReplayContext;
 
 
 static NSString *
@@ -139,7 +149,7 @@ StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSStrin
 // if the playlistKey is NULL, the whole content of the file is expected to be playlist array
 
 static inline NSArray<NSDictionary*> *
-GetPlaylist(const char* playlistPath, const char* playlistKey)
+GetPlaylist(const char* playlistPath, const char* playlistKey, ReplayContext *context)
 {
 	if(playlistPath == NULL)
 	{
@@ -215,6 +225,7 @@ GetPlaylist(const char* playlistPath, const char* playlistKey)
 		BOOL isReachable = [playlistURL checkResourceIsReachableAndReturnError:&operationError];
 		if(!isReachable)
 		{
+			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
@@ -223,6 +234,8 @@ GetPlaylist(const char* playlistPath, const char* playlistKey)
 		}
 		else
 		{
+			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unkown or invalid playlist type" };
+			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
 			fprintf(stderr, "Unkown or invalid playlist type. Only .plist and .json playlists are supported\nIf -playlistKey is specified, the root container is expected to be a dictionary. The playlist itself is always an array\n");
 		}
 	}
@@ -246,21 +259,25 @@ GetPlaylist(const char* playlistPath, const char* playlistKey)
 }
 
 static bool
-CloneItem(NSURL *fromURL, NSURL *toURL, const PlaylistSettings *settings)
+CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 {
-	if(settings->verbose || settings->dryRun)
+	if(context->stopOnError && (context->lastError.error != nil))
+		return false;
+
+	if(context->verbose || context->dryRun)
 	{
 		fprintf(stdout, "[clone]	%s	%s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String]);
 	}
 
-	bool isSuccessful = settings->dryRun;
-	if(!settings->dryRun)
+	bool isSuccessful = context->dryRun;
+	if(!context->dryRun)
 	{
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
 		isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL  toURL:(NSURL *)toURL error:&operationError];
 		if(!isSuccessful)
 		{
+			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 			{
@@ -273,21 +290,25 @@ CloneItem(NSURL *fromURL, NSURL *toURL, const PlaylistSettings *settings)
 }
 
 static bool
-MoveItem(NSURL *fromURL, NSURL *toURL, const PlaylistSettings *settings)
+MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 {
-	if(settings->verbose || settings->dryRun)
+	if(context->stopOnError && (context->lastError.error != nil))
+		return false;
+
+	if(context->verbose || context->dryRun)
 	{
 		fprintf(stdout, "[move]	%s	%s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String]);
 	}
 
-	bool isSuccessful = settings->dryRun;
-	if(!settings->dryRun)
+	bool isSuccessful = context->dryRun;
+	if(!context->dryRun)
 	{
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
 		isSuccessful = (bool)[fileManager moveItemAtURL:fromURL toURL:toURL error:&operationError];
 		if(!isSuccessful)
 		{
+			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 			{
@@ -300,21 +321,25 @@ MoveItem(NSURL *fromURL, NSURL *toURL, const PlaylistSettings *settings)
 }
 
 static bool
-HardlinkItem(NSURL *fromURL, NSURL *toURL, const PlaylistSettings *settings)
+HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 {
-	if(settings->verbose || settings->dryRun)
+	if(context->stopOnError && (context->lastError.error != nil))
+		return false;
+
+	if(context->verbose || context->dryRun)
 	{
 		fprintf(stdout, "[hardlink]	%s	%s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String]);
 	}
 
-	bool isSuccessful = settings->dryRun;
-	if(!settings->dryRun)
+	bool isSuccessful = context->dryRun;
+	if(!context->dryRun)
 	{
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
 		isSuccessful = (bool)[fileManager linkItemAtURL:fromURL toURL:toURL error:&operationError];
 		if(!isSuccessful)
 		{
+			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 			{
@@ -327,21 +352,25 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, const PlaylistSettings *settings)
 }
 
 static bool
-SymlinkItem(NSURL *fromURL, NSURL *linkURL, const PlaylistSettings *settings)
+SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context)
 {
-	if(settings->verbose || settings->dryRun)
+	if(context->stopOnError && (context->lastError.error != nil))
+		return false;
+
+	if(context->verbose || context->dryRun)
 	{
 		fprintf(stdout, "[symlink]	%s	%s\n", [[fromURL path] UTF8String], [[linkURL path] UTF8String]);
 	}
 
-	bool isSuccessful = settings->dryRun;
-	if(!settings->dryRun)
+	bool isSuccessful = context->dryRun;
+	if(!context->dryRun)
 	{
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
 		isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
 		if(!isSuccessful)
 		{
+			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 			{
@@ -354,21 +383,25 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, const PlaylistSettings *settings)
 }
 
 static bool
-CreateFile(NSURL *itemURL, NSString *content, const PlaylistSettings *settings)
+CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context)
 {
-	if(settings->verbose || settings->dryRun)
+	if(context->stopOnError && (context->lastError.error != nil))
+		return false;
+
+	if(context->verbose || context->dryRun)
 	{
 		//TODO: escape newlines for multiline text so it will be displayed in one line
 		fprintf(stdout, "[create]	%s	%s\n", [[itemURL path] UTF8String], [content UTF8String]);
 	}
 
-	bool isSuccessful = settings->dryRun;
-	if(!settings->dryRun)
+	bool isSuccessful = context->dryRun;
+	if(!context->dryRun)
 	{
 		NSError *operationError = nil;
 		isSuccessful = [content writeToURL:itemURL atomically:NO encoding:NSUTF8StringEncoding error:&operationError];
 		if(!isSuccessful)
 		{
+			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 			{
@@ -381,15 +414,18 @@ CreateFile(NSURL *itemURL, NSString *content, const PlaylistSettings *settings)
 }
 
 static bool
-CreateDirectory(NSURL *itemURL, const PlaylistSettings *settings)
+CreateDirectory(NSURL *itemURL, ReplayContext *context)
 {
-	if(settings->verbose || settings->dryRun)
+	if(context->stopOnError && (context->lastError.error != nil))
+		return false;
+
+	if(context->verbose || context->dryRun)
 	{
 		fprintf(stdout, "[create]	%s\n", [[itemURL path] UTF8String]);
 	}
 
-	bool isSuccessful = settings->dryRun;
-	if(!settings->dryRun)
+	bool isSuccessful = context->dryRun;
+	if(!context->dryRun)
 	{
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
@@ -397,6 +433,7 @@ CreateDirectory(NSURL *itemURL, const PlaylistSettings *settings)
 		
 		if(!isSuccessful)
 		{
+			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 			{
@@ -409,21 +446,25 @@ CreateDirectory(NSURL *itemURL, const PlaylistSettings *settings)
 }
 
 static bool
-DeleteItem(NSURL *itemURL, const PlaylistSettings *settings)
+DeleteItem(NSURL *itemURL, ReplayContext *context)
 {
-	if(settings->verbose || settings->dryRun)
+	if(context->stopOnError && (context->lastError.error != nil))
+		return false;
+
+	if(context->verbose || context->dryRun)
 	{
 		fprintf(stdout, "[delete]	%s\n", [[itemURL path] UTF8String]);
 	}
 
-	bool isSuccessful = settings->dryRun;
-	if(!settings->dryRun)
+	bool isSuccessful = context->dryRun;
+	if(!context->dryRun)
 	{
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
 		isSuccessful = (bool)[fileManager removeItemAtURL:itemURL error:&operationError];
 		if(!isSuccessful)
 		{
+			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 			{
@@ -437,14 +478,14 @@ DeleteItem(NSURL *itemURL, const PlaylistSettings *settings)
 
 
 static NSArray<NSURL*> *
-ItemPathsToURLs(NSArray<NSString*> *itemPaths, const PlaylistSettings *settings)
+ItemPathsToURLs(NSArray<NSString*> *itemPaths, ReplayContext *context)
 {
 	NSUInteger fileCount = [itemPaths count];
 	NSMutableArray *itemURLs = [NSMutableArray arrayWithCapacity:fileCount];
 	
 	for(NSString *itemPath in itemPaths)
 	{
-		NSString *expandedFileName = StringByExpandingEnvironmentVariables(itemPath, settings->environment, settings->verbose);
+		NSString *expandedFileName = StringByExpandingEnvironmentVariables(itemPath, context->environment, context->verbose);
 		if(expandedFileName == nil)
 		{
 			//one broken path breaks all
@@ -462,7 +503,7 @@ ItemPathsToURLs(NSArray<NSString*> *itemPaths, const PlaylistSettings *settings)
 //if more than one source file happens to have the same name, items will be overwritten
 
 static NSArray<NSURL*> *
-GetDestinationsForMultipleItems(NSArray<NSURL*> *sourceItemURLs, NSURL *destinationDirectoryURL, const PlaylistSettings *settings)
+GetDestinationsForMultipleItems(NSArray<NSURL*> *sourceItemURLs, NSURL *destinationDirectoryURL, ReplayContext *context)
 {
 	if(destinationDirectoryURL == nil)
 		return nil;
@@ -510,7 +551,7 @@ DispatchAction(dispatch_queue_t queue, dispatch_group_t group, dispatch_block_t 
 }
 
 static void
-DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t group, FileAction fileAction, NSURL *sourceURL, NSURL *destinationURL, const PlaylistSettings *settings)
+DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t group, FileAction fileAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context)
 {
 	if((sourceURL == nil) || (destinationURL == nil))
 		return;
@@ -521,7 +562,7 @@ DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t grou
 		case kFileActionClone:
 		{
 			action = ^{
-				__unused bool isOK = CloneItem(sourceURL, destinationURL, settings);
+				__unused bool isOK = CloneItem(sourceURL, destinationURL, context);
 			};
 		}
 		break;
@@ -529,7 +570,7 @@ DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t grou
 		case kFileActionMove:
 		{
 			action = ^{
-				__unused bool isOK = MoveItem(sourceURL, destinationURL, settings);
+				__unused bool isOK = MoveItem(sourceURL, destinationURL, context);
 			};
 		}
 		break;
@@ -537,7 +578,7 @@ DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t grou
 		case kFileActionHardlink:
 		{
 			action = ^{
-				__unused bool isOK = HardlinkItem(sourceURL, destinationURL, settings);
+				__unused bool isOK = HardlinkItem(sourceURL, destinationURL, context);
 			};
 		}
 		break;
@@ -545,7 +586,7 @@ DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t grou
 		case kFileActionSymlink:
 		{
 			action = ^{
-				__unused bool isOK = SymlinkItem(sourceURL, destinationURL, settings);
+				__unused bool isOK = SymlinkItem(sourceURL, destinationURL, context);
 			};
 		}
 		break;
@@ -559,8 +600,11 @@ DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t grou
 }
 
 static void
-DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_group_t group, const PlaylistSettings *settings)
+DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_group_t group, ReplayContext *context)
 {
+	if(context->stopOnError && (context->lastError.error != nil))
+		return;
+
 	NSString *actionName = stepDescription[@"action"];
 	if(actionName == nil)
 	{
@@ -623,15 +667,15 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 		{//simple one-to-one form
 			NSURL *sourceURL = nil;
 			NSURL *destinationURL = nil;
-			sourcePath = StringByExpandingEnvironmentVariables(sourcePath, settings->environment, settings->verbose);
+			sourcePath = StringByExpandingEnvironmentVariables(sourcePath, context->environment, context->verbose);
 			if(sourcePath != nil)
 				sourceURL = [NSURL fileURLWithPath:sourcePath];
 			
-			destinationPath = StringByExpandingEnvironmentVariables(destinationPath, settings->environment, settings->verbose);
+			destinationPath = StringByExpandingEnvironmentVariables(destinationPath, context->environment, context->verbose);
 			if(destinationPath != nil)
 				destinationURL = [NSURL fileURLWithPath:destinationPath];
 			
-			DispatchOneSourceDestinationAction(queue, group, fileAction, sourceURL, destinationURL, settings);
+			DispatchOneSourceDestinationAction(queue, group, fileAction, sourceURL, destinationURL, context);
 		}
 		else
 		{//multiple items to destintation directory form
@@ -639,21 +683,21 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 			NSString *destinationDirPath = stepDescription[@"destination directory"];
 			if([itemPaths isKindOfClass:arrayClass] && [destinationDirPath isKindOfClass:stringClass])
 			{
-				NSArray<NSURL*> *srcItemURLs = ItemPathsToURLs(itemPaths, settings);
+				NSArray<NSURL*> *srcItemURLs = ItemPathsToURLs(itemPaths, context);
 				if(srcItemURLs != nil)
 				{
 					NSURL *destinationDirectoryURL = nil;
-					NSString *expandedDestinationDirPath = StringByExpandingEnvironmentVariables(destinationDirPath, settings->environment, settings->verbose);
+					NSString *expandedDestinationDirPath = StringByExpandingEnvironmentVariables(destinationDirPath, context->environment, context->verbose);
 					if(expandedDestinationDirPath != nil)
 						destinationDirectoryURL = [NSURL fileURLWithPath:expandedDestinationDirPath isDirectory:YES];
 
-					NSArray<NSURL*> *destItemURLs = GetDestinationsForMultipleItems(srcItemURLs, destinationDirectoryURL, settings);
+					NSArray<NSURL*> *destItemURLs = GetDestinationsForMultipleItems(srcItemURLs, destinationDirectoryURL, context);
 					NSUInteger destIndex = 0;
 					for(NSURL *srcItemURL in srcItemURLs)
 					{
 						NSURL *destinationURL = [destItemURLs objectAtIndex:destIndex];
 						++destIndex;
-						DispatchOneSourceDestinationAction(queue, group, fileAction, srcItemURL, destinationURL, settings);
+						DispatchOneSourceDestinationAction(queue, group, fileAction, srcItemURL, destinationURL, context);
 					}
 				}
 			}
@@ -668,10 +712,10 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 			{
 				for(NSString *onePath in itemPaths)
 				{
-					NSString *expandedPath = StringByExpandingEnvironmentVariables(onePath, settings->environment, settings->verbose);
+					NSString *expandedPath = StringByExpandingEnvironmentVariables(onePath, context->environment, context->verbose);
 					NSURL *oneURL = [NSURL fileURLWithPath:expandedPath];
 					action = ^{
-						__unused bool isOK = DeleteItem(oneURL, settings);
+						__unused bool isOK = DeleteItem(oneURL, context);
 					};
 					DispatchAction(queue, group, action);
 				}
@@ -703,12 +747,12 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 				}
 
 				if(expandContent)
-					content = StringByExpandingEnvironmentVariables(content, settings->environment, settings->verbose);
+					content = StringByExpandingEnvironmentVariables(content, context->environment, context->verbose);
 				
-				NSString *expandedPath = StringByExpandingEnvironmentVariables(filePath, settings->environment, settings->verbose);
+				NSString *expandedPath = StringByExpandingEnvironmentVariables(filePath, context->environment, context->verbose);
 				NSURL *fileURL = [NSURL fileURLWithPath:expandedPath];
 				action = ^{
-					__unused bool isOK = CreateFile(fileURL, content, settings);
+					__unused bool isOK = CreateFile(fileURL, content, context);
 				};
 				DispatchAction(queue, group, action);
 			}
@@ -717,10 +761,10 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 				NSString *dirPath = stepDescription[@"directory"];
 				if([dirPath isKindOfClass:stringClass])
 				{
-					NSString *expandedDirPath = StringByExpandingEnvironmentVariables(dirPath, settings->environment, settings->verbose);
+					NSString *expandedDirPath = StringByExpandingEnvironmentVariables(dirPath, context->environment, context->verbose);
 					NSURL *dirURL = [NSURL fileURLWithPath:expandedDirPath];
 					action = ^{
-						__unused bool isOK = CreateDirectory(dirURL, settings);
+						__unused bool isOK = CreateDirectory(dirURL, context);
 					};
 					DispatchAction(queue, group, action);
 				}
@@ -731,12 +775,12 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 
 
 static inline void
-DispatchSteps(NSArray<NSDictionary*> *playlist, const PlaylistSettings *settings)
+DispatchSteps(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 {
 	dispatch_group_t group = NULL;
 	dispatch_queue_t queue = NULL;
 
-	if(settings->concurrent)
+	if(context->concurrent)
 	{
 		group = dispatch_group_create();
 		queue = dispatch_queue_create("concurrent.playback", DISPATCH_QUEUE_CONCURRENT);
@@ -756,7 +800,7 @@ DispatchSteps(NSArray<NSDictionary*> *playlist, const PlaylistSettings *settings
 	{
 		if([oneStep isKindOfClass:dictionaryClass])
 		{
-			DispatchStep((NSDictionary *)oneStep, queue, group, settings);
+			DispatchStep((NSDictionary *)oneStep, queue, group, context);
 		}
 		else
 		{
@@ -768,7 +812,7 @@ DispatchSteps(NSArray<NSDictionary*> *playlist, const PlaylistSettings *settings
 	printf("done dispatching async tasks\n");
 #endif
 
-	if(settings->concurrent)
+	if(context->concurrent)
 	{
 		dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
 #if TRACE
@@ -794,6 +838,7 @@ static struct option sLongOptions[] =
 	{"dry-run",			no_argument,		NULL, 'n'},
 	{"serial",			no_argument,		NULL, 's'},
 	{"playlist-key",	required_argument,	NULL, 'k'},
+	{"stop-on-error",   no_argument,		NULL, 'e'},
 	{"help",			no_argument,		NULL, 'h'},
 	{NULL, 				0, 					NULL,  0 }
 };
@@ -813,6 +858,7 @@ DisplayHelp(void)
 		"                     default behavior is to execute actions concurrently with no order guarantee (fast)\n"
 		"  -k, --playlist-key KEY   declare a key in root dictionary of the playlist file for action steps array\n"
 		"                     if absent, the playlist file root container is assumed to be an array of action steps\n"
+		"  -e, --stop-on-error   stop executing the reamining playlist actions on first error\n"
 		"  -n, --dry-run      show a log of actions which would be performed without running them\n"
 		"  -v, --verbose      show a log of actions while they are executed\n"
 		"  -h, --help         display this help\n"
@@ -967,42 +1013,48 @@ DisplayHelp(void)
 
 int main(int argc, const char * argv[])
 {
-	PlaylistSettings settings;
-	settings.environment = [[NSProcessInfo processInfo] environment];
-	settings.concurrent = true;
-	settings.verbose = false;
-	settings.dryRun = false;
+	ReplayContext context;
+	context.environment = [[NSProcessInfo processInfo] environment];
+	context.lastError = [AtomicError new];
+	context.concurrent = true;
+	context.verbose = false;
+	context.dryRun = false;
+	context.stopOnError = false;
 
 	const char *playlistKey = NULL;
 	
 	while(true)
 	{
 		int index = 0;
-		int oneOption = getopt_long (argc, (char * const *)argv, "vnsk:", sLongOptions, &index);
+		int oneOption = getopt_long (argc, (char * const *)argv, "vnsk:eh", sLongOptions, &index);
 		if (oneOption == -1) //end of options is signalled by -1
 			break;
 			
 		switch(oneOption)
 		{
 			case 'v':
-				settings.verbose = true;
+				context.verbose = true;
 			break;
 			
 			case 'n':
-				settings.dryRun = true;
+				context.dryRun = true;
 			break;
 
 			case 's':
-				settings.concurrent = false;
+				context.concurrent = false;
 			break;
 			
 			case 'k':
 				playlistKey = optarg;
 			break;
-			
+
+			case 'e':
+				context.stopOnError = true;
+			break;
+
 			case 'h':
 				DisplayHelp();
-				return 0;
+				return EXIT_SUCCESS;
 			break;
 		}
 	}
@@ -1014,15 +1066,17 @@ int main(int argc, const char * argv[])
 		optind++;
 	}
 
-	NSArray<NSDictionary*> *playlist = GetPlaylist(playlistPath, playlistKey);
+	NSArray<NSDictionary*> *playlist = GetPlaylist(playlistPath, playlistKey, &context);
 	if(playlist == nil)
 	{
 		printf("Empty playlist. No steps to replay\n");
-		return 0;
+		return EXIT_SUCCESS;
 	}
 	
-	DispatchSteps(playlist, &settings);
+	DispatchSteps(playlist, &context);
 
-	//TODO: propagate errors to return non-0 if something fails
-	return 0;
+	if(context.lastError.error != nil)
+		return EXIT_FAILURE;
+
+	return EXIT_SUCCESS;
 }
