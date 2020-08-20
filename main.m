@@ -37,6 +37,7 @@ typedef struct
 	bool verbose;
 	bool dryRun;
 	bool stopOnError;
+	bool force;
 } ReplayContext;
 
 
@@ -274,7 +275,15 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 	{
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL  toURL:(NSURL *)toURL error:&operationError];
+		isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL toURL:(NSURL *)toURL error:&operationError];
+
+		if(!isSuccessful && context->force)
+		{
+			//if([fileManager fileExistsAtPath:[itemURL path]]) // do not bother checking for existence, just try removing and retry
+			[fileManager removeItemAtURL:toURL error:nil]; // ignore the result, just retry
+			isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL toURL:(NSURL *)toURL error:&operationError];
+		}
+
 		if(!isSuccessful)
 		{
 			context->lastError.error = operationError;
@@ -306,6 +315,14 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
 		isSuccessful = (bool)[fileManager moveItemAtURL:fromURL toURL:toURL error:&operationError];
+
+		if(!isSuccessful && context->force)
+		{
+			//if([fileManager fileExistsAtPath:[itemURL path]]) // do not bother checking for existence, just try removing and retry
+			[fileManager removeItemAtURL:toURL error:nil]; // ignore the result, just retry
+			isSuccessful = (bool)[fileManager moveItemAtURL:fromURL toURL:toURL error:&operationError];
+		}
+
 		if(!isSuccessful)
 		{
 			context->lastError.error = operationError;
@@ -337,6 +354,14 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
 		isSuccessful = (bool)[fileManager linkItemAtURL:fromURL toURL:toURL error:&operationError];
+
+		if(!isSuccessful && context->force)
+		{
+			//if([fileManager fileExistsAtPath:[itemURL path]]) // do not bother checking for existence, just try removing and retry
+			[fileManager removeItemAtURL:toURL error:nil]; // ignore the result, just retry
+			isSuccessful = (bool)[fileManager linkItemAtURL:fromURL toURL:toURL error:&operationError];
+		}
+
 		if(!isSuccessful)
 		{
 			context->lastError.error = operationError;
@@ -368,6 +393,14 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context)
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
 		isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
+
+		if(!isSuccessful && context->force)
+		{
+			//if([fileManager fileExistsAtPath:[itemURL path]]) // do not bother checking for existence, just try removing and retry
+			[fileManager removeItemAtURL:linkURL error:nil]; // ignore the result, just retry
+			isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
+		}
+
 		if(!isSuccessful)
 		{
 			context->lastError.error = operationError;
@@ -399,6 +432,15 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context)
 	{
 		NSError *operationError = nil;
 		isSuccessful = [content writeToURL:itemURL atomically:NO encoding:NSUTF8StringEncoding error:&operationError];
+		
+		if(!isSuccessful && context->force)
+		{
+			NSFileManager *fileManager = [NSFileManager defaultManager];
+			//if([fileManager fileExistsAtPath:[itemURL path]]) // do not bother checking for existence, just try removing and retry
+			[fileManager removeItemAtURL:itemURL error:nil]; // ignore the result, just retry
+			isSuccessful = [content writeToURL:itemURL atomically:NO encoding:NSUTF8StringEncoding error:&operationError];
+		}
+
 		if(!isSuccessful)
 		{
 			context->lastError.error = operationError;
@@ -430,6 +472,9 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context)
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
 		isSuccessful = [fileManager createDirectoryAtURL:itemURL withIntermediateDirectories:YES attributes:nil error:&operationError];
+
+		// this call is not supposed to fail for existing directories if you use withIntermediateDirectories:YES
+		// so the behavior should be the same as mkdir -p
 		
 		if(!isSuccessful)
 		{
@@ -464,6 +509,9 @@ DeleteItem(NSURL *itemURL, ReplayContext *context)
 		isSuccessful = (bool)[fileManager removeItemAtURL:itemURL error:&operationError];
 		if(!isSuccessful)
 		{
+			if(![fileManager fileExistsAtPath:[itemURL path]])
+				return true; //do not treat it as an error if the object we tried to delete does not exist
+		
 			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
@@ -839,6 +887,7 @@ static struct option sLongOptions[] =
 	{"serial",			no_argument,		NULL, 's'},
 	{"playlist-key",	required_argument,	NULL, 'k'},
 	{"stop-on-error",   no_argument,		NULL, 'e'},
+	{"force",           no_argument,		NULL, 'f'},
 	{"help",			no_argument,		NULL, 'h'},
 	{NULL, 				0, 					NULL,  0 }
 };
@@ -859,6 +908,7 @@ DisplayHelp(void)
 		"  -k, --playlist-key KEY   declare a key in root dictionary of the playlist file for action steps array\n"
 		"                     if absent, the playlist file root container is assumed to be an array of action steps\n"
 		"  -e, --stop-on-error   stop executing the reamining playlist actions on first error\n"
+		"  -f, --force        if the file operation fails, delete destination and try again\n"
 		"  -n, --dry-run      show a log of actions which would be performed without running them\n"
 		"  -v, --verbose      show a log of actions while they are executed\n"
 		"  -h, --help         display this help\n"
@@ -1020,13 +1070,14 @@ int main(int argc, const char * argv[])
 	context.verbose = false;
 	context.dryRun = false;
 	context.stopOnError = false;
+	context.force = false;
 
 	const char *playlistKey = NULL;
 	
 	while(true)
 	{
 		int index = 0;
-		int oneOption = getopt_long (argc, (char * const *)argv, "vnsk:eh", sLongOptions, &index);
+		int oneOption = getopt_long (argc, (char * const *)argv, "vnsk:efh", sLongOptions, &index);
 		if (oneOption == -1) //end of options is signalled by -1
 			break;
 			
@@ -1051,7 +1102,11 @@ int main(int argc, const char * argv[])
 			case 'e':
 				context.stopOnError = true;
 			break;
-
+			
+			case 'f':
+				context.force = true;
+			break;
+			
 			case 'h':
 				DisplayHelp();
 				return EXIT_SUCCESS;

@@ -25,16 +25,38 @@ echo "REPLAY_TEST = $REPLAY_TEST"
 echo "------------------------------"
 echo ""
 echo "Testing playlist in JSON format"
-"$REPLAY_TOOL" --serial --playlist-key "setup" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
-"$REPLAY_TOOL" --playlist-key "tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
-echo ""
 
+echo ""
+echo "replay --serial --playlist-key \"setup\""
+"$REPLAY_TOOL" --serial --playlist-key "setup" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
+
+echo ""
+echo "replay --playlist-key \"tests\""
+"$REPLAY_TOOL" --playlist-key "tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
+
+echo ""
+echo "replay --force --serial tests --playlist-key \"force tests\""
+"$REPLAY_TOOL" --force --serial --playlist-key "force tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
+
+echo ""
 echo "------------------------------"
 echo ""
 echo "Testing playlist in plist format"
-echo "Validating plist"
-/usr/bin/plutil "$REPLAY_TEST_DIR_PATH/playlist.plist"
+
 echo ""
+echo "Validating plist with plutil"
+/usr/bin/plutil "$REPLAY_TEST_DIR_PATH/playlist.plist"
+
+echo ""
+echo "replay --serial --playlist-key \"setup\""
 "$REPLAY_TOOL" --serial --playlist-key "setup" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
+
+echo ""
+echo "replay --playlist-key \"tests\""
 "$REPLAY_TOOL" --playlist-key "tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
+
+echo ""
+echo "replay --force --serial tests --playlist-key \"force tests\""
+"$REPLAY_TOOL" --force --serial --playlist-key "force tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
+
 echo ""

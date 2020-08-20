@@ -108,5 +108,76 @@
 			</array>
 		</dict>
 	</array>
+	<key>force tests</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<string>create</string>
+			<key>directory</key>
+			<string>${HOME}/${REPLAY_TEST}/New Dir</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>create</string>
+			<key>directory</key>
+			<string>${HOME}/${REPLAY_TEST}/New Dir</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>create</string>
+			<key>content</key>
+			<string>revision 1</string>
+			<key>file</key>
+			<string>${HOME}/${REPLAY_TEST}/test-force.txt</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>create</string>
+			<key>content</key>
+			<string>revision 2</string>
+			<key>file</key>
+			<string>${HOME}/${REPLAY_TEST}/test-force.txt</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>clone</string>
+			<key>from</key>
+			<string>${REPLAY_TEST_FILES_DIR}/test-clone.txt</string>
+			<key>to</key>
+			<string>${HOME}/${REPLAY_TEST}/test-force.txt</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>create</string>
+			<key>content</key>
+			<string>to be moved</string>
+			<key>file</key>
+			<string>${HOME}/${REPLAY_TEST}/test-move.txt</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>move</string>
+			<key>from</key>
+			<string>/Users/${USER}/${REPLAY_TEST}/test-move.txt</string>
+			<key>to</key>
+			<string>${HOME}/${REPLAY_TEST}/test-force.txt</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>hardlink</string>
+			<key>from</key>
+			<string>${REPLAY_TEST_FILES_DIR}/test-hardlink.txt</string>
+			<key>to</key>
+			<string>${HOME}/${REPLAY_TEST}/test-force.txt</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>symlink</string>
+			<key>from</key>
+			<string>${REPLAY_TEST_FILES_DIR}/test-symlink.txt</string>
+			<key>to</key>
+			<string>${HOME}/${REPLAY_TEST}/test-force.txt</string>
+		</dict>
+	</array>
 </dict>
 </plist>

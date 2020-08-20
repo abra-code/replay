@@ -3,8 +3,8 @@
     {
       "action": "delete",
       "items": [
-      	"${HOME}/${REPLAY_TEST}",
-      	],
+        "${HOME}/${REPLAY_TEST}",
+        ],
     },
     {
       "action": "create",
@@ -45,10 +45,10 @@
     {
       "action": "clone",
       "items": [
-      	"${REPLAY_TEST_FILES_DIR}/test-clone-bulk1.txt",
-      	"${REPLAY_TEST_FILES_DIR}/test-clone-bulk2.txt",
-     	"${REPLAY_TEST_FILES_DIR}/test-clone-bulk3.txt",
-      	],
+        "${REPLAY_TEST_FILES_DIR}/test-clone-bulk1.txt",
+        "${REPLAY_TEST_FILES_DIR}/test-clone-bulk2.txt",
+       "${REPLAY_TEST_FILES_DIR}/test-clone-bulk3.txt",
+        ],
       "destination directory": "${HOME}/${REPLAY_TEST}",
     },
     {
@@ -65,8 +65,54 @@
     {
       "action": "delete",
       "items": [
-      	"${HOME}/${REPLAY_TEST}/test-delete.txt",
-      	],
+        "${HOME}/${REPLAY_TEST}/test-delete.txt",
+        ],
+    },
+  ],
+  "force tests":
+  [
+    {
+      "action": "create",
+      "directory": "${HOME}/${REPLAY_TEST}/New Dir",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/${REPLAY_TEST}/New Dir",
+    },
+    {
+      "action": "create",
+      "content": "revision 1",
+      "file": "${HOME}/${REPLAY_TEST}/test-force.txt",
+    },
+    {
+      "action": "create",
+      "content": "revision 2",
+      "file": "${HOME}/${REPLAY_TEST}/test-force.txt",
+    },
+    {
+      "action": "clone",
+      "from": "${REPLAY_TEST_FILES_DIR}/test-clone.txt",
+      "to": "${HOME}/${REPLAY_TEST}/test-force.txt",
+    },
+    {
+      "action": "create",
+      "content": "to be moved",
+      "file": "${HOME}/${REPLAY_TEST}/test-move.txt",
+    },
+    {
+      "action": "move",
+      "from": "/Users/${USER}/${REPLAY_TEST}/test-move.txt",
+      "to": "${HOME}/${REPLAY_TEST}/test-force.txt",
+    },
+    {
+      "action": "hardlink",
+      "from": "${REPLAY_TEST_FILES_DIR}/test-hardlink.txt",
+      "to": "${HOME}/${REPLAY_TEST}/test-force.txt",
+    },
+    {
+      "action": "symlink",
+      "from": "${REPLAY_TEST_FILES_DIR}/test-symlink.txt",
+      "to": "${HOME}/${REPLAY_TEST}/test-force.txt",
     },
   ],
 }
