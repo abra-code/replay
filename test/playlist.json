@@ -1,5 +1,6 @@
 {
-  "setup": [
+  "setup":
+  [
     {
       "action": "delete",
       "items": [
@@ -21,7 +22,8 @@
       "file": "${HOME}/${REPLAY_TEST}/test-move.txt",
     },
   ],
-  "tests": [
+  "tests":
+  [
     {
       "action": "clone",
       "from": "${REPLAY_TEST_FILES_DIR}/test-clone.txt",
@@ -113,6 +115,20 @@
       "action": "symlink",
       "from": "${REPLAY_TEST_FILES_DIR}/test-symlink.txt",
       "to": "${HOME}/${REPLAY_TEST}/test-force.txt",
+    },
+  ],
+  "symlink tests":
+  [
+    {
+      "action": "symlink",
+      "from": "${REPLAY_TEST_FILES_DIR}/source-validated-nonexistent.txt",
+      "to": "${HOME}/${REPLAY_TEST}/dest-validated-nonexistent.txt",
+    },
+    {
+      "action": "symlink",
+      "from": "${REPLAY_TEST_FILES_DIR}/source-allowed-nonexistent.txt",
+      "to": "${HOME}/${REPLAY_TEST}/dest-allowed-nonexistent.txt",
+      "validate": false,
     },
   ],
 }

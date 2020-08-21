@@ -179,5 +179,26 @@
 			<string>${HOME}/${REPLAY_TEST}/test-force.txt</string>
 		</dict>
 	</array>
+	<key>symlink tests</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<string>symlink</string>
+			<key>from</key>
+			<string>${REPLAY_TEST_FILES_DIR}/source-validated-nonexistent.txt</string>
+			<key>to</key>
+			<string>${HOME}/${REPLAY_TEST}/source-validated-nonexistent.txt</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>symlink</string>
+			<key>from</key>
+			<string>${REPLAY_TEST_FILES_DIR}/source-allowed-nonexistent.txt</string>
+			<key>to</key>
+			<string>${HOME}/${REPLAY_TEST}/source-allowed-nonexistent.txt</string>
+			<key>validate</key>
+			<false/>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -241,7 +241,6 @@ GetPlaylist(const char* playlistPath, const char* playlistKey, ReplayContext *co
 		}
 	}
 
-
 	if(playlistKey != NULL)
 	{
 		NSString *key = @(playlistKey); // [NSString stringWithUTF8String:playlistKey];
@@ -260,7 +259,7 @@ GetPlaylist(const char* playlistPath, const char* playlistKey, ReplayContext *co
 }
 
 static bool
-CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
+CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
@@ -279,8 +278,15 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 
 		if(!isSuccessful && context->force)
 		{
-			//if([fileManager fileExistsAtPath:[itemURL path]]) // do not bother checking for existence, just try removing and retry
-			[fileManager removeItemAtURL:toURL error:nil]; // ignore the result, just retry
+			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
+			// we could test first if any of these are true or we can just blindly try brute-force both
+			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
+			if(!removalOK)
+			{//could not remove the destination item - maybe the parent dir does not exist?
+				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
+				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
+			}
+
 			isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL toURL:(NSURL *)toURL error:&operationError];
 		}
 
@@ -299,7 +305,7 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 }
 
 static bool
-MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
+MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
@@ -318,8 +324,15 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 
 		if(!isSuccessful && context->force)
 		{
-			//if([fileManager fileExistsAtPath:[itemURL path]]) // do not bother checking for existence, just try removing and retry
-			[fileManager removeItemAtURL:toURL error:nil]; // ignore the result, just retry
+			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
+			// we could test first if any of these are true or we can just blindly try brute-force both
+			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
+			if(!removalOK)
+			{//could not remove the destination item - maybe the parent dir does not exist?
+				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
+				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
+			}
+
 			isSuccessful = (bool)[fileManager moveItemAtURL:fromURL toURL:toURL error:&operationError];
 		}
 
@@ -338,7 +351,7 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 }
 
 static bool
-HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
+HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
@@ -357,8 +370,15 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 
 		if(!isSuccessful && context->force)
 		{
-			//if([fileManager fileExistsAtPath:[itemURL path]]) // do not bother checking for existence, just try removing and retry
-			[fileManager removeItemAtURL:toURL error:nil]; // ignore the result, just retry
+			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
+			// we could test first if any of these are true or we can just blindly try brute-force both
+			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
+			if(!removalOK)
+			{//could not remove the destination item - maybe the parent dir does not exist?
+				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
+				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
+			}
+
 			isSuccessful = (bool)[fileManager linkItemAtURL:fromURL toURL:toURL error:&operationError];
 		}
 
@@ -377,7 +397,7 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context)
 }
 
 static bool
-SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context)
+SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, NSDictionary *actionSettings)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
@@ -386,18 +406,44 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context)
 	{
 		fprintf(stdout, "[symlink]	%s	%s\n", [[fromURL path] UTF8String], [[linkURL path] UTF8String]);
 	}
-
+	
+	bool force = context->force;
 	bool isSuccessful = context->dryRun;
+
 	if(!context->dryRun)
 	{
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
 
-		if(!isSuccessful && context->force)
+		NSNumber *validateSource = actionSettings[@"validate"];
+		bool validateSymlinkSource = true;
+		if([validateSource isKindOfClass:[NSNumber class]])
 		{
-			//if([fileManager fileExistsAtPath:[itemURL path]]) // do not bother checking for existence, just try removing and retry
-			[fileManager removeItemAtURL:linkURL error:nil]; // ignore the result, just retry
+			validateSymlinkSource = [validateSource boolValue];
+		}
+
+		if(validateSymlinkSource && ![fileManager fileExistsAtPath:[fromURL path]])
+		{
+			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Strict validation: attempt to create a symlink to nonexistent item" };
+			operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+			isSuccessful = false;
+			force = false;
+		}
+		else
+		{
+			isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
+		}
+
+		if(!isSuccessful && force)
+		{
+			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
+			// we could test first if any of these are true or we can just blindly try brute-force both
+			bool removalOK = [fileManager removeItemAtURL:linkURL error:nil];
+			if(!removalOK)
+			{//could not remove the destination item - maybe the parent dir does not exist?
+				NSURL *parentDirURL = [linkURL URLByDeletingLastPathComponent];
+				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
+			}
 			isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
 		}
 
@@ -416,7 +462,7 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context)
 }
 
 static bool
-CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context)
+CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, NSDictionary *actionSettings)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
@@ -435,9 +481,16 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context)
 		
 		if(!isSuccessful && context->force)
 		{
+			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
+			// we could test first if any of these are true or we can just blindly try brute-force both
 			NSFileManager *fileManager = [NSFileManager defaultManager];
-			//if([fileManager fileExistsAtPath:[itemURL path]]) // do not bother checking for existence, just try removing and retry
-			[fileManager removeItemAtURL:itemURL error:nil]; // ignore the result, just retry
+			bool removalOK = [fileManager removeItemAtURL:itemURL error:nil];
+			if(!removalOK)
+			{//could not remove the destination item - maybe the parent dir does not exist?
+				NSURL *parentDirURL = [itemURL URLByDeletingLastPathComponent];
+				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
+			}
+
 			isSuccessful = [content writeToURL:itemURL atomically:NO encoding:NSUTF8StringEncoding error:&operationError];
 		}
 
@@ -456,7 +509,7 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context)
 }
 
 static bool
-CreateDirectory(NSURL *itemURL, ReplayContext *context)
+CreateDirectory(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSettings)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
@@ -491,7 +544,7 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context)
 }
 
 static bool
-DeleteItem(NSURL *itemURL, ReplayContext *context)
+DeleteItem(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSettings)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
@@ -599,7 +652,7 @@ DispatchAction(dispatch_queue_t queue, dispatch_group_t group, dispatch_block_t 
 }
 
 static void
-DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t group, FileAction fileAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context)
+DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t group, FileAction fileAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context, NSDictionary *actionSettings)
 {
 	if((sourceURL == nil) || (destinationURL == nil))
 		return;
@@ -610,7 +663,7 @@ DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t grou
 		case kFileActionClone:
 		{
 			action = ^{
-				__unused bool isOK = CloneItem(sourceURL, destinationURL, context);
+				__unused bool isOK = CloneItem(sourceURL, destinationURL, context, actionSettings);
 			};
 		}
 		break;
@@ -618,7 +671,7 @@ DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t grou
 		case kFileActionMove:
 		{
 			action = ^{
-				__unused bool isOK = MoveItem(sourceURL, destinationURL, context);
+				__unused bool isOK = MoveItem(sourceURL, destinationURL, context, actionSettings);
 			};
 		}
 		break;
@@ -626,7 +679,7 @@ DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t grou
 		case kFileActionHardlink:
 		{
 			action = ^{
-				__unused bool isOK = HardlinkItem(sourceURL, destinationURL, context);
+				__unused bool isOK = HardlinkItem(sourceURL, destinationURL, context, actionSettings);
 			};
 		}
 		break;
@@ -634,7 +687,7 @@ DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t grou
 		case kFileActionSymlink:
 		{
 			action = ^{
-				__unused bool isOK = SymlinkItem(sourceURL, destinationURL, context);
+				__unused bool isOK = SymlinkItem(sourceURL, destinationURL, context, actionSettings);
 			};
 		}
 		break;
@@ -723,7 +776,7 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 			if(destinationPath != nil)
 				destinationURL = [NSURL fileURLWithPath:destinationPath];
 			
-			DispatchOneSourceDestinationAction(queue, group, fileAction, sourceURL, destinationURL, context);
+			DispatchOneSourceDestinationAction(queue, group, fileAction, sourceURL, destinationURL, context, stepDescription);
 		}
 		else
 		{//multiple items to destintation directory form
@@ -745,7 +798,7 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 					{
 						NSURL *destinationURL = [destItemURLs objectAtIndex:destIndex];
 						++destIndex;
-						DispatchOneSourceDestinationAction(queue, group, fileAction, srcItemURL, destinationURL, context);
+						DispatchOneSourceDestinationAction(queue, group, fileAction, srcItemURL, destinationURL, context, stepDescription);
 					}
 				}
 			}
@@ -763,7 +816,7 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 					NSString *expandedPath = StringByExpandingEnvironmentVariables(onePath, context->environment, context->verbose);
 					NSURL *oneURL = [NSURL fileURLWithPath:expandedPath];
 					action = ^{
-						__unused bool isOK = DeleteItem(oneURL, context);
+						__unused bool isOK = DeleteItem(oneURL, context, stepDescription);
 					};
 					DispatchAction(queue, group, action);
 				}
@@ -800,7 +853,7 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 				NSString *expandedPath = StringByExpandingEnvironmentVariables(filePath, context->environment, context->verbose);
 				NSURL *fileURL = [NSURL fileURLWithPath:expandedPath];
 				action = ^{
-					__unused bool isOK = CreateFile(fileURL, content, context);
+					__unused bool isOK = CreateFile(fileURL, content, context, stepDescription);
 				};
 				DispatchAction(queue, group, action);
 			}
@@ -812,7 +865,7 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 					NSString *expandedDirPath = StringByExpandingEnvironmentVariables(dirPath, context->environment, context->verbose);
 					NSURL *dirURL = [NSURL fileURLWithPath:expandedDirPath];
 					action = ^{
-						__unused bool isOK = CreateDirectory(dirURL, context);
+						__unused bool isOK = CreateDirectory(dirURL, context, stepDescription);
 					};
 					DispatchAction(queue, group, action);
 				}
@@ -956,6 +1009,10 @@ DisplayHelp(void)
 		"              Source and destination for this action can be specified the same way as for \"clone\"\n"
 		"  symlink     Create a symlink pointing to original file\n"
 		"              Source and destination for this action can be specified the same way as for \"clone\"\n"
+      	"    validate   bool value to indicate whether to check for the existence of source file. Default is true\n"
+      	"              it is usually a mistake if you try to create a symlink to nonexistent file\n"
+      	"              that is why \"validate\" is true by default but it is possible to create a dangling symlink\n"
+      	"              if you know what you are doing and really want that behavior, set \"validate\" to false\n"
 		"  create      Create a file or a directory\n"
       	"              you can create either a file with optional content or a directory but not both in one action step\n"
       	"    file      new file path (only for files)\n"

@@ -63,6 +63,10 @@ Actions and parameters:
               Source and destination for this action can be specified the same way as for "clone"
   symlink     Create a symlink pointing to original file
               Source and destination for this action can be specified the same way as for "clone"
+    validate   bool value to indicate whether to check for the existence of source file. Default is true
+              it is usually a mistake if you try to create a symlink to nonexistent file
+              that is why "validate" is true by default but it is possible to create a dangling symlink
+              if you know what you are doing and really want that behavior, set "validate" to false
   create      Create a file or a directory
               you can create either a file with optional content or a directory but not both in one action step
     file      new file path (only for files)
