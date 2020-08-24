@@ -1053,7 +1053,7 @@ DisplayHelp(void)
 		"  -k, --playlist-key KEY   declare a key in root dictionary of the playlist file for action steps array\n"
 		"                     if absent, the playlist file root container is assumed to be an array of action steps\n"
 		"                     the key may be specified multiple times to execute more than one playlist in the file\n"
-		"  -e, --stop-on-error   stop executing the reamining playlist actions on first error\n"
+		"  -e, --stop-on-error   stop executing the remaining playlist actions on first error\n"
 		"  -f, --force        if the file operation fails, delete destination and try again\n"
 		"  -n, --dry-run      show a log of actions which would be performed without running them\n"
 		"  -v, --verbose      show a log of actions while they are executed\n"
