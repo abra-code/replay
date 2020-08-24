@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>action</key>
+		<string>clone</string>
+		<key>from</key>
+		<string>${REPLAY_TEST_FILES_DIR}/test-clone.txt</string>
+		<key>to</key>
+		<string>/Users/${USER}/${REPLAY_TEST}/test-clone.txt</string>
+	</dict>
+	<dict>
+		<key>action</key>
+		<string>move</string>
+		<key>from</key>
+		<string>/Users/${USER}/${REPLAY_TEST}/test-move.txt</string>
+		<key>to</key>
+		<string>/Users/${USER}/${REPLAY_TEST}/test-moved.txt</string>
+	</dict>
+	<dict>
+		<key>action</key>
+		<string>hardlink</string>
+		<key>from</key>
+		<string>${REPLAY_TEST_FILES_DIR}/test-hardlink.txt</string>
+		<key>to</key>
+		<string>/Users/${USER}/${REPLAY_TEST}/test-hardlink.txt</string>
+	</dict>
+	<dict>
+		<key>action</key>
+		<string>symlink</string>
+		<key>from</key>
+		<string>${REPLAY_TEST_FILES_DIR}/test-symlink.txt</string>
+		<key>to</key>
+		<string>/Users/${USER}/${REPLAY_TEST}/test-symlink.txt</string>
+	</dict>
+	<dict>
+		<key>action</key>
+		<string>clone</string>
+		<key>items</key>
+		<array>
+			<string>${REPLAY_TEST_FILES_DIR}/test-clone-bulk1.txt</string>
+			<string>${REPLAY_TEST_FILES_DIR}/test-clone-bulk2.txt</string>
+			<string>${REPLAY_TEST_FILES_DIR}/test-clone-bulk3.txt</string>
+		</array>
+		<key>destination directory</key>
+		<string>${HOME}/${REPLAY_TEST}</string>
+	</dict>
+	<dict>
+		<key>action</key>
+		<string>create</string>
+		<key>content</key>
+		<string>This is test file 7 at ${HOME}/${REPLAY_TEST} with expanded env vars</string>
+		<key>file</key>
+		<string>${HOME}/${REPLAY_TEST}/test-create-expanded.txt</string>
+	</dict>
+	<dict>
+		<key>action</key>
+		<string>create</string>
+		<key>content</key>
+		<string>This is test file 8 at ${HOME}/${REPLAY_TEST} with unexpanded env vars</string>
+		<key>raw content</key>
+		<true/>
+		<key>file</key>
+		<string>${HOME}/${REPLAY_TEST}/test-create-unexpanded.txt</string>
+	</dict>
+	<dict>
+		<key>action</key>
+		<string>delete</string>
+		<key>items</key>
+		<array>
+			<string>${HOME}/${REPLAY_TEST}/test-delete.txt</string>
+		</array>
+	</dict>
+</array>
+</plist>

@@ -35,8 +35,15 @@ echo "replay --playlist-key \"tests\""
 "$REPLAY_TOOL" --playlist-key "tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
 
 echo ""
-echo "replay --force --serial tests --playlist-key \"force tests\""
+echo "replay --force --serial --playlist-key \"force tests\""
 "$REPLAY_TOOL" --force --serial --playlist-key "force tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
+
+echo "------------------------------"
+echo ""
+echo "Dry run testing multiple playlists executed together in JSON format"
+echo ""
+echo "replay --dry-run --playlist-key \"setup\" --playlist-key \"tests\" --playlist-key \"force tests\" --playlist-key \"symlink tests\""
+"$REPLAY_TOOL" --dry-run --playlist-key "setup" --playlist-key "tests" --playlist-key "force tests" --playlist-key "symlink tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
 
 echo ""
 echo "------------------------------"
@@ -56,7 +63,36 @@ echo "replay --playlist-key \"tests\""
 "$REPLAY_TOOL" --playlist-key "tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
 
 echo ""
-echo "replay --force --serial tests --playlist-key \"force tests\""
+echo "replay --force --serial --playlist-key \"force tests\""
 "$REPLAY_TOOL" --force --serial --playlist-key "force tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
 
+echo "------------------------------"
 echo ""
+echo "Dry run testing multiple playlists executed together in plist format"
+echo ""
+echo "replay --dry-run --playlist-key \"setup\" --playlist-key \"tests\" --playlist-key \"force tests\" --playlist-key \"symlink tests\""
+"$REPLAY_TOOL" --dry-run --playlist-key "setup" --playlist-key "tests" --playlist-key "force tests" --playlist-key "symlink tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Dry run testing playlist array in JSON format"
+echo ""
+echo "replay --dry-run"
+"$REPLAY_TOOL" --dry-run --verbose "$REPLAY_TEST_DIR_PATH/playlist_array.json"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Dry run testing playlist array in plist format"
+
+echo ""
+echo "Validating plist with plutil"
+/usr/bin/plutil "$REPLAY_TEST_DIR_PATH/playlist_array.plist"
+
+echo ""
+echo "replay --dry-run"
+"$REPLAY_TOOL" --dry-run --verbose "$REPLAY_TEST_DIR_PATH/playlist_array.plist"
+

@@ -21,6 +21,8 @@ typedef enum
 	kPlaylistFormatCount
 } PlaylistFormat;
 
+//a helper class to ensure atomic access to shared NSError from multiple threads
+
 @interface AtomicError : NSObject
 	@property(atomic, strong) NSError *error;
 @end
@@ -41,8 +43,12 @@ typedef struct
 } ReplayContext;
 
 
+// this function returns nil if the string is malformed or environment variable is not found
+// in both cases we treat this as a hard error and not allow executing an action with such string
+// becuase it may lead to file operations in unexpected locations
+
 static NSString *
-StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSString *,NSString *> *environment, bool verbose)
+StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSString *,NSString *> *environment)
 {
 	unichar stackBuffer[PATH_MAX];
 	unichar *uniChars = NULL;
@@ -66,7 +72,7 @@ StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSStrin
 
 	NSMutableArray *stringChunks = [NSMutableArray array];
 	
-	bool isMalformed = false;
+	bool isMalformedOrInvalid = false;
 	NSUInteger chunkStart = 0;
 	for(NSUInteger i = 0; i < length; i++)
 	{
@@ -97,13 +103,9 @@ StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSStrin
 				NSString *envValue = environment[envVarName];
 				if(envValue == nil)
 				{
-					 //In debug and verbose mode warn about referenced env variable that is missing
-#if !DEBUG
-					if (verbose)
-#endif
-					{
-						fprintf(stderr, "Referenced environment variable \"%s\" not found\n", [envVarName UTF8String]);
-					}
+					fprintf(stderr, "Referenced environment variable \"%s\" not found\n", [envVarName UTF8String]);
+					isMalformedOrInvalid = true;
+					break;
 				}
 				else
 				{//add only found env variable values
@@ -113,15 +115,9 @@ StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSStrin
 			}
 			else //unterminated ${} sequence - return nil
 			{
-				 //In debug and verbose mode warn about unterminated env variable sequence
-#if !DEBUG
-				if (verbose)
-#endif
-				{
-					//translate the error to 1-based index
-					fprintf(stderr, "Unterminated environment variable sequence at character %lu in string \"%s\"\n", chunkStart-1, [origString UTF8String]);
-				}
-				isMalformed = true;
+				// translate the error to 1-based index
+				fprintf(stderr, "Unterminated environment variable sequence at character %lu in string \"%s\"\n", chunkStart-1, [origString UTF8String]);
+				isMalformedOrInvalid = true;
 				break;
 			}
 		}
@@ -140,17 +136,29 @@ StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSStrin
 	}
 
 	NSString *expandedString = nil;
-	if(!isMalformed)
+	if(!isMalformedOrInvalid)
 		expandedString = [stringChunks componentsJoinedByString:@""];
 
 	return expandedString;
 }
 
-// if the playlistKey is specified, the playlist array is expected to be embedded in the root dictionary in the file
-// if the playlistKey is NULL, the whole content of the file is expected to be playlist array
+static NSString *
+StringByExpandingEnvironmentVariablesWithErrorCheck(NSString *origString, ReplayContext *context)
+{
+	NSString *outStr = StringByExpandingEnvironmentVariables(origString, context->environment);
+	if(outStr == nil)
+	{
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Malformed string or missing evnironment variable" };
+		NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+		context->lastError.error = operationError;
+	}
+	return outStr;
+}
 
-static inline NSArray<NSDictionary*> *
-GetPlaylist(const char* playlistPath, const char* playlistKey, ReplayContext *context)
+
+//this function is used when the playlist key is non-null so the root container must be a dictionary
+static inline NSDictionary*
+LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 {
 	if(playlistPath == NULL)
 	{
@@ -158,7 +166,6 @@ GetPlaylist(const char* playlistPath, const char* playlistKey, ReplayContext *co
 		return nil;
 	}
 
-	NSArray<NSDictionary*> *playlistArray = nil;
 	NSDictionary *playlistDict = nil;
 	NSURL *playlistURL = [NSURL fileURLWithFileSystemRepresentation:playlistPath isDirectory:NO relativeToURL:NULL];
 	
@@ -175,18 +182,92 @@ GetPlaylist(const char* playlistPath, const char* playlistKey, ReplayContext *co
 	{
 		if(hint == kPlaylistFormatPlist)
 		{
-			if(playlistKey != NULL)
+			playlistDict = [NSDictionary dictionaryWithContentsOfURL:playlistURL];
+			if(playlistDict != nil)
+				break;
+			numberOfTries++;
+			hint = kPlaylistFormatJson;
+		}
+		else if(hint == kPlaylistFormatJson)
+		{
+			NSError *error = nil;
+			NSData *jsonData = [NSData dataWithContentsOfURL:playlistURL options:kNilOptions error:&error];
+			
+			id playlistCollection = nil;
+			if(jsonData != nil)
 			{
-				playlistDict = [NSDictionary dictionaryWithContentsOfURL:playlistURL];
-				if(playlistDict != nil)
-					break;
+				playlistCollection = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:&error];
 			}
-			else
+
+			if(playlistCollection != nil)
 			{
-				playlistArray = [NSArray arrayWithContentsOfURL:playlistURL];
-				if(playlistArray != nil)
-					break;
+				if([playlistCollection isKindOfClass:[NSDictionary class]])
+				{
+					playlistDict = (NSDictionary *)playlistCollection;
+				}
+				break;
 			}
+			numberOfTries++;
+			hint = kPlaylistFormatPlist;
+		}
+	}
+	while(numberOfTries < kPlaylistFormatCount);
+
+	if(playlistDict == nil)
+	{
+		NSError *operationError = nil;
+		BOOL isReachable = [playlistURL checkResourceIsReachableAndReturnError:&operationError];
+		if(!isReachable)
+		{
+			context->lastError.error = operationError;
+			NSString *errorDesc = [operationError localizedDescription];
+			if(errorDesc == nil)
+				errorDesc = [operationError localizedFailureReason];
+
+			fprintf(stderr, "Playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
+		}
+		else
+		{
+			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unkown or invalid playlist type" };
+			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+			fprintf(stderr, "Unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key specified, the root container is expected to be a dictionary\n");
+		}
+	}
+
+	return playlistDict;
+}
+
+
+// This function is used when playlistKey is null and the whole content of the file must be the playlist array
+
+static inline NSArray<NSDictionary*> *
+GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
+{
+	if(playlistPath == NULL)
+	{
+		fprintf(stderr, "Playlist file path not provided\n");
+		return nil;
+	}
+
+	NSArray<NSDictionary*> *playlistArray = nil;
+	NSURL *playlistURL = [NSURL fileURLWithFileSystemRepresentation:playlistPath isDirectory:NO relativeToURL:NULL];
+	
+	PlaylistFormat hint = kPlaylistFormatPlist; //default to plist
+	PlaylistFormat numberOfTries = 0;
+
+	NSString *ext = [[playlistURL pathExtension] lowercaseString];
+	if([ext isEqualToString:@"json"])
+	{
+		hint = kPlaylistFormatJson;
+	}
+
+	do
+	{
+		if(hint == kPlaylistFormatPlist)
+		{
+			playlistArray = [NSArray arrayWithContentsOfURL:playlistURL];
+			if(playlistArray != nil)
+				break;
 			numberOfTries++;
 			hint = kPlaylistFormatJson;
 		}
@@ -205,12 +286,7 @@ GetPlaylist(const char* playlistPath, const char* playlistKey, ReplayContext *co
 			{
 				if([playlistCollection isKindOfClass:[NSArray class]])
 				{
-					//playlistKey is ignored even if not NULL
 					playlistArray = (NSArray *)playlistCollection;
-				}
-				else if([playlistCollection isKindOfClass:[NSDictionary class]] && (playlistKey != NULL))
-				{
-					playlistDict = (NSDictionary *)playlistCollection;
 				}
 				break;
 			}
@@ -220,7 +296,7 @@ GetPlaylist(const char* playlistPath, const char* playlistKey, ReplayContext *co
 	}
 	while(numberOfTries < kPlaylistFormatCount);
 
-	if((playlistDict == nil) && (playlistArray == nil))
+	if(playlistArray == nil)
 	{
 		NSError *operationError = nil;
 		BOOL isReachable = [playlistURL checkResourceIsReachableAndReturnError:&operationError];
@@ -237,23 +313,9 @@ GetPlaylist(const char* playlistPath, const char* playlistKey, ReplayContext *co
 		{
 			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unkown or invalid playlist type" };
 			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-			fprintf(stderr, "Unkown or invalid playlist type. Only .plist and .json playlists are supported\nIf -playlistKey is specified, the root container is expected to be a dictionary. The playlist itself is always an array\n");
+			fprintf(stderr, "Unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key not specified, the root container is expected to be an array.\n");
 		}
 	}
-
-	if(playlistKey != NULL)
-	{
-		NSString *key = @(playlistKey); // [NSString stringWithUTF8String:playlistKey];
-		playlistArray = playlistDict[key];
-		if(playlistArray == nil)
-		{
-			fprintf(stderr, "Playlist array not found for key \"%s\" in file \"%s\"\n", [key UTF8String], [[playlistURL path] UTF8String]);
-		}
-	}
-
-#if TRACE
-	NSLog(@"playlistArray = %@", playlistArray);
-#endif
 
 	return playlistArray;
 }
@@ -586,14 +648,16 @@ ItemPathsToURLs(NSArray<NSString*> *itemPaths, ReplayContext *context)
 	
 	for(NSString *itemPath in itemPaths)
 	{
-		NSString *expandedFileName = StringByExpandingEnvironmentVariables(itemPath, context->environment, context->verbose);
-		if(expandedFileName == nil)
+		NSString *expandedFileName = StringByExpandingEnvironmentVariablesWithErrorCheck(itemPath, context);
+		if(expandedFileName != nil)
 		{
-			//one broken path breaks all
+			NSURL *itemURL = [NSURL fileURLWithPath:expandedFileName];
+			[itemURLs addObject:itemURL];
+		}
+		else if(context->stopOnError)
+		{
 			return nil;
 		}
-		NSURL *itemURL = [NSURL fileURLWithPath:expandedFileName];
-		[itemURLs addObject:itemURL];
 	}
 
 	return itemURLs;
@@ -606,7 +670,7 @@ ItemPathsToURLs(NSArray<NSString*> *itemPaths, ReplayContext *context)
 static NSArray<NSURL*> *
 GetDestinationsForMultipleItems(NSArray<NSURL*> *sourceItemURLs, NSURL *destinationDirectoryURL, ReplayContext *context)
 {
-	if(destinationDirectoryURL == nil)
+	if((sourceItemURLs == nil) || (destinationDirectoryURL == nil))
 		return nil;
 
 	NSUInteger itemCount = [sourceItemURLs count];
@@ -768,14 +832,15 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 		{//simple one-to-one form
 			NSURL *sourceURL = nil;
 			NSURL *destinationURL = nil;
-			sourcePath = StringByExpandingEnvironmentVariables(sourcePath, context->environment, context->verbose);
+			sourcePath = StringByExpandingEnvironmentVariablesWithErrorCheck(sourcePath, context);
 			if(sourcePath != nil)
 				sourceURL = [NSURL fileURLWithPath:sourcePath];
 			
-			destinationPath = StringByExpandingEnvironmentVariables(destinationPath, context->environment, context->verbose);
+			destinationPath = StringByExpandingEnvironmentVariablesWithErrorCheck(destinationPath, context);
 			if(destinationPath != nil)
 				destinationURL = [NSURL fileURLWithPath:destinationPath];
 			
+			// handles nil sourceURL or destinationURL by skipping action
 			DispatchOneSourceDestinationAction(queue, group, fileAction, sourceURL, destinationURL, context, stepDescription);
 		}
 		else
@@ -788,10 +853,11 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 				if(srcItemURLs != nil)
 				{
 					NSURL *destinationDirectoryURL = nil;
-					NSString *expandedDestinationDirPath = StringByExpandingEnvironmentVariables(destinationDirPath, context->environment, context->verbose);
+					NSString *expandedDestinationDirPath = StringByExpandingEnvironmentVariablesWithErrorCheck(destinationDirPath, context);
 					if(expandedDestinationDirPath != nil)
 						destinationDirectoryURL = [NSURL fileURLWithPath:expandedDestinationDirPath isDirectory:YES];
-
+					
+					//handles nil destinationDirectoryURL by returning empty array
 					NSArray<NSURL*> *destItemURLs = GetDestinationsForMultipleItems(srcItemURLs, destinationDirectoryURL, context);
 					NSUInteger destIndex = 0;
 					for(NSURL *srcItemURL in srcItemURLs)
@@ -813,17 +879,27 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 			{
 				for(NSString *onePath in itemPaths)
 				{
-					NSString *expandedPath = StringByExpandingEnvironmentVariables(onePath, context->environment, context->verbose);
-					NSURL *oneURL = [NSURL fileURLWithPath:expandedPath];
-					action = ^{
-						__unused bool isOK = DeleteItem(oneURL, context, stepDescription);
-					};
-					DispatchAction(queue, group, action);
+					NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(onePath, context);
+					if(expandedPath != nil)
+					{
+						NSURL *oneURL = [NSURL fileURLWithPath:expandedPath];
+						action = ^{
+							__unused bool isOK = DeleteItem(oneURL, context, stepDescription);
+						};
+						DispatchAction(queue, group, action);
+					}
+					else if(context->stopOnError)
+					{ // one invalid path stops all actions
+						break;
+					}
 				}
 			}
 			else
 			{
 				fprintf(stderr, "\"items\" is expected to be an array of paths\n");
+				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unexpected items type" };
+				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				context->lastError.error = operationError;
 			}
 		}
 		else if(fileAction == kFileActionCreate)
@@ -848,26 +924,42 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 				}
 
 				if(expandContent)
-					content = StringByExpandingEnvironmentVariables(content, context->environment, context->verbose);
+					content = StringByExpandingEnvironmentVariablesWithErrorCheck(content, context);
 				
-				NSString *expandedPath = StringByExpandingEnvironmentVariables(filePath, context->environment, context->verbose);
-				NSURL *fileURL = [NSURL fileURLWithPath:expandedPath];
-				action = ^{
-					__unused bool isOK = CreateFile(fileURL, content, context, stepDescription);
-				};
-				DispatchAction(queue, group, action);
+				NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(filePath, context);
+				
+				// content is nil only if string is malformed or missing environment variable
+				// otherwise the string may be empty but non-nil
+				if((content != nil) && (expandedPath != nil))
+				{
+					NSURL *fileURL = [NSURL fileURLWithPath:expandedPath];
+					action = ^{
+						__unused bool isOK = CreateFile(fileURL, content, context, stepDescription);
+					};
+					DispatchAction(queue, group, action);
+				}
 			}
 			else
 			{
 				NSString *dirPath = stepDescription[@"directory"];
 				if([dirPath isKindOfClass:stringClass])
 				{
-					NSString *expandedDirPath = StringByExpandingEnvironmentVariables(dirPath, context->environment, context->verbose);
-					NSURL *dirURL = [NSURL fileURLWithPath:expandedDirPath];
-					action = ^{
-						__unused bool isOK = CreateDirectory(dirURL, context, stepDescription);
-					};
-					DispatchAction(queue, group, action);
+					NSString *expandedDirPath = StringByExpandingEnvironmentVariablesWithErrorCheck(dirPath, context);
+					if(expandedDirPath != nil)
+					{
+						NSURL *dirURL = [NSURL fileURLWithPath:expandedDirPath];
+						action = ^{
+							__unused bool isOK = CreateDirectory(dirURL, context, stepDescription);
+						};
+						DispatchAction(queue, group, action);
+					}
+				}
+				else
+				{
+					fprintf(stderr, "\"create\" action must specify \"file\" or \"directory\" \n");
+					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid create action specification" };
+					NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+					context->lastError.error = operationError;
 				}
 			}
 		}
@@ -960,6 +1052,7 @@ DisplayHelp(void)
 		"                     default behavior is to execute actions concurrently with no order guarantee (fast)\n"
 		"  -k, --playlist-key KEY   declare a key in root dictionary of the playlist file for action steps array\n"
 		"                     if absent, the playlist file root container is assumed to be an array of action steps\n"
+		"                     the key may be specified multiple times to execute more than one playlist in the file\n"
 		"  -e, --stop-on-error   stop executing the reamining playlist actions on first error\n"
 		"  -f, --force        if the file operation fails, delete destination and try again\n"
 		"  -n, --dry-run      show a log of actions which would be performed without running them\n"
@@ -988,6 +1081,9 @@ DisplayHelp(void)
 		"\n"
 		"  Environment variables in form of ${VARIABLE} are expanded in all paths\n"
 		"  New file content may also contain environment variables in its body (with an option to turn off expansion)\n"
+		"  Missing environment variables or malformed text is considered an error and the action will not be executed\n"
+		"  It is easy to make a mistake and allowing evironment variables resolved to empty would result in invalid paths,\n"
+		"  potentially leading to destructive file operations\n"
 		"\n"
 	);
 
@@ -1129,8 +1225,8 @@ int main(int argc, const char * argv[])
 	context.stopOnError = false;
 	context.force = false;
 
-	const char *playlistKey = NULL;
-	
+	NSMutableArray *playlistKeys = [NSMutableArray new];
+
 	while(true)
 	{
 		int index = 0;
@@ -1153,7 +1249,8 @@ int main(int argc, const char * argv[])
 			break;
 			
 			case 'k':
-				playlistKey = optarg;
+				//multiple playlists are allowed and stored in array to dispatch one after another
+				[playlistKeys addObject:@(optarg)];
 			break;
 
 			case 'e':
@@ -1178,14 +1275,42 @@ int main(int argc, const char * argv[])
 		optind++;
 	}
 
-	NSArray<NSDictionary*> *playlist = GetPlaylist(playlistPath, playlistKey, &context);
-	if(playlist == nil)
+	if ([playlistKeys count] > 0)
 	{
-		printf("Empty playlist. No steps to replay\n");
-		return EXIT_SUCCESS;
+		NSDictionary* playlistRootDict = LoadPlaylistRootDictionary(playlistPath, &context);
+		if(playlistRootDict == nil)
+		{
+			printf("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
+			return EXIT_SUCCESS;
+		}
+
+		for(NSString *oneKey in playlistKeys)
+		{
+			NSArray<NSDictionary*> *playlist = playlistRootDict[oneKey];
+			if(playlist != nil)
+			{
+				DispatchSteps(playlist, &context);
+			}
+			else
+			{
+				printf("Invalid or empty playlist for key \"%s\". No steps to replay\n", [oneKey UTF8String]);
+				if(context.stopOnError)
+				{
+					break;
+				}
+			}
+		}
 	}
-	
-	DispatchSteps(playlist, &context);
+	else
+	{
+		NSArray<NSDictionary*> *playlist = GetPlaylistFromRootArray(playlistPath, &context);
+		if(playlist == nil)
+		{
+			printf("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
+			return EXIT_SUCCESS;
+		}
+		DispatchSteps(playlist, &context);
+	}
 
 	if(context.lastError.error != nil)
 		return EXIT_FAILURE;

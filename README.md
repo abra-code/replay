@@ -23,6 +23,7 @@ Options:
                      default behavior is to execute actions concurrently with no order guarantee (fast)
   -k, --playlist-key KEY   declare a key in root dictionary of the playlist file for action steps array
                      if absent, the playlist file root container is assumed to be an array of action steps
+                     the key may be specified multiple times to execute more than one playlist in the file
   -e, --stop-on-error   stop executing the reamining playlist actions on first error
   -f, --force        if the file operation fails, delete destination and try again
   -n, --dry-run      show a log of actions which would be performed without running them
@@ -45,6 +46,9 @@ Environment variables expansion:
 
   Environment variables in form of ${VARIABLE} are expanded in all paths
   New file content may also contain environment variables in its body (with an option to turn off expansion)
+  Missing environment variables or malformed text is considered an error and the action will not be executed
+  It is easy to make a mistake and allowing evironment variables resolved to empty would result in invalid paths,
+  potentially leading to destructive file operations
 
 Actions and parameters:
 
