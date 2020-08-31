@@ -639,6 +639,76 @@ DeleteItem(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSettings)
 	return isSuccessful;
 }
 
+static bool
+ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, NSDictionary *actionSettings)
+{
+	if(context->stopOnError && (context->lastError.error != nil))
+		return false;
+
+	if(context->verbose || context->dryRun)
+	{
+		NSString *allArgsStr = [arguments componentsJoinedByString:@"\t"];
+		fprintf(stdout, "[execute]	%s	%s\n", [toolPath UTF8String], [allArgsStr UTF8String]);
+	}
+
+	bool isSuccessful = context->dryRun;
+	if(!context->dryRun)
+	{
+		NSTask *task = [[NSTask alloc] init];
+		[task setLaunchPath:toolPath];
+		[task setArguments:arguments];
+
+		[task setTerminationHandler: ^(NSTask *task) {
+			int toolStatus = [task terminationStatus];
+			if(toolStatus != EXIT_SUCCESS)
+			{
+				NSString *toolErrorDescription = [NSString stringWithFormat:@"%@ returned error %d", toolPath, toolStatus];
+				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: toolErrorDescription };
+				NSError *taskError = [NSError errorWithDomain:NSPOSIXErrorDomain code:toolStatus userInfo:userInfo];
+				context->lastError.error = taskError;
+				fprintf(stderr, "Failed to execute \"%s\". Error: %d\n", [toolPath UTF8String], toolStatus);
+			}
+		}];
+
+		NSPipe *stdOutPipe = [NSPipe pipe];
+		[task setStandardOutput:stdOutPipe];
+
+		NSFileHandle *stdOutFileHandle = [stdOutPipe fileHandleForReading];
+
+		NSError *operationError = nil;
+		isSuccessful = (bool)[task launchAndReturnError:&operationError];
+		if(isSuccessful)
+		{
+			NSData *stdOutData = [stdOutFileHandle readDataToEndOfFileAndReturnError:&operationError];
+			if(stdOutData != nil)
+			{
+				if(context->verbose)
+				{
+					//since we captured stdout and waited on it, now replay it to stdout
+					//because it was synchronous, all output will be printed at once after the tool finished
+					NSString *stdOutString = [[NSString alloc] initWithData:stdOutData encoding:NSUTF8StringEncoding];
+					fprintf(stdout, "%s\n", [stdOutString UTF8String]);
+				}
+			}
+			else
+			{
+				isSuccessful = false;
+			}
+		}
+		
+		if (!isSuccessful)
+		{
+			context->lastError.error = operationError;
+			NSString *errorDesc = [operationError localizedDescription];
+			if(errorDesc == nil)
+			{
+				errorDesc = [operationError localizedFailureReason];
+			}
+			fprintf(stderr, "Failed to execute \"%s\". Error: %s\n", [toolPath UTF8String], [errorDesc UTF8String] );
+		}
+	}
+	return isSuccessful;
+}
 
 static NSArray<NSURL*> *
 ItemPathsToURLs(NSArray<NSString*> *itemPaths, ReplayContext *context)
@@ -689,14 +759,15 @@ GetDestinationsForMultipleItems(NSArray<NSURL*> *sourceItemURLs, NSURL *destinat
 
 typedef enum
 {
-	kFileActionInvalid,
+	kActionInvalid,
 	kFileActionClone,
 	kFileActionMove,
 	kFileActionHardlink,
 	kFileActionSymlink,
 	kFileActionCreate,
 	kFileActionDelete,
-} FileAction;
+	kActionExecuteTool
+} Action;
 
 
 static inline void
@@ -716,7 +787,7 @@ DispatchAction(dispatch_queue_t queue, dispatch_group_t group, dispatch_block_t 
 }
 
 static void
-DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t group, FileAction fileAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context, NSDictionary *actionSettings)
+DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t group, Action fileAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context, NSDictionary *actionSettings)
 {
 	if((sourceURL == nil) || (destinationURL == nil))
 		return;
@@ -777,7 +848,7 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 		return;
 	}
 
-	FileAction fileAction = kFileActionInvalid;
+	Action fileAction = kActionInvalid;
 	bool isSrcDestAction = false;
 
 	if([actionName isEqualToString:@"clone"] || [actionName isEqualToString:@"copy"])
@@ -810,13 +881,18 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 		fileAction = kFileActionDelete;
 		isSrcDestAction = false;
 	}
+	else if([actionName isEqualToString:@"execute"])
+	{
+		fileAction = kActionExecuteTool;
+		isSrcDestAction = false;
+	}
 	else
 	{
-		fileAction = kFileActionInvalid;
+		fileAction = kActionInvalid;
 		fprintf(stderr, "Unrecognized step action: %s\n", [actionName UTF8String]);
 	}
 	
-	if(fileAction == kFileActionInvalid)
+	if(fileAction == kActionInvalid)
 		return;
 	
 	Class stringClass = [NSString class];
@@ -961,6 +1037,58 @@ DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_gro
 					NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
 					context->lastError.error = operationError;
 				}
+			}
+		}
+		else if(fileAction == kActionExecuteTool)
+		{
+			NSString *toolPath = stepDescription[@"tool"];
+			if([toolPath isKindOfClass:stringClass])
+			{
+				NSArray<NSString*> *arguments = stepDescription[@"arguments"];
+				if((arguments != nil) && ![arguments isKindOfClass:arrayClass])
+				{
+					fprintf(stderr, "\"execute\" action must specify \"arguments\" as a string array\n");
+					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid execute action specification" };
+					NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+					context->lastError.error = operationError;
+				}
+				else
+				{
+					NSString *expandedToolPath = StringByExpandingEnvironmentVariablesWithErrorCheck(toolPath, context);
+					if(expandedToolPath != nil)
+					{
+						bool argsOK = true;
+						NSMutableArray *expandedArgs = [NSMutableArray arrayWithCapacity:[arguments count]];
+						for(NSString *oneArg in arguments)
+						{
+							NSString *expandedArg = StringByExpandingEnvironmentVariablesWithErrorCheck(oneArg, context);
+							if(expandedArg != nil)
+							{
+								[expandedArgs addObject:expandedArg];
+							}
+							else if(context->stopOnError)
+							{ // one invalid string expansion stops all actions
+								argsOK = false;
+								break;
+							}
+						}
+
+						if(argsOK)
+						{
+							action = ^{
+								__unused bool isOK = ExcecuteTool(expandedToolPath, expandedArgs, context, stepDescription);
+							};
+							DispatchAction(queue, group, action);
+						}
+					}
+				}
+			}
+			else
+			{
+				fprintf(stderr, "\"execute\" action must specify \"tool\" value with path to executable\n");
+				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid execute action specification" };
+				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				context->lastError.error = operationError;
 			}
 		}
 	}
@@ -1120,6 +1248,9 @@ DisplayHelp(void)
 		"  delete      Delete a file or directory (with its content).\n"
 		"              CAUTION: There is no warning or user confirmation requested before deletion\n"
 		"    items     array of item paths to delete (files or directories with their content)\n"
+		"  execute     Run an executable as a child process\n"
+		"    tool      Full path to a tool to start\n"
+		"    arguments   array of arguments to pass to the tool (optional)\n"
 		"\n"
 	);
 

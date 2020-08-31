@@ -200,5 +200,56 @@
 			<false/>
 		</dict>
 	</array>
+	<key>execute tests</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<string>execute</string>
+			<key>tool</key>
+			<string>/usr/bin/touch</string>
+			<key>arguments</key>
+			<array>
+				<string>-c</string>
+				<string>${HOME}/${REPLAY_TEST}</string>
+			</array>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>execute</string>
+			<key>tool</key>
+			<string>/usr/bin/zip</string>
+			<key>arguments</key>
+			<array>
+				<string>-r</string>
+				<string>${HOME}/${REPLAY_TEST}/replay_test_files.zip</string>
+				<string>${REPLAY_TEST_FILES_DIR}</string>
+			</array>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>execute</string>
+			<key>tool</key>
+			<string>/usr/bin/tar</string>
+			<key>arguments</key>
+			<array>
+				<string>--create</string>
+				<string>--gzip</string>
+				<string>--file</string>
+				<string>${HOME}/${REPLAY_TEST}/replay_test_files.tar.gz</string>
+				<string>${REPLAY_TEST_FILES_DIR}</string>
+			</array>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>execute</string>
+			<key>tool</key>
+			<string>/bin/sh</string>
+			<key>arguments</key>
+			<array>
+				<string>-c</string>
+				<string>/bin/ls "${REPLAY_TEST_FILES_DIR}" | /usr/bin/grep 'clone' &gt; "${HOME}/${REPLAY_TEST}/clone_inputs.txt"</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

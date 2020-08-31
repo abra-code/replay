@@ -131,4 +131,43 @@
       "validate": false,
     },
   ],
+  "execute tests":
+  [
+    {
+      "action": "execute",
+      "tool": "/usr/bin/touch",
+      "arguments": [
+        "-c",
+        "${HOME}/${REPLAY_TEST}",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/usr/bin/zip",
+      "arguments": [
+        "-r",
+        "${HOME}/${REPLAY_TEST}/replay_test_files.zip",
+        "${REPLAY_TEST_FILES_DIR}",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/usr/bin/tar",
+      "arguments": [
+        "--create",
+        "--gzip",
+        "--file",
+        "${HOME}/${REPLAY_TEST}/replay_test_files.tar.gz",
+        "${REPLAY_TEST_FILES_DIR}",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/sh",
+      "arguments": [
+        "-c",
+        "/bin/ls \"${REPLAY_TEST_FILES_DIR}\" | /usr/bin/grep 'clone' > \"${HOME}/${REPLAY_TEST}/clone_inputs.txt\"",
+      ],
+    },
+  ],
 }

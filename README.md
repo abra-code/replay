@@ -82,6 +82,9 @@ Actions and parameters:
   delete      Delete a file or directory (with its content).
               CAUTION: There is no warning or user confirmation requested before deletion
     items     array of item paths to delete (files or directories with their content)
+  execute     Run an executable as a child process
+    tool      Full path to a tool to start
+    arguments   array of arguments to pass to the tool (optional)
 
 Example JSON playlist:
 

@@ -38,6 +38,10 @@ echo ""
 echo "replay --force --serial --playlist-key \"force tests\""
 "$REPLAY_TOOL" --force --serial --playlist-key "force tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
 
+echo ""
+echo "replay --playlist-key \"execute tests\""
+"$REPLAY_TOOL" --playlist-key "execute tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
+
 echo "------------------------------"
 echo ""
 echo "Dry run testing multiple playlists executed together in JSON format"
@@ -65,6 +69,10 @@ echo "replay --playlist-key \"tests\""
 echo ""
 echo "replay --force --serial --playlist-key \"force tests\""
 "$REPLAY_TOOL" --force --serial --playlist-key "force tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
+
+echo ""
+echo "replay --playlist-key \"execute tests\""
+"$REPLAY_TOOL" --playlist-key "execute tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
 
 echo "------------------------------"
 echo ""
