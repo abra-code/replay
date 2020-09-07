@@ -1339,7 +1339,10 @@ DisplayHelp(void)
 
 	printf(
 		"Example execution:\n"
-		"./replay --dry-run --playlist-key \"Shepherd Playlist\" shepherd.plist\n"
+		"./replay --dry-run --serial --playlist-key \"Shepherd Playlist\" shepherd.plist\n"
+		"\n"
+		"In the above example playlist some output files are inputs to later actions\n"
+		"so serial execution is required for achieve the expected outcome\n"
 		"\n"
 		"\n"
 	);

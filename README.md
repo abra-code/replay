@@ -6,10 +6,10 @@ Key features:
 - concurrent file operations for fastest execution
 - serial file operations supported if a sequence is required
 - designed to replace custom shell scripts serially moving/copying files around
-- self contained code - not calling external binaries to preform file operations
+- self contained code - not calling external binaries to perform file operations
 - supports cloning on APFS so duplicates don't take unnecessary space on disk
 
-If it sounds a bit like an installer or package extractor it's becuase that's what it's designed to be used for.
+If it sounds a bit like an installer or package extractor it's because that's what it's designed to be used for.
 
 Type `replay --help` in Terminal to learn more:
 ```
@@ -164,5 +164,8 @@ Example plist playlist:
 </plist>
 
 Example execution:
-./replay --dry-run --playlist-key "Shepherd Playlist" shepherd.plist
+./replay --dry-run --serial --playlist-key "Shepherd Playlist" shepherd.plist
+
+In the above example playlist some output files are inputs to later actions
+so serial execution is required for achieve the expected outcome
 ```
