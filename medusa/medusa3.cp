@@ -1,22 +1,18 @@
 //
-//  medusa2.cpp
+//  medusa3.cpp
 //  medusa
 //
-//  Created by Tomasz Kukielka on 7/5/19.
-//  Copyright © 2019 Tomasz Kukielka. All rights reserved.
+//  Created by Tomasz Kukielka on 9/12/2020.
+//  Copyright © 2020 Tomasz Kukielka. All rights reserved.
 //
+// medusa3 removes the assumption of separate input and out locations for quick classification
+// this comes at the cost of checking each input if it is the output of some producer
+
 
 #include "medusa.h"
 #include <iostream>
 #include <random>
 #include "hi_res_timer.h"
-
-
-//input type classification based on known locations for static inputs
-static bool is_static_input(const std::string &in_path)
-{
-    return (in_path[0] == 'S');
-}
 
 static void index_all_outputs(std::vector<medusa>& all_medusas,
                        std::unordered_map< std::string, size_t >& output_paths_to_indexes_map,
@@ -47,7 +43,7 @@ static void index_all_outputs(std::vector<medusa>& all_medusas,
     std::cout << "Finished indexing all outputs in " << seconds << " seconds\n";
 }
 
-static void connect_all_dynamic_inputs(std::vector<medusa>& all_medusas, //input list of all raw unconnected medusas
+static void connect_all_dynamic_inputs_v3(std::vector<medusa>& all_medusas, //input list of all raw unconnected medusas
                        std::vector<medusa*>& static_medusa_list, //medusas without dynamic dependencies to be executed first
                        const std::unordered_map< std::string, size_t >& output_paths_to_indexes_map, //the helper map produced in first pass
                        std::vector<file_producer_and_consumers>& output_spec_list) //the list of all output specs
@@ -57,7 +53,7 @@ static void connect_all_dynamic_inputs(std::vector<medusa>& all_medusas, //input
     hi_res_timer timer;
     size_t all_input_count = 0;
     size_t static_input_count = 0;
-   
+
     //second pass - connect outputs to inputs, gather info about consumers and producers
     //find first medusas without dependencies
     for(size_t mi = 0; mi < all_medusas.size(); mi++)
@@ -70,26 +66,24 @@ static void connect_all_dynamic_inputs(std::vector<medusa>& all_medusas, //input
         	all_input_count++;
             const std::string &one_input_path = one_medusa.inputs[ii].path;
             
-            bool is_input_satisfied = is_static_input(one_input_path);
-            if(!is_input_satisfied)
-            {//non-static inputs are outputs from other medusas, this medusa is a consumer
-                //dynamic element must already exist in our map, otherwise the input is unknown
-                //this will assert if this is not true
-                auto output_path_iterator = output_paths_to_indexes_map.find(one_input_path);
-				size_t found_output_index = 0;
-				assert(output_path_iterator != output_paths_to_indexes_map.end());
-				found_output_index = output_path_iterator->second; //this is index+1
-                //size_t found_output_index = output_paths_to_indexes_map.at(one_input_path); //this is index+1
+            //find if this medusa's input is known to be produced by another one
+            auto output_path_iterator = output_paths_to_indexes_map.find(one_input_path);
+            size_t found_output_index = 0;//index = 0 means the path is not an output from producer
+            assert(one_medusa.inputs[ii].path_index == 0);
+            if(output_path_iterator != output_paths_to_indexes_map.end())
+            {
+                found_output_index = output_path_iterator->second; //this is index+1
                 assert(found_output_index > 0); //0 is a reserved index for static inputs
                 one_medusa.inputs[ii].path_index = found_output_index; //for easy lookup later in output_spec_list
                 file_producer_and_consumers& producer_and_consumers = output_spec_list[found_output_index-1];
-                producer_and_consumers.consumers.insert(&one_medusa);
+                producer_and_consumers.consumers.insert(&one_medusa);// add oneself to the list of consumers
             }
             else
             {
             	static_input_count++;
             }
-            are_all_inputs_satisfied = (are_all_inputs_satisfied && is_input_satisfied);
+
+            are_all_inputs_satisfied = (are_all_inputs_satisfied && (found_output_index == 0));
         }
         
         if(are_all_inputs_satisfied)
@@ -101,6 +95,7 @@ static void connect_all_dynamic_inputs(std::vector<medusa>& all_medusas, //input
     
     double seconds = timer.elapsed();
     std::cout << "Finished connecting all dynamic outputs in " << seconds << " seconds\n";
+    
     
     std::cout << "All input count " << all_input_count << "\n";
     std::cout << "Static input count " << static_input_count << "\n";
@@ -179,18 +174,14 @@ static void execute_medusa_list(std::vector<medusa*>& medusa_list, std::vector<f
     }
 }
 
-// medusa 2 tries to avoid excessive re-hashing of all paths so all output paths are sequentially indexed upfront instead
-// this requires 3 passes:
-// 1. index all outputs and create a map of path to index
-// 2. put the same indexes into input file specs by looking up paths to indexes in the map created in 1
-// 3. execute the medusa graph using indexes for input/output paths with spec lookup just in array instead of dictionary
+// medusa 3 builds on top of medusa 2 but works harder classifying inputs
 
 // Perf results on MacBook Pro 2.7 GHz Quad-Core Intel Core i7 (release config, no debugging)
-// The speed penalty for extra pass is small. Step 1+2 in v2 is slightly longer than step 1 in v1,
-// e.g. 8+11=19 secs vs 16.5 secs for a million test medusas
-// but the execution of the graph (step 3) can be a magnitude faster with v2, e.g 8.5 secs vs 70 secs for a million test medusas
+// Checking all inputs without easy static classification by prefix adds a cost
+// In example 1 million medusas, there are about 20 million inputs, about 10 million of them are static
+// the 10 million extra input lookups compared to medusa 2 add about 4 seconds to 10 seconds spent in connect_all_dynamic_inputs
 
-void conect_medusas_v2(std::vector<medusa>& all_medusas)
+void conect_medusas_v3(std::vector<medusa>& all_medusas)
 {
     //this is a map of all outputs, each keeping a set of medusas which consume it
     std::unordered_map< std::string, size_t > output_paths_to_indexes_map;
@@ -201,7 +192,7 @@ void conect_medusas_v2(std::vector<medusa>& all_medusas)
                       output_paths_to_indexes_map,
                       output_spec_list);
 
-    connect_all_dynamic_inputs(all_medusas, //input list of all raw unconnected medusas
+    connect_all_dynamic_inputs_v3(all_medusas, //input list of all raw unconnected medusas
                                     static_medusa_list, //medusas without dynamic dependencies to be executed first
                                     output_paths_to_indexes_map, //the helper map produced in first pass
                                     output_spec_list); //the list of all output specs

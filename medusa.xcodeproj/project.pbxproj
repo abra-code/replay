@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		1D36689022D1F01E007A4290 /* medusa2.cp in Sources */ = {isa = PBXBuildFile; fileRef = 1D36688F22D1F01E007A4290 /* medusa2.cp */; };
 		1D47A83C25071EE20047AA39 /* medusa1.cp in Sources */ = {isa = PBXBuildFile; fileRef = 1D47A83B25071EE20047AA39 /* medusa1.cp */; };
+		1DC15FA8250DBEED0089C423 /* medusa3.cp in Sources */ = {isa = PBXBuildFile; fileRef = 1DC15FA7250DBEED0089C423 /* medusa3.cp */; };
 		1DF55B0C22CF2EF700A56226 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1DF55B0B22CF2EF700A56226 /* main.cpp */; };
 /* End PBXBuildFile section */
 
@@ -28,6 +29,7 @@
 		1D36688F22D1F01E007A4290 /* medusa2.cp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = medusa2.cp; sourceTree = "<group>"; };
 		1D36689122D1F072007A4290 /* hi_res_timer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hi_res_timer.h; sourceTree = "<group>"; };
 		1D47A83B25071EE20047AA39 /* medusa1.cp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = medusa1.cp; sourceTree = "<group>"; };
+		1DC15FA7250DBEED0089C423 /* medusa3.cp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = medusa3.cp; sourceTree = "<group>"; };
 		1DF55B0822CF2EF700A56226 /* medusa */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = medusa; sourceTree = BUILT_PRODUCTS_DIR; };
 		1DF55B0B22CF2EF700A56226 /* main.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
 		1DF55B1222CF2F3800A56226 /* medusa.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = medusa.h; sourceTree = "<group>"; };
@@ -66,6 +68,7 @@
 				1DF55B0B22CF2EF700A56226 /* main.cpp */,
 				1D47A83B25071EE20047AA39 /* medusa1.cp */,
 				1D36688F22D1F01E007A4290 /* medusa2.cp */,
+				1DC15FA7250DBEED0089C423 /* medusa3.cp */,
 				1DF55B1222CF2F3800A56226 /* medusa.h */,
 				1D36689122D1F072007A4290 /* hi_res_timer.h */,
 			);
@@ -130,6 +133,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1D36689022D1F01E007A4290 /* medusa2.cp in Sources */,
+				1DC15FA8250DBEED0089C423 /* medusa3.cp in Sources */,
 				1DF55B0C22CF2EF700A56226 /* main.cpp in Sources */,
 				1D47A83C25071EE20047AA39 /* medusa1.cp in Sources */,
 			);

@@ -15,7 +15,7 @@
 /*
     Well formed medusa specification:
     - unique/not duplicate outputs (medusa's out tentacles belong only to one medusa)
-    - static inputs (anchored to islands) can be recognized in first pass
+    - static inputs (anchored to islands) can be recognized in first pass - in medusa 1 & 2, removed in medusa 3
     - outputs are not allowed to be produced in static input location so it is quick to distinguish the two
     - some medusas have only static anchors and these are the starters
     - no circular connections (there must be a way to find the first medusa without dynamic artifact dependency)
@@ -82,7 +82,7 @@ std::vector<medusa> generate_three_test_medusas()
 }
 
 
-std::vector<medusa> generate_test_medusas(size_t medusa_count,
+static std::vector<medusa> generate_test_medusas(size_t medusa_count,
                                     size_t max_static_input_count, //>0
                                     size_t max_dynamic_input_count, //>=0
                                     size_t max_output_count) //>0
@@ -151,7 +151,27 @@ std::vector<medusa> generate_test_medusas(size_t medusa_count,
     return test_medusas;
 }
 
-int verify_all_medusas_have_been_processed(std::vector<medusa>& all_medusas)
+static void reset_medusas(std::vector<medusa>& all_medusas)
+{
+    for(size_t i = 0; i < all_medusas.size(); i++)
+    {
+        medusa& one_medusa = all_medusas[i];
+        one_medusa.is_processed = false;
+        size_t input_count = one_medusa.inputs.size();
+        for(size_t ii = 0; ii < input_count; ii++)
+        {
+            one_medusa.inputs[ii].path_index = 0;
+        }
+
+        size_t output_count = one_medusa.outputs.size();
+        for(size_t oi = 0; oi < output_count; oi++)
+        {
+            one_medusa.outputs[oi].path_index = 0;
+        }
+    }
+}
+
+static int verify_all_medusas_have_been_processed(std::vector<medusa>& all_medusas)
 {
     bool all_processed = true;
     for(size_t i = 0; i < all_medusas.size(); i++)
@@ -173,6 +193,7 @@ int verify_all_medusas_have_been_processed(std::vector<medusa>& all_medusas)
 
 int main(int argc, const char * argv[])
 {
+    int err_code;
     std::vector<medusa> all_medusas = generate_test_medusas( 1000000, // medusa_count,
                                                             20, // max_static_input_count > 0
                                                             20, // max_dynamic_input_count, //>=0
@@ -180,10 +201,16 @@ int main(int argc, const char * argv[])
                                                             );
     std::cout << "\nMedusa connector v1\n";
     conect_medusas_v1(all_medusas);
-    int err_code = verify_all_medusas_have_been_processed(all_medusas);
+    err_code = verify_all_medusas_have_been_processed(all_medusas);
 
     std::cout << "\nMedusa connector v2\n";
+    reset_medusas(all_medusas);
     conect_medusas_v2(all_medusas);
+    err_code = verify_all_medusas_have_been_processed(all_medusas);
+
+    std::cout << "\nMedusa connector v3\n";
+    reset_medusas(all_medusas);
+    conect_medusas_v3(all_medusas);
     err_code = verify_all_medusas_have_been_processed(all_medusas);
     return err_code;
 }

@@ -36,10 +36,8 @@ struct file_producer_and_consumers
     bool is_built { false };
 };
 
-
-int verify_all_medusas_have_been_processed(std::vector<medusa>& all_medusas);
-
 void conect_medusas_v1(std::vector<medusa>& all_medusas);
 void conect_medusas_v2(std::vector<medusa>& all_medusas);
+void conect_medusas_v3(std::vector<medusa>& all_medusas);
 
 #endif /* medusa_h */

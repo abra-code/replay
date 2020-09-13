@@ -1,5 +1,5 @@
 //
-//  main.cpp
+//  medusa1.cpp
 //  medusa
 //
 //  Created by Tomasz Kukielka on 7/5/19.
@@ -23,7 +23,9 @@ static void visit_all_medusas(std::vector<medusa>& all_medusas, std::vector<medu
     std::cout << "First pass on raw unconnected medusa list\n";
     
     hi_res_timer timer;
-    
+    size_t all_input_count = 0;
+	size_t static_input_count = 0;
+   
     size_t all_output_count = 0;
     //first pass - classify inputs/outputs, gather info about consumers and producers
     //find first medusas without dependencies
@@ -34,6 +36,7 @@ static void visit_all_medusas(std::vector<medusa>& all_medusas, std::vector<medu
         bool are_all_inputs_satisfied = true;
         for(size_t ii = 0; ii < input_count; ii++)
         {
+        	all_input_count++;
             const std::string &one_input = one_medusa.inputs[ii].path;
             bool is_input_satisfied = is_static_input(one_input);
             if(!is_input_satisfied)
@@ -41,6 +44,10 @@ static void visit_all_medusas(std::vector<medusa>& all_medusas, std::vector<medu
                 file_producer_and_consumers& producer_and_consumers = outputs_map[one_input];
                 producer_and_consumers.consumers.insert(&one_medusa);
             }
+			else
+			{
+				static_input_count++;
+			}
             are_all_inputs_satisfied = (are_all_inputs_satisfied && is_input_satisfied);
         }
         
@@ -65,7 +72,8 @@ static void visit_all_medusas(std::vector<medusa>& all_medusas, std::vector<medu
     std::cout << "Total number of outputs in all medusas " << all_output_count << "\n";
     std::cout << "Finished visiting all medusas in " << seconds << " seconds\n";
     
-    //now go over all startig medusas and follow the outputs to find the ones with all satisifed inputs
+    std::cout << "All input count " << all_input_count << "\n";
+    std::cout << "Static input count " << static_input_count << "\n";
     std::cout << "Initial count of medusas with static dependencies only: " << static_medusa_list.size() << "\n";
 }
 
