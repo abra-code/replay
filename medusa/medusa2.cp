@@ -6,7 +6,7 @@
 //  Copyright © 2019 Tomasz Kukielka. All rights reserved.
 //
 
-#include "medusa.h"
+#include "medusa_common.h"
 #include <iostream>
 #include <random>
 #include "hi_res_timer.h"
@@ -155,6 +155,8 @@ static void execute_medusa_list(std::vector<medusa*>& medusa_list, std::vector<f
                          is_input_satisfied = producer_and_consumers.is_built;
                      }
                      are_all_inputs_satisfied = (are_all_inputs_satisfied && is_input_satisfied);
+                     if(!are_all_inputs_satisfied)
+                     	break;
                  }
                  
                  if(are_all_inputs_satisfied)

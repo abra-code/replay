@@ -10,10 +10,21 @@
 		1D36689022D1F01E007A4290 /* medusa2.cp in Sources */ = {isa = PBXBuildFile; fileRef = 1D36688F22D1F01E007A4290 /* medusa2.cp */; };
 		1D47A83C25071EE20047AA39 /* medusa1.cp in Sources */ = {isa = PBXBuildFile; fileRef = 1D47A83B25071EE20047AA39 /* medusa1.cp */; };
 		1DC15FA8250DBEED0089C423 /* medusa3.cp in Sources */ = {isa = PBXBuildFile; fileRef = 1DC15FA7250DBEED0089C423 /* medusa3.cp */; };
+		1DC15FB0250ECF020089C423 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1DC15FAF250ECF020089C423 /* main.mm */; };
+		1DC15FB9250ED2070089C423 /* Medusa.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DC15FB7250ED2070089C423 /* Medusa.m */; };
 		1DF55B0C22CF2EF700A56226 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1DF55B0B22CF2EF700A56226 /* main.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		1DC15FAB250ECF020089C423 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
 		1DF55B0622CF2EF700A56226 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -30,12 +41,23 @@
 		1D36689122D1F072007A4290 /* hi_res_timer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hi_res_timer.h; sourceTree = "<group>"; };
 		1D47A83B25071EE20047AA39 /* medusa1.cp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = medusa1.cp; sourceTree = "<group>"; };
 		1DC15FA7250DBEED0089C423 /* medusa3.cp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = medusa3.cp; sourceTree = "<group>"; };
+		1DC15FAD250ECF020089C423 /* medusa-objc */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "medusa-objc"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1DC15FAF250ECF020089C423 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		1DC15FB7250ED2070089C423 /* Medusa.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Medusa.m; sourceTree = SOURCE_ROOT; };
+		1DC15FB8250ED2070089C423 /* Medusa.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Medusa.h; sourceTree = SOURCE_ROOT; };
 		1DF55B0822CF2EF700A56226 /* medusa */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = medusa; sourceTree = BUILT_PRODUCTS_DIR; };
 		1DF55B0B22CF2EF700A56226 /* main.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
-		1DF55B1222CF2F3800A56226 /* medusa.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = medusa.h; sourceTree = "<group>"; };
+		1DF55B1222CF2F3800A56226 /* medusa_common.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = medusa_common.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		1DC15FAA250ECF020089C423 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		1DF55B0522CF2EF700A56226 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -46,10 +68,21 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1DC15FAE250ECF020089C423 /* medusa-objc */ = {
+			isa = PBXGroup;
+			children = (
+				1DC15FAF250ECF020089C423 /* main.mm */,
+				1DC15FB8250ED2070089C423 /* Medusa.h */,
+				1DC15FB7250ED2070089C423 /* Medusa.m */,
+			);
+			path = "medusa-objc";
+			sourceTree = "<group>";
+		};
 		1DF55AFF22CF2EF700A56226 = {
 			isa = PBXGroup;
 			children = (
 				1DF55B0A22CF2EF700A56226 /* medusa */,
+				1DC15FAE250ECF020089C423 /* medusa-objc */,
 				1DF55B0922CF2EF700A56226 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -58,6 +91,7 @@
 			isa = PBXGroup;
 			children = (
 				1DF55B0822CF2EF700A56226 /* medusa */,
+				1DC15FAD250ECF020089C423 /* medusa-objc */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -69,7 +103,7 @@
 				1D47A83B25071EE20047AA39 /* medusa1.cp */,
 				1D36688F22D1F01E007A4290 /* medusa2.cp */,
 				1DC15FA7250DBEED0089C423 /* medusa3.cp */,
-				1DF55B1222CF2F3800A56226 /* medusa.h */,
+				1DF55B1222CF2F3800A56226 /* medusa_common.h */,
 				1D36689122D1F072007A4290 /* hi_res_timer.h */,
 			);
 			path = medusa;
@@ -78,6 +112,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		1DC15FAC250ECF020089C423 /* medusa-objc */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1DC15FB3250ECF020089C423 /* Build configuration list for PBXNativeTarget "medusa-objc" */;
+			buildPhases = (
+				1DC15FA9250ECF020089C423 /* Sources */,
+				1DC15FAA250ECF020089C423 /* Frameworks */,
+				1DC15FAB250ECF020089C423 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "medusa-objc";
+			productName = "medusa-objc";
+			productReference = 1DC15FAD250ECF020089C423 /* medusa-objc */;
+			productType = "com.apple.product-type.tool";
+		};
 		1DF55B0722CF2EF700A56226 /* medusa */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1DF55B0F22CF2EF700A56226 /* Build configuration list for PBXNativeTarget "medusa" */;
@@ -104,6 +155,9 @@
 				LastUpgradeCheck = 1100;
 				ORGANIZATIONNAME = "Tomasz Kukielka";
 				TargetAttributes = {
+					1DC15FAC250ECF020089C423 = {
+						CreatedOnToolsVersion = 11.7;
+					};
 					1DF55B0722CF2EF700A56226 = {
 						CreatedOnToolsVersion = 11.0;
 					};
@@ -123,11 +177,21 @@
 			projectRoot = "";
 			targets = (
 				1DF55B0722CF2EF700A56226 /* medusa */,
+				1DC15FAC250ECF020089C423 /* medusa-objc */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
+		1DC15FA9250ECF020089C423 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1DC15FB9250ED2070089C423 /* Medusa.m in Sources */,
+				1DC15FB0250ECF020089C423 /* main.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		1DF55B0422CF2EF700A56226 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -142,6 +206,28 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		1DC15FB1250ECF020089C423 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = T9NM2ZLDTY;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		1DC15FB2250ECF020089C423 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = T9NM2ZLDTY;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
 		1DF55B0D22CF2EF700A56226 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -270,6 +356,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1DC15FB3250ECF020089C423 /* Build configuration list for PBXNativeTarget "medusa-objc" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1DC15FB1250ECF020089C423 /* Debug */,
+				1DC15FB2250ECF020089C423 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		1DF55B0322CF2EF700A56226 /* Build configuration list for PBXProject "medusa" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

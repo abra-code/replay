@@ -6,7 +6,7 @@
 //  Copyright © 2019 Tomasz Kukielka. All rights reserved.
 //
 
-#include "medusa.h"
+#include "medusa_common.h"
 #include <iostream>
 #include <random>
 #include "hi_res_timer.h"
@@ -199,9 +199,11 @@ int main(int argc, const char * argv[])
                                                             20, // max_dynamic_input_count, //>=0
                                                             20  // max_output_count > 0
                                                             );
+#if 1 //INCLUDE_V1
     std::cout << "\nMedusa connector v1\n";
     conect_medusas_v1(all_medusas);
     err_code = verify_all_medusas_have_been_processed(all_medusas);
+#endif
 
     std::cout << "\nMedusa connector v2\n";
     reset_medusas(all_medusas);

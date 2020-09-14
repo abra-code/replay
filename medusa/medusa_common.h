@@ -1,13 +1,13 @@
 //
-//  medusa.h
+//  medusa_common.h
 //  medusa
 //
 //  Created by Tomasz Kukielka on 7/5/19.
 //  Copyright © 2019 Tomasz Kukielka. All rights reserved.
 //
 
-#ifndef medusa_h
-#define medusa_h
+#ifndef medusa_common_h
+#define medusa_common_h
 
 #include <vector>
 #include <string>
@@ -40,4 +40,4 @@ void conect_medusas_v1(std::vector<medusa>& all_medusas);
 void conect_medusas_v2(std::vector<medusa>& all_medusas);
 void conect_medusas_v3(std::vector<medusa>& all_medusas);
 
-#endif /* medusa_h */
+#endif /* medusa_common_h */
