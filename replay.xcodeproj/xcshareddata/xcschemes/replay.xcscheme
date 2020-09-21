@@ -52,18 +52,39 @@
       </BuildableProductRunnable>
       <CommandLineArguments>
          <CommandLineArgument
+            argument = "--verbose"
+            isEnabled = "YES">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "--force"
+            isEnabled = "YES">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "--playlist-key"
+            isEnabled = "YES">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "&quot;symlink tests&quot;"
+            isEnabled = "YES">
+         </CommandLineArgument>
+         <CommandLineArgument
             argument = "/Users/tkukielk/playlist.json"
             isEnabled = "NO">
          </CommandLineArgument>
          <CommandLineArgument
-            argument = "/Users/tkukielk/playlist.plist"
+            argument = "/Users/tkukielk/Development/replay/test/playlist.plist"
             isEnabled = "YES">
          </CommandLineArgument>
       </CommandLineArguments>
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "REPLAY_TEST"
-            value = "Replay Test"
+            value = "Replay/Test Files"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "REPLAY_TEST_FILES_DIR"
+            value = "/Users/tkukielk/Development/replay/test/Test Files"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>

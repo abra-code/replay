@@ -7,105 +7,20 @@
 
 #import <Foundation/Foundation.h>
 #import "TaskScheduler.h"
+#import "TaskProxy.h"
 
 //#define TRACE_PROXY 1
 
-static dispatch_queue_t sQueue = nil;
-static dispatch_group_t sGroup = nil;
+dispatch_queue_t sQueue = nil;
+dispatch_group_t sGroup = nil;
+
+// private contract between TaskScheduler and TaskProxy:
 
 @interface TaskProxy()
-	@property(nonatomic, strong) NSMutableArray<TaskProxy*> *nextTasks;
-	@property(nonatomic, strong) dispatch_block_t taskBlock;
-	@property(nonatomic) NSInteger pendingDependenciesCount;
+	- (void)incrementDependencyCount;
+	-(void)decrementDependencyCount;
 @end
 
-@implementation TaskProxy
-
-- (id)initWithTask:(dispatch_block_t)task
-{
-	self = [super init];
-	if(self != nil)
-	{
-		_pendingDependenciesCount = 0;
-		_taskBlock = task;
-	}
-
-	return self;
-}
-
-- (void)linkNextTask:(TaskProxy*)nextTask
-{
-	if(_nextTasks == nil)
-	{
-		_nextTasks = [[NSMutableArray<TaskProxy*> alloc] init];
-	}
-	
-	[_nextTasks addObject:nextTask];
-	[nextTask incrementDependencyCount]; //our object is the dependency for the new nextTask
-}
-
-- (void)incrementDependencyCount
-{
-	@synchronized (self)
-	{
-		++_pendingDependenciesCount;
-	}
-}
-
-// A task may have multiple dependencies
-// They are incremented for the task during graph construction when you call linkNextTask:
-// After each dependency has finished execution, it removes itself out of the picture
-// and reduces the count in each downstream task which waits for it
-// When the number of pending dependenices reaches 0
-// it is a signal fot the task that it can be scheduled for execution and gets dispatched here
--(void)decrementDependencyCount
-{
-	@synchronized (self)
-	{
-		--_pendingDependenciesCount;
-		if(_pendingDependenciesCount == 0)
-		{//all dependencies satisfied, now we can execute our task
-			//dispatch queue operations themselves are thread safe per Apple's documentation
-			dispatch_group_async(sGroup, sQueue, ^{
-				//self is captured strongly here by the block
-				//at enqueueing time so callers with the last reference
-				//are safe to release this object right after
-				//calling [task decrementDependencyCount]
-				[self executeTask];
-			});
-		}
-	}
-}
-
-- (void)executeTask
-{
-#if TRACE_PROXY
-	printf("executing proxy = %p\n", (__bridge void *)self);
-#endif
-
-	@autoreleasepool
-	{
-		//execute the actual requested task now
-		_taskBlock();
-
-		//when we are done executing, tell all nextTasks there is one less dependency to wait on
-		for (TaskProxy *nextTask in _nextTasks)
-		{
-			[nextTask decrementDependencyCount];
-		}
-	}
-}
-
-#if TRACE_PROXY
--(void)dealloc
-{
-	 printf("dealloc proxy = %p\n", (__bridge void *)self);
-}
-#endif
-
-@end //@implementation TaskProxy
-
-#pragma mark -
 
 static TaskScheduler *sSharedScheduler = nil;
 

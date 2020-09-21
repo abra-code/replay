@@ -1,73 +1,39 @@
 //
-//  Medusa.m
+//  RecursiveMedusa.m
 //
 //  Created by Tomasz Kukielka on 9/13/20.
 //  Copyright © 2020 Tomasz Kukielka. All rights reserved.
 //
 
-#import "Medusa.h"
-
-@implementation PathSpec
-
-- (id)initWithPath:(NSString *)path
-{
-	self = [super init];
-	if(self != nil)
-	{
-		_path = path;
-	}
-	return self;
-}
-
-@end //@implementation PathSpec
-
-
-@implementation Medusa
-
-@end //@implementation Medusa
-
-
-@implementation OutputProducer
-
-- (id)init
-{
-	self = [super init];
-	if(self != nil)
-	{
-		_consumers = [[NSMutableSet alloc] initWithCapacity:0];
-	}
-	return self;
-}
-
-@end //@implementation OutputProducer
-
+#import "RecursiveMedusa.h"
+#import "MedusaTaskProxy.h"
 
 //first pass
-void index_all_outputs(NSArray<Medusa *> *all_medusas,
+void IndexAllOutputsForRecursiveExecution(NSArray< id<MedusaTask> > *all_medusas,
 						CFMutableDictionaryRef output_paths_to_producer_indexes,
-                       	NSMutableArray<OutputProducer*> *output_producers)
+                       	OutputInfo *outputInfoArray, NSUInteger outputArrayCount)
 {
     printf("First pass to index all output files\n");
     clock_t begin = clock();
-
-	for(Medusa *one_medusa in all_medusas)
+	NSUInteger outputIndex = 0;
+	for( id<MedusaTask> one_medusa in all_medusas)
 	{
         for(PathSpec *one_output in one_medusa.outputs)
         {
-            OutputProducer* output_producer = [[OutputProducer alloc] init];
-            output_producer.producer = one_medusa;
-            [output_producers addObject:output_producer];
-            NSUInteger producer_index = output_producers.count; //intentionally +1 so index 0 is not a built product path
-            one_output.producerIndex = producer_index;
-            //no two producers can produce the same output - validation would be required
-            CFDictionaryAddValue(output_paths_to_producer_indexes, (const void *)one_output.path, (const void *)producer_index);
+        	assert(outputIndex < outputArrayCount);
+			OutputInfo* output_producer = &(outputInfoArray[outputIndex]);
+			output_producer->producer = one_medusa;
+			outputIndex++; //intentionally +1 so index 0 is not a built product path
+			one_output.producerIndex = outputIndex;
+			//no two producers can produce the same output - validation would be required
+			CFDictionaryAddValue(output_paths_to_producer_indexes, (const void *)one_output.path, (const void *)outputIndex);
         }
     }
 
 	clock_t end = clock();
 	double seconds = (double)(end - begin) / CLOCKS_PER_SEC;
 
-    printf("Total number of outputs in all medusas %lu\n", output_producers.count);
+    printf("Total number of outputs in all medusas %lu\n", outputIndex);
     printf("Finished indexing all outputs in %f seconds\n", seconds);
 }
 
@@ -75,10 +41,10 @@ void index_all_outputs(NSArray<Medusa *> *all_medusas,
 //second pass - connect outputs to inputs, gather info about consumers and producers
 //find first medusas without dependencies
 
-NSMutableArray<Medusa *> * //medusas without dynamic dependencies to be executed first - produced here
-connect_all_dynamic_inputs(NSArray<Medusa *> *all_medusas, //input list of all raw unconnected medusas
+NSArray<MedusaTaskProxy *> * //medusas without dynamic dependencies to be executed first - produced here
+ConnectDynamicInputsForRecursiveExecution(NSArray<MedusaTaskProxy *> *all_medusas, //input list of all raw unconnected medusas
                        CFDictionaryRef output_paths_to_producer_indexes, //the helper map produced in first pass
-                       NSArray<OutputProducer*> *output_producers)  //the list of all output specs
+                       OutputInfo *outputInfoArray, NSUInteger outputArrayCount)  //the list of all output specs
 {
     printf("Connecting all dynamic inputs\n");
     
@@ -86,9 +52,9 @@ connect_all_dynamic_inputs(NSArray<Medusa *> *all_medusas, //input list of all r
     size_t all_input_count = 0;
     size_t static_input_count = 0;
 
-	NSMutableArray<Medusa *> *static_input_medusas = [[NSMutableArray alloc] initWithCapacity:0];
+	NSMutableArray<MedusaTaskProxy *> *static_input_medusas = [[NSMutableArray alloc] initWithCapacity:0];
 
-	for(Medusa *one_medusa in all_medusas)
+	for(MedusaTaskProxy *one_medusa in all_medusas)
 	{
         bool are_all_inputs_satisfied = true;
         for(PathSpec *input_spec in one_medusa.inputs)
@@ -101,8 +67,11 @@ connect_all_dynamic_inputs(NSArray<Medusa *> *all_medusas, //input list of all r
             if(producer_index != 0) //0 is a reserved index for static inputs
             {
                 input_spec.producerIndex = producer_index; //for easy lookup later in output_producers
-                OutputProducer *producer = output_producers[producer_index-1];
-                [producer.consumers addObject:one_medusa];// add oneself to the list of consumers
+                assert((producer_index-1) < outputArrayCount);
+                OutputInfo *outputInfo = &(outputInfoArray[producer_index-1]);
+                if(outputInfo->consumers == nil)
+	                outputInfo->consumers = [[NSMutableSet alloc] initWithCapacity:0];
+                [outputInfo->consumers addObject:one_medusa];// add oneself to the list of consumers
             }
             else
             {
@@ -138,28 +107,27 @@ connect_all_dynamic_inputs(NSArray<Medusa *> *all_medusas, //input list of all r
 // - we have no dictionary lookups
 // - we populate one medusa array for the next nested iteration
 //
-// TODO: investigate what makes it so costly. Is recursion itself in Obj-C putting such a heavy toll?
-// TODO: re-evaluate containers and possibly use linked lists with weak references instead of NSSMutableArrays
-// TODO: this would allow us to reduce reallocations for huge arrays and not pay the price for refcounting when not needed
 
-void execute_medusa_list(NSMutableArray<Medusa *> *medusa_list, NSArray<OutputProducer*> *output_producers)
+void ExecuteMedusaGraphRecursively(NSArray<MedusaTaskProxy *> *medusa_list, OutputInfo *outputInfoArray, NSUInteger outputArrayCount)
 {
-    NSMutableArray<Medusa *> *next_medusa_list = [[NSMutableArray alloc] initWithCapacity:0];
-    for(Medusa *one_medusa in medusa_list)
+    NSMutableArray<MedusaTaskProxy *> *next_medusa_list = [[NSMutableArray alloc] initWithCapacity:0];
+    for(MedusaTaskProxy *one_medusa in medusa_list)
 	{
-		// consider one_medusa executed here
 		// ****** EXECUTE ******
+		[one_medusa executeTask];
 		
+		// consider one_medusa executed here
+
 		for(PathSpec *output_spec in one_medusa.outputs)
         {
         	//mark all path specs coming out from this medusa as produced now
             size_t output_producer_index = output_spec.producerIndex;
-            assert(output_producer_index > 0);
-            OutputProducer* output_producer = output_producers[output_producer_index-1];
-            output_producer.built = true;
+            assert((output_producer_index > 0) && ((output_producer_index-1) < outputArrayCount));
+            OutputInfo* output_producer = &(outputInfoArray[output_producer_index-1]);
+            output_producer->built = true;
 
 			// now look ahead at consuming nodes and check if all inputs are satisifed now
-			for(Medusa *consumer_medusa in output_producer.consumers)
+			for(MedusaTaskProxy *consumer_medusa in output_producer->consumers)
 			{
 				bool are_all_inputs_satisfied = true;
 				
@@ -169,9 +137,10 @@ void execute_medusa_list(NSMutableArray<Medusa *> *medusa_list, NSArray<OutputPr
 					bool is_input_satisfied = (producerIndex == 0); //index 0 is static
 					if(!is_input_satisfied)
 					{
-						OutputProducer* oneProducer = output_producers[producerIndex-1];
+						assert((producerIndex-1) < outputArrayCount);
+						OutputInfo* oneProducer = &(outputInfoArray[producerIndex-1]);
 						//check if the producer for this input has been executed already
-						is_input_satisfied = oneProducer.built;
+						is_input_satisfied = oneProducer->built;
 					}
 					are_all_inputs_satisfied = (are_all_inputs_satisfied && is_input_satisfied);
 					if(!are_all_inputs_satisfied)
@@ -190,10 +159,11 @@ void execute_medusa_list(NSMutableArray<Medusa *> *medusa_list, NSArray<OutputPr
     if(next_medusa_list.count > 0)
     {
         //now recursively go over next medusas and follow the outputs to find the ones with all satisifed inputs
-        execute_medusa_list(next_medusa_list, output_producers);
+        ExecuteMedusaGraphRecursively(next_medusa_list, outputInfoArray, outputArrayCount);
     }
     else
     {
         // std::cout << "No more medusas with all satsfied inputs found. Done\n";
     }
 }
+

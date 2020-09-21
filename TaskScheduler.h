@@ -7,14 +7,7 @@
 
 #import <Foundation/Foundation.h>
 
-
-@interface TaskProxy : NSObject
-
-- (id)initWithTask:(dispatch_block_t)task;
-- (void)linkNextTask:(TaskProxy*)nextTask;
-
-@end //TaskProxy
-
+@class TaskProxy;
 
 @interface TaskScheduler : NSObject
 

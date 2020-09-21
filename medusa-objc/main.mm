@@ -7,20 +7,33 @@
 //
 
 #import <Foundation/Foundation.h>
-#import "Medusa.h"
+#import "RecursiveMedusa.h"
+#import "SchedulerMedusa.h"
+#import "MedusaTaskProxy.h"
+#import "TaskScheduler.h"
+
 #include <iostream>
 #include <random>
 #include "hi_res_timer.h"
 
+//#define PRINT_TASK 1
+#define TEST_RECURSIVE 1
 
-static NSArray<Medusa *> * generate_test_medusas(NSUInteger medusa_count,
+static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
+									Class TaskClass,
+									NSUInteger medusa_count,
                                     size_t max_static_input_count, //>0
                                     size_t max_dynamic_input_count, //>=0
-                                    size_t max_output_count) //>0
+                                    size_t max_output_count, //>0
+                                    NSUInteger *inputCountPtr,
+                                    NSUInteger *outputCountPtr)
 {
     std::cout << "Generating " << medusa_count << " test medusas\n";
     hi_res_timer timer;
-    NSMutableArray<Medusa *> *test_medusas = [[NSMutableArray alloc] initWithCapacity:medusa_count];
+    NSMutableArray< id<MedusaTask> > *test_medusas = [[NSMutableArray alloc] initWithCapacity:medusa_count];
+
+	NSUInteger inputCount = 0;
+	NSUInteger outputCount = 0;
 
     std::random_device randomizer;
     assert(max_static_input_count > 0);
@@ -36,7 +49,11 @@ static NSArray<Medusa *> * generate_test_medusas(NSUInteger medusa_count,
         size_t dynamic_input_count = (i < max_dynamic_input_count) ? 0 : dynamic_input_distibution(randomizer);
         size_t output_count = output_distibution(randomizer);
         
-        Medusa *one_medusa = [[Medusa alloc] init];
+        MedusaTaskProxy *one_medusa = [[TaskClass alloc] initWithTask:^{
+#if PRINT_TASK
+        	printf("executing medusa %lu\n", i);
+#endif
+		}];
         [test_medusas addObject:one_medusa];
         
         one_medusa.inputs = [[NSMutableArray alloc] initWithCapacity:static_input_count+dynamic_input_count];
@@ -45,6 +62,7 @@ static NSArray<Medusa *> * generate_test_medusas(NSUInteger medusa_count,
             NSString *path = [[NSString alloc] initWithFormat:@"S%lu", (i*1000 + j)];
             PathSpec *pathSpec = [[PathSpec alloc] initWithPath:path];
             [one_medusa.inputs addObject:pathSpec];
+            inputCount++;
         }
 
         //dynamic inputs are chosen at random from medusas with lower indexes
@@ -58,7 +76,7 @@ static NSArray<Medusa *> * generate_test_medusas(NSUInteger medusa_count,
             do
             {
                 lower_medusa_index = lower_medusa_distibution(randomizer);
-				Medusa *lower_medusa = test_medusas[lower_medusa_index];
+				id<MedusaTask> lower_medusa = test_medusas[lower_medusa_index];
                 lower_medusa_output_count = lower_medusa.outputs.count;
             } while(lower_medusa_output_count == 0);
 
@@ -68,6 +86,7 @@ static NSArray<Medusa *> * generate_test_medusas(NSUInteger medusa_count,
             NSString *path = [[NSString alloc] initWithFormat:@"D%lu", (lower_medusa_index*1000 + lower_medusa_output_index)];
             PathSpec *pathSpec = [[PathSpec alloc] initWithPath:path];
             [one_medusa.inputs addObject:pathSpec];
+            inputCount++;
         }
 
         one_medusa.outputs = [[NSMutableArray alloc] initWithCapacity:output_count];
@@ -77,6 +96,7 @@ static NSArray<Medusa *> * generate_test_medusas(NSUInteger medusa_count,
             NSString *path = [[NSString alloc] initWithFormat:@"D%lu", (i*1000 + j)];
             PathSpec *pathSpec = [[PathSpec alloc] initWithPath:path];
             [one_medusa.outputs addObject:pathSpec];
+            outputCount++;
         }
     }
 
@@ -91,13 +111,19 @@ static NSArray<Medusa *> * generate_test_medusas(NSUInteger medusa_count,
 
     double seconds_shuffled = timer.elapsed();
 
-    std::cout << "Shuffled generated medusas in " << (seconds_shuffled - seconds_core) << " seconds\n";
     std::cout << "Finished medusa generation in " << seconds_shuffled << " seconds\n";
+    std::cout << "Shuffled generated medusas in " << (seconds_shuffled - seconds_core) << " seconds\n";
+
+	if(inputCountPtr != NULL)
+		*inputCountPtr = inputCount;
+
+	if(outputCountPtr != NULL)
+		*outputCountPtr = outputCount;
 
     return test_medusas;
 }
 
-static void conect_medusas_objc(NSArray<Medusa *> *all_medusas)
+static void ExecuteMedusasRecursively(NSArray<MedusaTaskProxy *> *all_medusas, NSUInteger inputCount, NSUInteger outputCount)
 {
 	//keys are CFStrings/NSStrings output paths
 	//values are NSUInteger indexes to producers in output_producers array
@@ -107,38 +133,119 @@ static void conect_medusas_objc(NSArray<Medusa *> *all_medusas)
 										&kCFTypeDictionaryKeyCallBacks,//keyCallBacks,
 										NULL ); //value callbacks
 
-	NSMutableArray<OutputProducer*> *output_producers = [[NSMutableArray alloc] initWithCapacity:0];
+	OutputInfo *outputInfoArray = (OutputInfo *)calloc(outputCount, sizeof(OutputInfo));
 	
-	index_all_outputs(all_medusas, output_paths_to_producer_indexes, output_producers);
+	IndexAllOutputsForRecursiveExecution(all_medusas, output_paths_to_producer_indexes, outputInfoArray, outputCount);
 
 	//medusas without dynamic dependencies to be executed first - produced by this call
-	NSMutableArray<Medusa *> *static_inputs_medusas = connect_all_dynamic_inputs(
+	NSArray<MedusaTaskProxy *> *static_inputs_medusas = ConnectDynamicInputsForRecursiveExecution(
 										all_medusas, //input list of all raw unconnected medusas
 										output_paths_to_producer_indexes, //the helper map produced in first pass
-										output_producers);  //the list of all output specs
+										outputInfoArray, outputCount);  //the list of all output specs
 
 	std::cout << "Following medusa chain recursively\n";
 	hi_res_timer timer;
-	execute_medusa_list(static_inputs_medusas, output_producers);
+	ExecuteMedusaGraphRecursively(static_inputs_medusas, outputInfoArray, outputCount);
 	double seconds = timer.elapsed();
 	std::cout << "Finished medusa execution in " << seconds << " seconds\n";
 }
+
+static void ExecuteMedusasWithScheduler(NSArray<TaskProxy*> *allTasks, NSUInteger inputCount, NSUInteger outputCount)
+{
+	//keys are CFStrings/NSStrings output paths
+	//values are NSUInteger indexes to producers in output_producers array
+	CFMutableDictionaryRef output_paths_to_producer_indexes = ::CFDictionaryCreateMutable(
+										kCFAllocatorDefault,
+										0,
+										&kCFTypeDictionaryKeyCallBacks,//keyCallBacks,
+										NULL ); //value callbacks
+
+	__unsafe_unretained TaskProxy* *outputInfoArray = (__unsafe_unretained TaskProxy* *)calloc(outputCount, sizeof(TaskProxy*));
+	
+	IndexAllOutputsForScheduler(allTasks, output_paths_to_producer_indexes, outputInfoArray, outputCount);
+
+	TaskScheduler *scheduler = [TaskScheduler sharedScheduler];
+
+	//graph root task is created by the scheduler
+	//we build the graph by adding children tasks to the root
+
+	ConnectDynamicInputsForScheduler(
+								allTasks, //input list of all raw unconnected medusas
+								scheduler.rootTask,
+								output_paths_to_producer_indexes, //the helper map produced in first pass
+								outputInfoArray, outputCount);  //the list of all output specs
+
+	free(outputInfoArray);
+
+	std::cout << "Executing medusa chain with TaskScheduler\n";
+	hi_res_timer timer;
+
+	[scheduler startExecutionAndWait];
+	 
+	double seconds = timer.elapsed();
+	std::cout << "Finished medusa execution in " << seconds << " seconds\n";
+}
+
 
 int main(int argc, const char * argv[])
 {
     int err_code = 0;
 	@autoreleasepool
 	{
-   		NSArray<Medusa *> *all_medusas = generate_test_medusas( 1000000, // medusa_count,
+		NSUInteger totalInputCount = 0;
+		NSUInteger totalOutputCount = 0;
+
+#if TEST_RECURSIVE
+		printf("Single-threaded recursive medusa algorithm\n\n");
+
+   		NSArray< id<MedusaTask> > *testMedusas = GenerateTestMedusaTasks(
+   															[MedusaTaskProxy class],
+															1000000, // medusa_count,
                                                             20, // max_static_input_count > 0
                                                             20, // max_dynamic_input_count, //>=0
-                                                            20  // max_output_count > 0
+                                                            20,  // max_output_count > 0
+                                                            &totalInputCount,
+                                                            &totalOutputCount
                                                             );
 
-		conect_medusas_objc(all_medusas);
+		// it is a reasonable requirement for the medusa generator to give us the total input/output count upfront
+		// it must have been processed already so we don't have to count again or adjust storage for items on the fly
+		ExecuteMedusasRecursively((NSArray<MedusaTaskProxy *> *)testMedusas, totalInputCount, totalOutputCount);
 
-		//it looks like a lot of unnecessary Obj-C memory cleanup is happening at exit and takes long time
-		//skip it and just reminate the app now
+		{
+			hi_res_timer timer;
+			testMedusas = nil;
+			double seconds = timer.elapsed();
+			std::cout << "Releasing all generated MedusaTaskProxy nodes took " << seconds << " seconds\n";
+		}
+
+		printf("\n\n--------------------------------\n");
+
+#endif //TEST_RECURSIVE
+
+		printf("Concurrent medusa algorithm with TaskScheduler\n\n");
+
+  		NSArray< id<MedusaTask> > *scheduleMedusas = GenerateTestMedusaTasks(
+   															[TaskProxy class],
+															1000000, // medusa_count,
+                                                            20, // max_static_input_count > 0
+                                                            20, // max_dynamic_input_count, //>=0
+                                                            20,  // max_output_count > 0
+                                                            &totalInputCount,
+                                                            &totalOutputCount
+                                                            );
+
+		ExecuteMedusasWithScheduler((NSArray<TaskProxy*> *)scheduleMedusas, totalInputCount, totalOutputCount);
+		
+		{
+			hi_res_timer timer;
+			scheduleMedusas = nil;
+			double seconds = timer.elapsed();
+			std::cout << "Releasing all generated TaskProxy nodes took " << seconds << " seconds\n";
+		}
+
+		// it looks like a lot of unnecessary Obj-C memory cleanup is happening at exit and takes long time
+		// skip it and just terminate the app now
 		exit(err_code);
 	}
 	return err_code;

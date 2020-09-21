@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		1D44722625045B7F00AD4746 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D44722525045B7F00AD4746 /* main.m */; };
 		1D79DF212506338200089548 /* TaskScheduler.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D79DF202506338200089548 /* TaskScheduler.m */; };
+		1DB8C3AF2517600C008B9BF9 /* TaskProxy.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3AD2517600C008B9BF9 /* TaskProxy.m */; };
+		1DB8C3C72518184C008B9BF9 /* PathSpec.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3C62518184C008B9BF9 /* PathSpec.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -28,6 +30,11 @@
 		1D44722525045B7F00AD4746 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = main.m; path = scheduler/main.m; sourceTree = "<group>"; };
 		1D79DF1F2506338100089548 /* TaskScheduler.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskScheduler.h; sourceTree = "<group>"; };
 		1D79DF202506338200089548 /* TaskScheduler.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskScheduler.m; sourceTree = "<group>"; };
+		1DB8C3AD2517600C008B9BF9 /* TaskProxy.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskProxy.m; sourceTree = "<group>"; };
+		1DB8C3AE2517600C008B9BF9 /* TaskProxy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskProxy.h; sourceTree = "<group>"; };
+		1DB8C3C52518184C008B9BF9 /* PathSpec.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PathSpec.h; sourceTree = "<group>"; };
+		1DB8C3C62518184C008B9BF9 /* PathSpec.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PathSpec.m; sourceTree = "<group>"; };
+		1DB8C3C925181858008B9BF9 /* MedusaTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MedusaTask.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -45,6 +52,11 @@
 			isa = PBXGroup;
 			children = (
 				1D44722525045B7F00AD4746 /* main.m */,
+				1DB8C3C52518184C008B9BF9 /* PathSpec.h */,
+				1DB8C3C62518184C008B9BF9 /* PathSpec.m */,
+				1DB8C3C925181858008B9BF9 /* MedusaTask.h */,
+				1DB8C3AE2517600C008B9BF9 /* TaskProxy.h */,
+				1DB8C3AD2517600C008B9BF9 /* TaskProxy.m */,
 				1D79DF1F2506338100089548 /* TaskScheduler.h */,
 				1D79DF202506338200089548 /* TaskScheduler.m */,
 				1D44722325045B7F00AD4746 /* Products */,
@@ -117,7 +129,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				1D79DF212506338200089548 /* TaskScheduler.m in Sources */,
+				1DB8C3C72518184C008B9BF9 /* PathSpec.m in Sources */,
 				1D44722625045B7F00AD4746 /* main.m in Sources */,
+				1DB8C3AF2517600C008B9BF9 /* TaskProxy.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

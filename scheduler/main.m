@@ -8,6 +8,7 @@
 
 #import <Foundation/Foundation.h>
 #import "TaskScheduler.h"
+#import "TaskProxy.h"
 
 @import os.signpost;
 
