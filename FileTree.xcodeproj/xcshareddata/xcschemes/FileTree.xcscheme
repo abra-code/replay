@@ -54,7 +54,7 @@
       </BuildableProductRunnable>
       <CommandLineArguments>
          <CommandLineArgument
-            argument = "/Users/tkukielk/Downloads/FileTree/FileTree/TestPaths.plist"
+            argument = "/Users/tkukielk/Development/replay/FileTree/TestPaths.plist"
             isEnabled = "YES">
          </CommandLineArgument>
       </CommandLineArguments>
