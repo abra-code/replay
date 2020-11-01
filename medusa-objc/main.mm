@@ -11,16 +11,25 @@
 #import "SchedulerMedusa.h"
 #import "MedusaTaskProxy.h"
 #import "TaskScheduler.h"
+#include "FileTree.h"
 
 #include <iostream>
 #include <random>
 #include "hi_res_timer.h"
+
+static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path)
+{
+	NSString *lowercasePath = [path lowercaseString];
+	const char *posixPath = [lowercasePath fileSystemRepresentation];
+	return FindOrInsertFileNodeForPath(fileTreeRoot, posixPath);
+}
 
 //#define PRINT_TASK 1
 #define TEST_RECURSIVE 1
 
 static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
 									Class TaskClass,
+									FileNode *fileTreeRoot,
 									NSUInteger medusa_count,
                                     size_t max_static_input_count, //>0
                                     size_t max_dynamic_input_count, //>=0
@@ -56,14 +65,19 @@ static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
 		}];
         [test_medusas addObject:one_medusa];
         
-        one_medusa.inputs = [[NSMutableArray alloc] initWithCapacity:static_input_count+dynamic_input_count];
+        uint64_t input_count = static_input_count + dynamic_input_count;
+        FileNode** input_array = (FileNode**)malloc(sizeof(FileNode*) * input_count);
+
         for(size_t j = 0; j < static_input_count; j++)
         {
-            NSString *path = [[NSString alloc] initWithFormat:@"S%lu", (i*1000 + j)];
-            PathSpec *pathSpec = [[PathSpec alloc] initWithPath:path];
-            [one_medusa.inputs addObject:pathSpec];
+            NSString *path = [[NSString alloc] initWithFormat:@"/Static/Dir-%lu/File-%lu", i, (i*1000 + j)];
+			FileNode *node = FileNodeFromPath(fileTreeRoot, path);
+			input_array[j] = node;
             inputCount++;
         }
+        
+        one_medusa.inputCount = input_count;
+		one_medusa.inputs = input_array;
 
         //dynamic inputs are chosen at random from medusas with lower indexes
         
@@ -77,27 +91,30 @@ static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
             {
                 lower_medusa_index = lower_medusa_distibution(randomizer);
 				id<MedusaTask> lower_medusa = test_medusas[lower_medusa_index];
-                lower_medusa_output_count = lower_medusa.outputs.count;
+                lower_medusa_output_count = lower_medusa.outputCount;
             } while(lower_medusa_output_count == 0);
 
-            //TODO: this generator allows putting the same dynamic inputs more than once (does not matter with larger numeber of medusas)
+            //TODO: this generator allows putting the same dynamic inputs more than once (does not matter with larger number of medusas)
             std::uniform_int_distribution<size_t> lower_medusa_output_distribution(0, lower_medusa_output_count-1);
             size_t lower_medusa_output_index = lower_medusa_output_distribution(randomizer);
-            NSString *path = [[NSString alloc] initWithFormat:@"D%lu", (lower_medusa_index*1000 + lower_medusa_output_index)];
-            PathSpec *pathSpec = [[PathSpec alloc] initWithPath:path];
-            [one_medusa.inputs addObject:pathSpec];
+            NSString *path = [[NSString alloc] initWithFormat:@"/Dynamic/Dir-%lu/Out-%lu", lower_medusa_index, (lower_medusa_index*1000 + lower_medusa_output_index)];
+			FileNode *node = FileNodeFromPath(fileTreeRoot, path);
+			input_array[static_input_count+j] = node;
             inputCount++;
         }
 
-        one_medusa.outputs = [[NSMutableArray alloc] initWithCapacity:output_count];
+		FileNode** output_array = (FileNode**)malloc(sizeof(FileNode*) * output_count);
 
         for(size_t j = 0; j < output_count; j++)
         {
-            NSString *path = [[NSString alloc] initWithFormat:@"D%lu", (i*1000 + j)];
-            PathSpec *pathSpec = [[PathSpec alloc] initWithPath:path];
-            [one_medusa.outputs addObject:pathSpec];
+            NSString *path = [[NSString alloc] initWithFormat:@"/Dynamic/Dir-%lu/Out-%lu", i, (i*1000 + j)];
+			FileNode *node = FileNodeFromPath(fileTreeRoot, path);
+			output_array[j] = node;
             outputCount++;
         }
+        
+		one_medusa.outputCount = output_count;
+		one_medusa.outputs = output_array;
     }
 
     double seconds_core = timer.elapsed();
@@ -125,22 +142,13 @@ static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
 
 static void ExecuteMedusasRecursively(NSArray<MedusaTaskProxy *> *all_medusas, NSUInteger inputCount, NSUInteger outputCount)
 {
-	//keys are CFStrings/NSStrings output paths
-	//values are NSUInteger indexes to producers in output_producers array
-	CFMutableDictionaryRef output_paths_to_producer_indexes = ::CFDictionaryCreateMutable(
-										kCFAllocatorDefault,
-										0,
-										&kCFTypeDictionaryKeyCallBacks,//keyCallBacks,
-										NULL ); //value callbacks
-
 	OutputInfo *outputInfoArray = (OutputInfo *)calloc(outputCount, sizeof(OutputInfo));
 	
-	IndexAllOutputsForRecursiveExecution(all_medusas, output_paths_to_producer_indexes, outputInfoArray, outputCount);
+	IndexAllOutputsForRecursiveExecution(all_medusas, outputInfoArray, outputCount);
 
 	//medusas without dynamic dependencies to be executed first - produced by this call
 	NSArray<MedusaTaskProxy *> *static_inputs_medusas = ConnectDynamicInputsForRecursiveExecution(
 										all_medusas, //input list of all raw unconnected medusas
-										output_paths_to_producer_indexes, //the helper map produced in first pass
 										outputInfoArray, outputCount);  //the list of all output specs
 
 	std::cout << "Following medusa chain recursively\n";
@@ -152,17 +160,9 @@ static void ExecuteMedusasRecursively(NSArray<MedusaTaskProxy *> *all_medusas, N
 
 static void ExecuteMedusasWithScheduler(NSArray<TaskProxy*> *allTasks, NSUInteger inputCount, NSUInteger outputCount)
 {
-	//keys are CFStrings/NSStrings output paths
-	//values are NSUInteger indexes to producers in output_producers array
-	CFMutableDictionaryRef output_paths_to_producer_indexes = ::CFDictionaryCreateMutable(
-										kCFAllocatorDefault,
-										0,
-										&kCFTypeDictionaryKeyCallBacks,//keyCallBacks,
-										NULL ); //value callbacks
-
 	__unsafe_unretained TaskProxy* *outputInfoArray = (__unsafe_unretained TaskProxy* *)calloc(outputCount, sizeof(TaskProxy*));
 	
-	IndexAllOutputsForScheduler(allTasks, output_paths_to_producer_indexes, outputInfoArray, outputCount);
+	IndexAllOutputsForScheduler(allTasks, outputInfoArray, outputCount);
 
 	TaskScheduler *scheduler = [TaskScheduler sharedScheduler];
 
@@ -172,7 +172,6 @@ static void ExecuteMedusasWithScheduler(NSArray<TaskProxy*> *allTasks, NSUIntege
 	ConnectDynamicInputsForScheduler(
 								allTasks, //input list of all raw unconnected medusas
 								scheduler.rootTask,
-								output_paths_to_producer_indexes, //the helper map produced in first pass
 								outputInfoArray, outputCount);  //the list of all output specs
 
 	free(outputInfoArray);
@@ -196,11 +195,14 @@ int main(int argc, const char * argv[])
 		NSUInteger totalOutputCount = 0;
 
 #if TEST_RECURSIVE
+	{
 		printf("Single-threaded recursive medusa algorithm\n\n");
 
+		FileNode *fileTreeRoot = CreateFileTreeRoot();
    		NSArray< id<MedusaTask> > *testMedusas = GenerateTestMedusaTasks(
    															[MedusaTaskProxy class],
-															1000000, // medusa_count,
+   															fileTreeRoot,
+															500000, // medusa_count,
                                                             20, // max_static_input_count > 0
                                                             20, // max_dynamic_input_count, //>=0
                                                             20,  // max_output_count > 0
@@ -220,14 +222,16 @@ int main(int argc, const char * argv[])
 		}
 
 		printf("\n\n--------------------------------\n");
-
+	}
 #endif //TEST_RECURSIVE
 
+		FileNode *fileTreeRoot = CreateFileTreeRoot();
 		printf("Concurrent medusa algorithm with TaskScheduler\n\n");
 
   		NSArray< id<MedusaTask> > *scheduleMedusas = GenerateTestMedusaTasks(
    															[TaskProxy class],
-															1000000, // medusa_count,
+   															fileTreeRoot,
+															500000, // medusa_count,
                                                             20, // max_static_input_count > 0
                                                             20, // max_dynamic_input_count, //>=0
                                                             20,  // max_output_count > 0

@@ -12,8 +12,11 @@
 
 @interface TaskProxy : NSObject<MedusaTask>
 
-@property(nonatomic, strong) NSMutableArray<PathSpec*> *inputs;
-@property(nonatomic, strong) NSMutableArray<PathSpec*> *outputs;
+@property(nonatomic) NSUInteger inputCount;
+@property(nonatomic, unsafe_unretained) FileNode** inputs;
+
+@property(nonatomic) NSUInteger outputCount;
+@property(nonatomic, unsafe_unretained) FileNode** outputs;
 
 - (id)initWithTask:(dispatch_block_t)task;
 - (void)linkNextTask:(TaskProxy*)nextTask;

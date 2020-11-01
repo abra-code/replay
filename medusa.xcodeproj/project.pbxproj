@@ -8,10 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		1D36689022D1F01E007A4290 /* medusa2.cp in Sources */ = {isa = PBXBuildFile; fileRef = 1D36688F22D1F01E007A4290 /* medusa2.cp */; };
+		1D3FFA62254D7D9B0076E19C /* FileTree.c in Sources */ = {isa = PBXBuildFile; fileRef = 1D3FFA61254D7D9B0076E19C /* FileTree.c */; };
 		1D47A83C25071EE20047AA39 /* medusa1.cp in Sources */ = {isa = PBXBuildFile; fileRef = 1D47A83B25071EE20047AA39 /* medusa1.cp */; };
 		1DB8C3B52517FCD0008B9BF9 /* MedusaTaskProxy.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3B42517FCD0008B9BF9 /* MedusaTaskProxy.m */; };
 		1DB8C3BA2518161F008B9BF9 /* TaskProxy.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3B92518161F008B9BF9 /* TaskProxy.m */; };
-		1DB8C3BF2518181A008B9BF9 /* PathSpec.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3BE2518181A008B9BF9 /* PathSpec.m */; };
 		1DB8C3CD25186CA6008B9BF9 /* TaskScheduler.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3CB25186CA6008B9BF9 /* TaskScheduler.m */; };
 		1DB8C3D22518B804008B9BF9 /* SchedulerMedusa.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3D02518B804008B9BF9 /* SchedulerMedusa.m */; };
 		1DC15FA8250DBEED0089C423 /* medusa3.cp in Sources */ = {isa = PBXBuildFile; fileRef = 1DC15FA7250DBEED0089C423 /* medusa3.cp */; };
@@ -44,13 +44,13 @@
 /* Begin PBXFileReference section */
 		1D36688F22D1F01E007A4290 /* medusa2.cp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = medusa2.cp; sourceTree = "<group>"; };
 		1D36689122D1F072007A4290 /* hi_res_timer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hi_res_timer.h; sourceTree = "<group>"; };
+		1D3FFA60254D7D8C0076E19C /* FileTree.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = FileTree.h; path = FileTree/FileTree.h; sourceTree = SOURCE_ROOT; };
+		1D3FFA61254D7D9B0076E19C /* FileTree.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = FileTree.c; path = FileTree/FileTree.c; sourceTree = SOURCE_ROOT; };
 		1D47A83B25071EE20047AA39 /* medusa1.cp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = medusa1.cp; sourceTree = "<group>"; };
 		1DB8C3B32517FCD0008B9BF9 /* MedusaTaskProxy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = MedusaTaskProxy.h; sourceTree = SOURCE_ROOT; };
 		1DB8C3B42517FCD0008B9BF9 /* MedusaTaskProxy.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = MedusaTaskProxy.m; sourceTree = SOURCE_ROOT; };
 		1DB8C3B82518161F008B9BF9 /* TaskProxy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskProxy.h; sourceTree = SOURCE_ROOT; };
 		1DB8C3B92518161F008B9BF9 /* TaskProxy.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskProxy.m; sourceTree = SOURCE_ROOT; };
-		1DB8C3BD2518181A008B9BF9 /* PathSpec.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PathSpec.h; sourceTree = SOURCE_ROOT; };
-		1DB8C3BE2518181A008B9BF9 /* PathSpec.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PathSpec.m; sourceTree = SOURCE_ROOT; };
 		1DB8C3C225181823008B9BF9 /* MedusaTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MedusaTask.h; sourceTree = SOURCE_ROOT; };
 		1DB8C3CB25186CA6008B9BF9 /* TaskScheduler.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskScheduler.m; sourceTree = SOURCE_ROOT; };
 		1DB8C3CC25186CA6008B9BF9 /* TaskScheduler.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskScheduler.h; sourceTree = SOURCE_ROOT; };
@@ -87,9 +87,9 @@
 		1DC15FAE250ECF020089C423 /* medusa-objc */ = {
 			isa = PBXGroup;
 			children = (
+				1D3FFA60254D7D8C0076E19C /* FileTree.h */,
+				1D3FFA61254D7D9B0076E19C /* FileTree.c */,
 				1DC15FAF250ECF020089C423 /* main.mm */,
-				1DB8C3BD2518181A008B9BF9 /* PathSpec.h */,
-				1DB8C3BE2518181A008B9BF9 /* PathSpec.m */,
 				1DB8C3C225181823008B9BF9 /* MedusaTask.h */,
 				1DB8C3B82518161F008B9BF9 /* TaskProxy.h */,
 				1DB8C3B92518161F008B9BF9 /* TaskProxy.m */,
@@ -217,8 +217,8 @@
 				1DB8C3B52517FCD0008B9BF9 /* MedusaTaskProxy.m in Sources */,
 				1DB8C3D22518B804008B9BF9 /* SchedulerMedusa.m in Sources */,
 				1DC15FB9250ED2070089C423 /* RecursiveMedusa.m in Sources */,
+				1D3FFA62254D7D9B0076E19C /* FileTree.c in Sources */,
 				1DC15FB0250ECF020089C423 /* main.mm in Sources */,
-				1DB8C3BF2518181A008B9BF9 /* PathSpec.m in Sources */,
 				1DB8C3CD25186CA6008B9BF9 /* TaskScheduler.m in Sources */,
 				1DB8C3BA2518161F008B9BF9 /* TaskProxy.m in Sources */,
 			);

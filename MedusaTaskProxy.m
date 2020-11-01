@@ -1,5 +1,5 @@
 //
-//  MedusaMedusaTaskProxy.m
+//  MedusaTaskProxy.m
 //
 //  Created by Tomasz Kukielka on 9/20/20.
 //  Copyright © 2020 Tomasz Kukielka. All rights reserved.

@@ -102,7 +102,7 @@ FindOrCreateChildNode(FileNode *parentNode, const uint64_t *nameChunks, size_t n
 }
 
 //Public API
-FileNode * CreateTreeRoot(void)
+FileNode * CreateFileTreeRoot(void)
 {
 	return CreateNodeForDirEntry("/", 1);
 }

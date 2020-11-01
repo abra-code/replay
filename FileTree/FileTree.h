@@ -10,6 +10,10 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // CFSet proved to be much more performant than the linked list of siblings
 // for ~700,000 file paths found in ~/Library, creating the tree in release build took as follows:
 // - linked list verion: 11 secs
@@ -38,9 +42,13 @@ typedef struct FileNode
 // and the additional ones following in memory if needed
 
 //caller should hold to the tree for as long as needed
-FileNode * CreateTreeRoot(void);
+FileNode * CreateFileTreeRoot(void);
 
 //call FindOrInsertFileNodeForPath() repeatedly with paths to construct in-memory tree
 FileNode * FindOrInsertFileNodeForPath(FileNode *treeRoot, const char *filePath);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* FileTree_h */

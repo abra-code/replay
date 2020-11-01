@@ -10,22 +10,28 @@
 
 //first pass
 void IndexAllOutputsForScheduler(NSArray< id<MedusaTask> > *all_medusas,
-						CFMutableDictionaryRef output_paths_to_producer_indexes,
                        	__unsafe_unretained id<MedusaTask> *outputInfoArray, NSUInteger outputArrayCount)
 {
     printf("First pass to index all output files\n");
     clock_t begin = clock();
 	NSUInteger outputIndex = 0;
-	for( id<MedusaTask> one_medusa in all_medusas)
+	for(__weak id<MedusaTask> one_medusa in all_medusas)
 	{
-        for(PathSpec *one_output in one_medusa.outputs)
+		NSUInteger outputCount = one_medusa.outputCount;
+		FileNode** outputs = one_medusa.outputs;
+        for(NSUInteger i = 0; i < outputCount; i++)
         {
+        	FileNode *node = outputs[i];
         	assert(outputIndex < outputArrayCount);
 			outputInfoArray[outputIndex] = one_medusa;
 			outputIndex++; //intentionally +1 so index 0 is not a built product path
-			one_output.producerIndex = outputIndex;
-			//no two producers can produce the same output - validation would be required
-			CFDictionaryAddValue(output_paths_to_producer_indexes, (const void *)one_output.path, (const void *)outputIndex);
+			
+			//no two producers can produce the same output - add runtime validation
+			assert(node->producerIndex == 0);
+			// in our in-memory file tree both inputs are outputs are the same nodes
+			// so setting it here for the output will allow it to be retrieved later if this node happens
+			// to be an input to some other medusa
+			node->producerIndex = outputIndex;
         }
     }
 
@@ -39,7 +45,6 @@ void IndexAllOutputsForScheduler(NSArray< id<MedusaTask> > *all_medusas,
 void
 ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *all_medusas, //input list of all raw unconnected medusas
 						TaskProxy *rootTask,
-						CFDictionaryRef output_paths_to_producer_indexes, //the helper map produced in first pass
 						__unsafe_unretained id<MedusaTask> *outputInfoArray, NSUInteger outputArrayCount) //the list of all output specs
 {
     printf("Connecting all dynamic inputs\n");
@@ -48,19 +53,21 @@ ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *all_medusas, //input
     size_t all_input_count = 0;
     size_t static_input_count = 0;
 
-	for(TaskProxy *one_medusa in all_medusas)
+	for(__weak TaskProxy *one_medusa in all_medusas)
 	{
         bool are_all_inputs_satisfied = true;
-        for(PathSpec *input_spec in one_medusa.inputs)
+
+		NSUInteger inputCount = one_medusa.inputCount;
+		FileNode** inputs = one_medusa.inputs;
+        for(NSUInteger i = 0; i < inputCount; i++)
         {
+        	FileNode *node = inputs[i];
          	all_input_count++;
             
             //find if this medusa's input is known to be produced by another one
-            NSUInteger producer_index = (NSUInteger)CFDictionaryGetValue(output_paths_to_producer_indexes, (const void *)input_spec.path);
-            assert(input_spec.producerIndex == 0);
+			uint64_t producer_index = node->producerIndex;
             if(producer_index != 0) //0 is a reserved index for static inputs
             {
-                input_spec.producerIndex = producer_index; //for easy lookup later in output_producers
                 assert((producer_index-1) < outputArrayCount);
                 id<MedusaTask> outputProducer = outputInfoArray[producer_index-1];
                 [outputProducer linkNextTask:one_medusa];

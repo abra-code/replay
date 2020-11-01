@@ -22,12 +22,10 @@ extern "C" {
 #endif
 
 void IndexAllOutputsForRecursiveExecution(NSArray< id<MedusaTask> > *all_medusas,
-						CFMutableDictionaryRef output_paths_to_indexes_map,
                        	OutputInfo *outputInfoArray, NSUInteger outputArrayCount);
 
 NSArray<MedusaTaskProxy *> * //medusas without dynamic dependencies to be executed first produced here
 ConnectDynamicInputsForRecursiveExecution(NSArray<MedusaTaskProxy *> *all_medusas, //input list of all raw unconnected medusas
-						CFDictionaryRef output_paths_to_producer_indexes, //the helper map produced in first pass
 						OutputInfo *outputInfoArray, NSUInteger outputArrayCount); //the list of all output specs
 
 void ExecuteMedusaGraphRecursively(NSArray<MedusaTaskProxy *> *medusa_list, OutputInfo *outputInfoArray, NSUInteger outputArrayCount);

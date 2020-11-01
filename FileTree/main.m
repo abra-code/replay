@@ -111,7 +111,7 @@ int main(int argc, const char * argv[])
  	
 	os_signpost_event_emit(log, OS_SIGNPOST_ID_EXCLUSIVE, "Creating file tree");
 
-	FileNode* rootNode = CreateTreeRoot();
+	FileNode* rootNode = CreateFileTreeRoot();
 
 	uint64_t myProducerIndex = 12345;
 	for (__weak NSString *testPath in testPaths)
