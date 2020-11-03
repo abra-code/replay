@@ -9,29 +9,31 @@
 #import "MedusaTaskProxy.h"
 
 //first pass
-void IndexAllOutputsForRecursiveExecution(NSArray< id<MedusaTask> > *all_medusas,
+void IndexAllOutputsForRecursiveExecution(NSArray< id<MedusaTask> > *allTasks,
                        	OutputInfo *outputInfoArray, NSUInteger outputArrayCount)
 {
     printf("First pass to index all output files\n");
     clock_t begin = clock();
 	NSUInteger outputIndex = 0;
-	for(__weak id<MedusaTask> one_medusa in all_medusas)
+	for(__weak id<MedusaTask> oneTask in allTasks)
 	{
-		NSUInteger outputCount = one_medusa.outputCount;
-		FileNode** outputs = one_medusa.outputs;
+		NSUInteger outputCount = oneTask.outputCount;
+		FileNode** outputs = oneTask.outputs;
         for(NSUInteger i = 0; i < outputCount; i++)
         {
         	FileNode *node = outputs[i];
         	assert(outputIndex < outputArrayCount);
-			OutputInfo* output_producer = &(outputInfoArray[outputIndex]);
-			output_producer->producer = one_medusa;
-			outputIndex++; //intentionally +1 so index 0 is not a built product path
+			OutputInfo* outputProducer = &(outputInfoArray[outputIndex]);
+			outputProducer->producer = oneTask;
+			outputIndex++;
 			//no two producers can produce the same output - add runtime validation
-			assert(node->producerIndex == 0);
+			assert(node->producer == NULL);
 			// in our in-memory file tree both inputs are outputs are the same nodes
 			// so setting it here for the output will allow it to be retrieved later if this node happens
 			// to be an input to some other medusa
-			node->producerIndex = outputIndex;
+			
+			//For recursive medusa we just stuff pointers to slots in our single allocation array of OutputInfo
+			node->producer = outputProducer;
         }
     }
 
@@ -43,12 +45,58 @@ void IndexAllOutputsForRecursiveExecution(NSArray< id<MedusaTask> > *all_medusas
 }
 
 
+static void FileNodeCFSetConnectConsumers(const void *value, void *producerContext)
+{
+	FileNode *node = (FileNode *)value;
+	if(producerContext != NULL)
+	{
+		node->anyParentHasProducer = 1;
+		if(node->producer != NULL) //if parent has a producer and our node has one, we need to connect them
+		{
+			OutputInfo *parentProducerInfo = (OutputInfo *)producerContext;
+			OutputInfo *currProducerInfo = (OutputInfo *)node->producer;
+			if(parentProducerInfo->consumers == nil)
+				parentProducerInfo->consumers = [[NSMutableSet alloc] initWithCapacity:0];
+			[parentProducerInfo->consumers addObject:currProducerInfo->producer];// add oneself to the list of consumers
+		}
+	}
+	
+	if(node->children != NULL)
+	{
+		if(node->producer != NULL) //and we have a new context to pass to child nodes
+			producerContext = node->producer;
+
+		CFSetApplyFunction(node->children, FileNodeCFSetConnectConsumers, producerContext);
+	}
+}
+
+//after the producers are assigned to their nodes we need to walk the whole tree to find
+//if there are any implicit producer dependencies
+//for example a node creating a directory and a node creating a file in there
+
+void
+ConnectImplicitProducersForRecursiveExecution(FileNode *treeRoot)
+{
+	printf("Connecting implicit producers\n");
+    clock_t begin = clock();
+
+	if(treeRoot->children != NULL)
+	{
+		void *producerContext = treeRoot->producer;
+		CFSetApplyFunction(treeRoot->children, FileNodeCFSetConnectConsumers, producerContext);
+	}
+
+	clock_t end = clock();
+	double seconds = (double)(end - begin) / CLOCKS_PER_SEC;
+    printf("Finished connecting implicit producers in %f seconds\n", seconds);
+}
+
+
 //second pass - connect outputs to inputs, gather info about consumers and producers
 //find first medusas without dependencies
 
-NSArray<MedusaTaskProxy *> * //medusas without dynamic dependencies to be executed first - produced here
-ConnectDynamicInputsForRecursiveExecution(NSArray<MedusaTaskProxy *> *all_medusas, //input list of all raw unconnected medusas
-                       OutputInfo *outputInfoArray, NSUInteger outputArrayCount)  //the list of all output specs
+NSSet<MedusaTaskProxy *> * //medusas without dynamic dependencies to be executed first - produced here
+ConnectDynamicInputsForRecursiveExecution(NSArray<MedusaTaskProxy *> *allTasks) //input list of all raw unconnected medusas
 {
     printf("Connecting all dynamic inputs\n");
     
@@ -56,41 +104,54 @@ ConnectDynamicInputsForRecursiveExecution(NSArray<MedusaTaskProxy *> *all_medusa
     size_t all_input_count = 0;
     size_t static_input_count = 0;
 
-	NSMutableArray<MedusaTaskProxy *> *static_input_medusas = [[NSMutableArray alloc] initWithCapacity:0];
+	NSMutableSet<MedusaTaskProxy *> *staticInputTasks = [[NSMutableSet alloc] initWithCapacity:0];
 
-	for(__weak MedusaTaskProxy *one_medusa in all_medusas)
+	for(__weak MedusaTaskProxy *oneTask in allTasks)
 	{
         bool are_all_inputs_satisfied = true;
 
-		NSUInteger inputCount = one_medusa.inputCount;
-		FileNode** inputs = one_medusa.inputs;
+		NSUInteger inputCount = oneTask.inputCount;
+		FileNode** inputs = oneTask.inputs;
         for(NSUInteger i = 0; i < inputCount; i++)
         {
         	FileNode *node = inputs[i];
          	all_input_count++;
             
             //find if this medusa's input is known to be produced by another one
-            uint64_t producer_index = node->producerIndex;
-            if(producer_index != 0) //0 is a reserved index for static inputs
+            OutputInfo *outputProducer = (OutputInfo *)node->producer;
+            if(outputProducer != NULL)
             {
-                assert((producer_index-1) < outputArrayCount);
-                OutputInfo *outputInfo = &(outputInfoArray[producer_index-1]);
-                if(outputInfo->consumers == nil)
-	                outputInfo->consumers = [[NSMutableSet alloc] initWithCapacity:0];
-                [outputInfo->consumers addObject:one_medusa];// add oneself to the list of consumers
+                if(outputProducer->consumers == nil)
+	                outputProducer->consumers = [[NSMutableSet alloc] initWithCapacity:0];
+                [outputProducer->consumers addObject:oneTask];// add oneself to the list of consumers
+            }
+            else if(node->anyParentHasProducer)
+            {//we know there is a producer up the tree in one of the parent nodes
+            	FileNode *parentNode = node->parent;
+            	while(parentNode != NULL)
+            	{
+            		if(parentNode->producer != NULL)
+            		{
+						outputProducer = (OutputInfo *)parentNode->producer;
+						if(outputProducer->consumers == nil)
+							outputProducer->consumers = [[NSMutableSet alloc] initWithCapacity:0];
+						[outputProducer->consumers addObject:oneTask];// add oneself to the list of consumers
+						break;
+            		}
+            		parentNode = parentNode->parent;
+            	}
             }
             else
             {
             	static_input_count++;
             }
 
-            are_all_inputs_satisfied = (are_all_inputs_satisfied && (producer_index == 0));
+            are_all_inputs_satisfied = (are_all_inputs_satisfied && (outputProducer == NULL));
         }
         
         if(are_all_inputs_satisfied)
         {
-            //one_medusa.is_processed = true;
-			[static_input_medusas addObject:one_medusa];
+			[staticInputTasks addObject:oneTask];
         }
     }
     
@@ -100,9 +161,9 @@ ConnectDynamicInputsForRecursiveExecution(NSArray<MedusaTaskProxy *> *all_medusa
     
     printf("All input count %lu\n", all_input_count);
     printf("Static input count %lu\n", static_input_count);
-    printf("Initial count of medusas with static dependencies only: %lu\n", static_input_medusas.count);
+    printf("Initial count of medusas with static dependencies only: %lu\n", staticInputTasks.count);
     
-    return static_input_medusas;
+    return staticInputTasks;
 }
 
 
@@ -114,45 +175,48 @@ ConnectDynamicInputsForRecursiveExecution(NSArray<MedusaTaskProxy *> *all_medusa
 // - we populate one medusa array for the next nested iteration
 //
 
-void ExecuteMedusaGraphRecursively(NSArray<MedusaTaskProxy *> *medusa_list, OutputInfo *outputInfoArray, NSUInteger outputArrayCount)
+void ExecuteMedusaGraphRecursively(NSSet<MedusaTaskProxy *> *taskSet)
 {
-    NSMutableArray<MedusaTaskProxy *> *next_medusa_list = [[NSMutableArray alloc] initWithCapacity:0];
-    for(__weak MedusaTaskProxy *one_medusa in medusa_list)
+    NSMutableSet<MedusaTaskProxy *> *nextTaskSet = [[NSMutableSet alloc] initWithCapacity:0];
+    for(__weak MedusaTaskProxy *oneTask in taskSet)
 	{
 		// ****** EXECUTE ******
-		[one_medusa executeTask];
+		
+#if ENABLE_DEBUG_DUMP
+		[oneTask dumpDescription];
+#endif
+		[oneTask executeTask];
 		
 		// consider one_medusa executed here
 
-		NSUInteger outputCount = one_medusa.outputCount;
-		FileNode** outputs = one_medusa.outputs;
+		NSUInteger outputCount = oneTask.outputCount;
+		FileNode** outputs = oneTask.outputs;
         for(NSUInteger i = 0; i < outputCount; i++)
         {
-        	FileNode *output_node = outputs[i];
+        	FileNode *outputNode = outputs[i];
         	//mark all path specs coming out from this medusa as produced now
-            uint64_t output_producer_index = output_node->producerIndex;
-            assert((output_producer_index > 0) && ((output_producer_index-1) < outputArrayCount));
-            OutputInfo* output_producer = &(outputInfoArray[output_producer_index-1]);
-            output_producer->built = true;
+            OutputInfo *outputProducer = (OutputInfo *)outputNode->producer;
 
 			// now look ahead at consuming nodes and check if all inputs are satisifed now
-			for(__weak MedusaTaskProxy *consumer_medusa in output_producer->consumers)
+			for(__weak MedusaTaskProxy *consumerTask in outputProducer->consumers)
 			{
+				if(consumerTask.executed) //if the task has already been executed by other path do not schedule it again
+					continue;
+
 				bool are_all_inputs_satisfied = true;
 				
-				NSUInteger inputCount = consumer_medusa.inputCount;
-				FileNode** inputs = consumer_medusa.inputs;
+				NSUInteger inputCount = consumerTask.inputCount;
+				FileNode** inputs = consumerTask.inputs;
 				for(NSUInteger i = 0; i < inputCount; i++)
 				{
 					FileNode *input_node = inputs[i];
-					size_t producerIndex = input_node->producerIndex;
-					bool is_input_satisfied = (producerIndex == 0); //index 0 is static
-					if(!is_input_satisfied)
+					OutputInfo * oneProducer = (OutputInfo *)input_node->producer;
+					bool is_input_satisfied = (oneProducer == NULL); //is static
+					if(oneProducer != NULL)
 					{
-						assert((producerIndex-1) < outputArrayCount);
-						OutputInfo* oneProducer = &(outputInfoArray[producerIndex-1]);
 						//check if the producer for this input has been executed already
-						is_input_satisfied = oneProducer->built;
+						MedusaTaskProxy *recursiveTask = (MedusaTaskProxy *)oneProducer->producer;
+						is_input_satisfied = recursiveTask.executed;
 					}
 					are_all_inputs_satisfied = (are_all_inputs_satisfied && is_input_satisfied);
 					if(!are_all_inputs_satisfied)
@@ -161,21 +225,55 @@ void ExecuteMedusaGraphRecursively(NSArray<MedusaTaskProxy *> *medusa_list, Outp
 
 				if(are_all_inputs_satisfied)
 				{
-					//consumer_medusa.is_processed = true;
-					[next_medusa_list addObject:consumer_medusa];
+					[nextTaskSet addObject:consumerTask];
 				}
 			}
         }
     }
 
-    if(next_medusa_list.count > 0)
+    if(nextTaskSet.count > 0)
     {
         //now recursively go over next medusas and follow the outputs to find the ones with all satisifed inputs
-        ExecuteMedusaGraphRecursively(next_medusa_list, outputInfoArray, outputArrayCount);
+        ExecuteMedusaGraphRecursively(nextTaskSet);
     }
     else
     {
         // std::cout << "No more medusas with all satsfied inputs found. Done\n";
     }
 }
+
+#if ENABLE_DEBUG_DUMP
+
+void DumpOneRecursiveTaskLevel(NSSet<MedusaTaskProxy*> *taskSet, int level)
+{
+    for(__weak MedusaTaskProxy *oneTask in taskSet)
+	{
+		for(int l=0; l<level; l++) printf("  ");
+		printf("MedusaTaskProxy=%p\n", (__bridge void *)oneTask);
+		NSUInteger outputCount = oneTask.outputCount;
+		FileNode** outputs = oneTask.outputs;
+        for(NSUInteger i = 0; i < outputCount; i++)
+        {
+        	FileNode *outputNode = outputs[i];
+			for(int l=0; l<(level+1); l++) printf("  ");
+			printf("consumers of output %d: ", (int)i);
+        	DumpBranchForNode(outputNode);
+			
+            OutputInfo *outputProducerInfo = (OutputInfo *)outputNode->producer;
+            NSSet< MedusaTaskProxy*> *consumerSet = (NSSet< MedusaTaskProxy*> *)outputProducerInfo->consumers;
+			DumpOneRecursiveTaskLevel(consumerSet, level+2);
+		}
+	}
+}
+
+
+void DumpRecursiveTaskTree(NSSet<MedusaTaskProxy*> *rootTaskSet)
+{
+	printf("---------------------------\n");
+	printf("Dumping recursive task tree:\n");
+	DumpOneRecursiveTaskLevel(rootTaskSet, 0);
+	printf("---------------------------\n");
+}
+
+#endif //ENABLE_DEBUG_DUMP
 

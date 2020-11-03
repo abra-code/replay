@@ -8,81 +8,103 @@
 #import "SchedulerMedusa.h"
 #import "MedusaTaskProxy.h"
 
-//first pass
-void IndexAllOutputsForScheduler(NSArray< id<MedusaTask> > *all_medusas,
-                       	__unsafe_unretained id<MedusaTask> *outputInfoArray, NSUInteger outputArrayCount)
+static void FileNodeCFSetConnector(const void *value, void *producerContext)
 {
-    printf("First pass to index all output files\n");
-    clock_t begin = clock();
-	NSUInteger outputIndex = 0;
-	for(__weak id<MedusaTask> one_medusa in all_medusas)
+	FileNode *node = (FileNode *)value;
+	if(producerContext != NULL)
 	{
-		NSUInteger outputCount = one_medusa.outputCount;
-		FileNode** outputs = one_medusa.outputs;
-        for(NSUInteger i = 0; i < outputCount; i++)
-        {
-        	FileNode *node = outputs[i];
-        	assert(outputIndex < outputArrayCount);
-			outputInfoArray[outputIndex] = one_medusa;
-			outputIndex++; //intentionally +1 so index 0 is not a built product path
-			
-			//no two producers can produce the same output - add runtime validation
-			assert(node->producerIndex == 0);
-			// in our in-memory file tree both inputs are outputs are the same nodes
-			// so setting it here for the output will allow it to be retrieved later if this node happens
-			// to be an input to some other medusa
-			node->producerIndex = outputIndex;
-        }
-    }
+		node->anyParentHasProducer = 1;
+		if(node->producer != NULL) //if parent has a producer and our node has one, we need to connect them
+		{
+			__unsafe_unretained id<MedusaTask> parentNodeTask = (__bridge __unsafe_unretained id<MedusaTask>)producerContext;
+			__unsafe_unretained id<MedusaTask> currNodeTask = (__bridge __unsafe_unretained id<MedusaTask>)node->producer;
+			[parentNodeTask linkNextTask:currNodeTask];
+		}
+	}
+	
+	if(node->children != NULL)
+	{
+		if(node->producer != NULL) //and we have a new context to pass to child nodes
+			producerContext = node->producer;
+
+		CFSetApplyFunction(node->children, FileNodeCFSetConnector, producerContext);
+	}
+}
+
+//after the producers are assigned to their nodes we need to walk the whole tree to find
+//if there are any implicit producer dependencies
+//for example a node creating a directory and a node creating a file in there
+
+void
+ConnectImplicitProducers(FileNode *treeRoot)
+{
+	printf("Connecting implicit producers\n");
+    clock_t begin = clock();
+
+	if(treeRoot->children != NULL)
+	{
+		void *producerContext = treeRoot->producer;
+		CFSetApplyFunction(treeRoot->children, FileNodeCFSetConnector, producerContext);
+	}
 
 	clock_t end = clock();
 	double seconds = (double)(end - begin) / CLOCKS_PER_SEC;
-
-    printf("Total number of outputs in all medusas %lu\n", outputIndex);
-    printf("Finished indexing all outputs in %f seconds\n", seconds);
+    printf("Finished connecting implicit producers in %f seconds\n", seconds);
 }
 
 void
-ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *all_medusas, //input list of all raw unconnected medusas
-						TaskProxy *rootTask,
-						__unsafe_unretained id<MedusaTask> *outputInfoArray, NSUInteger outputArrayCount) //the list of all output specs
+ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *allTasks, //input list of all raw unconnected medusas
+								TaskProxy *rootTask)
 {
     printf("Connecting all dynamic inputs\n");
-    
+
     clock_t begin = clock();
     size_t all_input_count = 0;
     size_t static_input_count = 0;
 
-	for(__weak TaskProxy *one_medusa in all_medusas)
-	{
-        bool are_all_inputs_satisfied = true;
 
-		NSUInteger inputCount = one_medusa.inputCount;
-		FileNode** inputs = one_medusa.inputs;
+	for(__weak TaskProxy *oneTask in allTasks)
+	{
+        bool taskHasStaticInputsOnly = true;
+
+		NSUInteger inputCount = oneTask.inputCount;
+		FileNode** inputs = oneTask.inputs;
         for(NSUInteger i = 0; i < inputCount; i++)
         {
         	FileNode *node = inputs[i];
          	all_input_count++;
-            
+                        
             //find if this medusa's input is known to be produced by another one
-			uint64_t producer_index = node->producerIndex;
-            if(producer_index != 0) //0 is a reserved index for static inputs
+			__unsafe_unretained id<MedusaTask> producerTask = (__bridge __unsafe_unretained id<MedusaTask>)node->producer;
+            if(producerTask != nil)
             {
-                assert((producer_index-1) < outputArrayCount);
-                id<MedusaTask> outputProducer = outputInfoArray[producer_index-1];
-                [outputProducer linkNextTask:one_medusa];
+                [producerTask linkNextTask:oneTask];
+            }
+            else if(node->anyParentHasProducer)
+            {//we know there is a producer up the tree in one of the parent nodes
+            	FileNode *parentNode = node->parent;
+            	while(parentNode != NULL)
+            	{
+            		if(parentNode->producer != NULL)
+            		{
+            			producerTask = (__bridge __unsafe_unretained id<MedusaTask>)parentNode->producer;
+						[producerTask linkNextTask:oneTask];
+						break;
+            		}
+            		parentNode = parentNode->parent;
+            	}
             }
             else
             {
             	static_input_count++;
             }
 
-            are_all_inputs_satisfied = (are_all_inputs_satisfied && (producer_index == 0));
+            taskHasStaticInputsOnly = (taskHasStaticInputsOnly && (producerTask == nil));
         }
         
-        if(are_all_inputs_satisfied)
-        {
-            [rootTask linkNextTask:one_medusa];
+        if(taskHasStaticInputsOnly)
+        {//when the task has only static inputs, it gets scheduled for execution first
+            [rootTask linkNextTask:oneTask];
         }
     }
     

@@ -14,7 +14,7 @@ SetProducerForFilePath(FileNode *parentNode, const char *filePath, uint64_t prod
 	FileNode *entryNode = FindOrInsertFileNodeForPath(parentNode, filePath);
 	if(entryNode != NULL)
 	{
-		entryNode->producerIndex = producerIndex;
+		entryNode->producer = (void *)producerIndex;
 	}
 }
 

@@ -12,13 +12,12 @@
 extern "C" {
 #endif
 
-void IndexAllOutputsForScheduler(NSArray< id<MedusaTask> > *all_medusas,
-                       	__unsafe_unretained id<MedusaTask> *outputInfoArray, NSUInteger outputArrayCount);
+void
+ConnectImplicitProducers(FileNode *treeRoot);
 
 void
 ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *all_medusas, //input list of all raw unconnected medusas
-						TaskProxy *rootTask,
-						__unsafe_unretained id<MedusaTask> *outputInfoArray, NSUInteger outputArrayCount); //the list of all output specs
+								TaskProxy *rootTask);
 
 #ifdef __cplusplus
 }

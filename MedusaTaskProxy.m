@@ -12,7 +12,6 @@
 
 @interface MedusaTaskProxy()
 	@property(nonatomic, strong) dispatch_block_t taskBlock;
-	@property(nonatomic) bool executed;
 @end
 
 @implementation MedusaTaskProxy
@@ -35,7 +34,7 @@
 #if TRACE_PROXY
 	printf("executing proxy = %p\n", (__bridge void *)self);
 #endif
-	
+
 	// there must be no mistake in algorithm
 	// no matter what, the task in graph can only be executed once
 	assert(!_executed);
@@ -59,6 +58,29 @@
 	 printf("dealloc proxy = %p\n", (__bridge void *)self);
 }
 #endif
+
+
+#if ENABLE_DEBUG_DUMP
+
+- (void)dumpDescription
+{
+	printf("MedusaTaskProxy self=%p\n", (__bridge void *)self);
+	
+	printf("  inputs:\n");
+	for(NSUInteger i = 0; i < _inputCount; i++)
+	{
+		printf("    ");
+		DumpBranchForNode(_inputs[i]);
+	}
+
+	printf("  outputs:\n");
+	for(NSUInteger i = 0; i < _outputCount; i++)
+	{
+		printf("    ");
+		DumpBranchForNode(_outputs[i]);
+	}
+}
+#endif //ENABLE_DEBUG_DUMP
 
 @end //@implementation MedusaTaskProxy
 

@@ -17,18 +17,27 @@
 #include <random>
 #include "hi_res_timer.h"
 
-static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path)
+static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path, id<MedusaTask> producer)
 {
 	NSString *lowercasePath = [path lowercaseString];
 	const char *posixPath = [lowercasePath fileSystemRepresentation];
-	return FindOrInsertFileNodeForPath(fileTreeRoot, posixPath);
+	FileNode *outNode = FindOrInsertFileNodeForPath(fileTreeRoot, posixPath);
+	//Input nodes don't have a producer.
+	//Recursive medusa does not set MedusaTask right there. Tney will be filled later in first pass with OutputInfo *
+	//important not to reset to NULL to not override what might have been set already
+	if(producer != nil)
+	{
+		assert(outNode->producer == NULL);
+		outNode->producer = (__bridge void *)producer;
+	}
+	return outNode;
 }
 
 //#define PRINT_TASK 1
 #define TEST_RECURSIVE 1
 
 static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
-									Class TaskClass,
+									bool forScheduler,
 									FileNode *fileTreeRoot,
 									NSUInteger medusa_count,
                                     size_t max_static_input_count, //>0
@@ -51,6 +60,29 @@ static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
     assert(max_output_count > 0);
     std::uniform_int_distribution<size_t> output_distibution(1, max_output_count-1);
 
+	Class TaskClass = nil;
+	if(forScheduler)
+		TaskClass = [TaskProxy class];
+	else
+		TaskClass = [MedusaTaskProxy class];
+
+	id<MedusaTask> dir_medusa = [[TaskClass alloc] initWithTask:^{
+#if PRINT_TASK
+				printf("executing directory creating medusa\n");
+#endif
+		}];
+
+	
+	[test_medusas addObject:dir_medusa];
+	
+	dir_medusa.outputCount = 2;
+	dir_medusa.outputs = (FileNode**)malloc(sizeof(FileNode*) * 2);
+	//scheduler medusa needs producer's reference right in the output node
+	dir_medusa.outputs[0] = FileNodeFromPath(fileTreeRoot, @"/Static", forScheduler ? dir_medusa : nil);
+	outputCount++;
+	dir_medusa.outputs[1] = FileNodeFromPath(fileTreeRoot, @"/Dynamic", forScheduler ? dir_medusa : nil);
+	outputCount++;
+
     for(size_t i = 0; i < medusa_count; i++)
     {
         size_t static_input_count = static_input_distibution(randomizer);
@@ -58,7 +90,7 @@ static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
         size_t dynamic_input_count = (i < max_dynamic_input_count) ? 0 : dynamic_input_distibution(randomizer);
         size_t output_count = output_distibution(randomizer);
         
-        MedusaTaskProxy *one_medusa = [[TaskClass alloc] initWithTask:^{
+        id<MedusaTask> one_medusa = [[TaskClass alloc] initWithTask:^{
 #if PRINT_TASK
         	printf("executing medusa %lu\n", i);
 #endif
@@ -71,7 +103,7 @@ static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
         for(size_t j = 0; j < static_input_count; j++)
         {
             NSString *path = [[NSString alloc] initWithFormat:@"/Static/Dir-%lu/File-%lu", i, (i*1000 + j)];
-			FileNode *node = FileNodeFromPath(fileTreeRoot, path);
+			FileNode *node = FileNodeFromPath(fileTreeRoot, path, nil);
 			input_array[j] = node;
             inputCount++;
         }
@@ -98,7 +130,7 @@ static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
             std::uniform_int_distribution<size_t> lower_medusa_output_distribution(0, lower_medusa_output_count-1);
             size_t lower_medusa_output_index = lower_medusa_output_distribution(randomizer);
             NSString *path = [[NSString alloc] initWithFormat:@"/Dynamic/Dir-%lu/Out-%lu", lower_medusa_index, (lower_medusa_index*1000 + lower_medusa_output_index)];
-			FileNode *node = FileNodeFromPath(fileTreeRoot, path);
+			FileNode *node = FileNodeFromPath(fileTreeRoot, path, nil);
 			input_array[static_input_count+j] = node;
             inputCount++;
         }
@@ -108,7 +140,8 @@ static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
         for(size_t j = 0; j < output_count; j++)
         {
             NSString *path = [[NSString alloc] initWithFormat:@"/Dynamic/Dir-%lu/Out-%lu", i, (i*1000 + j)];
-			FileNode *node = FileNodeFromPath(fileTreeRoot, path);
+            //scheduler medusa needs producer's reference right in the output node
+			FileNode *node = FileNodeFromPath(fileTreeRoot, path, forScheduler ? one_medusa : nil);
 			output_array[j] = node;
             outputCount++;
         }
@@ -140,41 +173,39 @@ static NSArray< id<MedusaTask> > * GenerateTestMedusaTasks(
     return test_medusas;
 }
 
-static void ExecuteMedusasRecursively(NSArray<MedusaTaskProxy *> *all_medusas, NSUInteger inputCount, NSUInteger outputCount)
+static void ExecuteMedusasRecursively(NSArray<MedusaTaskProxy *> *all_medusas, FileNode *fileTreeRoot, NSUInteger inputCount, NSUInteger outputCount)
 {
 	OutputInfo *outputInfoArray = (OutputInfo *)calloc(outputCount, sizeof(OutputInfo));
 	
 	IndexAllOutputsForRecursiveExecution(all_medusas, outputInfoArray, outputCount);
 
+	ConnectImplicitProducersForRecursiveExecution(fileTreeRoot);
+
 	//medusas without dynamic dependencies to be executed first - produced by this call
-	NSArray<MedusaTaskProxy *> *static_inputs_medusas = ConnectDynamicInputsForRecursiveExecution(
-										all_medusas, //input list of all raw unconnected medusas
-										outputInfoArray, outputCount);  //the list of all output specs
+	NSSet<MedusaTaskProxy *> *staticInputTaskSet = ConnectDynamicInputsForRecursiveExecution(all_medusas); //input list of all raw unconnected medusas
+
+#if ENABLE_DEBUG_DUMP
+	DumpRecursiveTaskTree(staticInputTaskSet);
+#endif
 
 	std::cout << "Following medusa chain recursively\n";
 	hi_res_timer timer;
-	ExecuteMedusaGraphRecursively(static_inputs_medusas, outputInfoArray, outputCount);
+	ExecuteMedusaGraphRecursively(staticInputTaskSet);
 	double seconds = timer.elapsed();
 	std::cout << "Finished medusa execution in " << seconds << " seconds\n";
 }
 
-static void ExecuteMedusasWithScheduler(NSArray<TaskProxy*> *allTasks, NSUInteger inputCount, NSUInteger outputCount)
+static void ExecuteMedusasWithScheduler(NSArray<TaskProxy*> *allTasks, FileNode *fileTreeRoot, NSUInteger inputCount, NSUInteger outputCount)
 {
-	__unsafe_unretained TaskProxy* *outputInfoArray = (__unsafe_unretained TaskProxy* *)calloc(outputCount, sizeof(TaskProxy*));
-	
-	IndexAllOutputsForScheduler(allTasks, outputInfoArray, outputCount);
+	ConnectImplicitProducers(fileTreeRoot);
 
 	TaskScheduler *scheduler = [TaskScheduler sharedScheduler];
 
 	//graph root task is created by the scheduler
 	//we build the graph by adding children tasks to the root
 
-	ConnectDynamicInputsForScheduler(
-								allTasks, //input list of all raw unconnected medusas
-								scheduler.rootTask,
-								outputInfoArray, outputCount);  //the list of all output specs
-
-	free(outputInfoArray);
+	ConnectDynamicInputsForScheduler( allTasks, //input list of all raw unconnected medusas
+									scheduler.rootTask);
 
 	std::cout << "Executing medusa chain with TaskScheduler\n";
 	hi_res_timer timer;
@@ -200,9 +231,9 @@ int main(int argc, const char * argv[])
 
 		FileNode *fileTreeRoot = CreateFileTreeRoot();
    		NSArray< id<MedusaTask> > *testMedusas = GenerateTestMedusaTasks(
-   															[MedusaTaskProxy class],
+   															false, //forScheduler
    															fileTreeRoot,
-															500000, // medusa_count,
+															100000, // medusa_count,
                                                             20, // max_static_input_count > 0
                                                             20, // max_dynamic_input_count, //>=0
                                                             20,  // max_output_count > 0
@@ -212,7 +243,7 @@ int main(int argc, const char * argv[])
 
 		// it is a reasonable requirement for the medusa generator to give us the total input/output count upfront
 		// it must have been processed already so we don't have to count again or adjust storage for items on the fly
-		ExecuteMedusasRecursively((NSArray<MedusaTaskProxy *> *)testMedusas, totalInputCount, totalOutputCount);
+		ExecuteMedusasRecursively((NSArray<MedusaTaskProxy *> *)testMedusas, fileTreeRoot, totalInputCount, totalOutputCount);
 
 		{
 			hi_res_timer timer;
@@ -229,17 +260,17 @@ int main(int argc, const char * argv[])
 		printf("Concurrent medusa algorithm with TaskScheduler\n\n");
 
   		NSArray< id<MedusaTask> > *scheduleMedusas = GenerateTestMedusaTasks(
-   															[TaskProxy class],
+   															true, //forScheduler
    															fileTreeRoot,
-															500000, // medusa_count,
+															100000, // medusa_count,
                                                             20, // max_static_input_count > 0
                                                             20, // max_dynamic_input_count, //>=0
                                                             20,  // max_output_count > 0
                                                             &totalInputCount,
                                                             &totalOutputCount
                                                             );
-
-		ExecuteMedusasWithScheduler((NSArray<TaskProxy*> *)scheduleMedusas, totalInputCount, totalOutputCount);
+		
+		ExecuteMedusasWithScheduler((NSArray<TaskProxy*> *)scheduleMedusas, fileTreeRoot, totalInputCount, totalOutputCount);
 		
 		{
 			hi_res_timer timer;

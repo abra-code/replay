@@ -11,6 +11,7 @@
 //MedusaTask for recursive single-threaded execution
 @interface MedusaTaskProxy : NSObject<MedusaTask>
 
+@property(nonatomic) bool executed;
 
 @property(nonatomic) NSUInteger inputCount;
 @property(nonatomic, unsafe_unretained) FileNode** inputs;

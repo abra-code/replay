@@ -24,7 +24,7 @@ typedef struct FileNode
 {
 	struct FileNode *parent;
 	CFMutableSetRef children;
-	uint64_t producerIndex;
+	void *producer; //different producer object depending on implementation
 	
 	uint8_t anyParentHasProducer;
 	uint8_t padding[3];
@@ -46,6 +46,11 @@ FileNode * CreateFileTreeRoot(void);
 
 //call FindOrInsertFileNodeForPath() repeatedly with paths to construct in-memory tree
 FileNode * FindOrInsertFileNodeForPath(FileNode *treeRoot, const char *filePath);
+
+#if ENABLE_DEBUG_DUMP
+//debug to see the node branch (a reversed path)
+void DumpBranchForNode(FileNode *fileNode);
+#endif
 
 #ifdef __cplusplus
 }

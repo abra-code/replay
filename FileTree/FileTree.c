@@ -1,4 +1,5 @@
 #include "FileTree.h"
+//#define ENABLE_DEBUG_DUMP 1
 
 Boolean FileNodeEqualCallBack(const void *value1, const void *value2)
 {
@@ -153,3 +154,21 @@ FindOrInsertFileNodeForPath(FileNode *treeRoot, const char *filePath)
 
 	return entryNode; //this is the deepest child found
 }
+
+#if ENABLE_DEBUG_DUMP
+
+void
+DumpBranchForNode(FileNode *fileNode)
+{
+	FileNode *node = fileNode;
+
+	do
+	{
+		printf("%.*s/", node->nameLength, node->name);
+		node = node->parent;
+	} while(node->parent != NULL);
+
+	printf("\n");
+}
+
+#endif //ENABLE_DEBUG_DUMP
