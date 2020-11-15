@@ -2,12 +2,12 @@
 A macOS tool to execute a list of declared actions, primarily file operations like clone, move, create, delete
 
 Key features:
-- tiny binary
-- concurrent file operations for fastest execution
+- concurrent file operations for fastest execution with automatic dependency resolution
 - serial file operations supported if a sequence is required
 - designed to replace custom shell scripts serially moving/copying files around
 - self contained code - not calling external binaries to perform file operations
 - supports cloning on APFS so duplicates don't take unnecessary space on disk
+- small binary
 
 
 Type `replay --help` in Terminal to read the following:
