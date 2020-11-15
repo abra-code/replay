@@ -1,5 +1,6 @@
-#include "FileTree.h"
 //#define ENABLE_DEBUG_DUMP 1
+
+#include "FileTree.h"
 
 Boolean FileNodeEqualCallBack(const void *value1, const void *value2)
 {
@@ -11,7 +12,7 @@ Boolean FileNodeEqualCallBack(const void *value1, const void *value2)
 	{
 		//the same name length and first chunks equal. check the remaining chunks, if any
 		uint64_t equalCount = 1;
-		uint64_t chunkCount = ((uint64_t)node1->nameLength + sizeof(uint64_t)-1) / sizeof(uint64_t);
+		const uint64_t chunkCount = ((uint64_t)node1->nameLength + sizeof(uint64_t)-1) / sizeof(uint64_t);
 		while((equalCount < chunkCount) && (node1->nameChunks[equalCount] == node2->nameChunks[equalCount]))
 		{
 			equalCount++;
@@ -25,7 +26,7 @@ CFHashCode FileNodeHashCallBack(const void *value)
 {
 	CFHashCode outHash = 0; //CFHashCode is unsigned long so the same as uint64_t nameChunks
 	const FileNode *node = (const FileNode *)value;
-	uint64_t chunkCount = ((uint64_t)node->nameLength + sizeof(uint64_t)-1) / sizeof(uint64_t);
+	const uint64_t chunkCount = ((uint64_t)node->nameLength + sizeof(uint64_t)-1) / sizeof(uint64_t);
 	for(uint64_t i = 0; i < chunkCount; i++)
 	{
 		outHash += node->nameChunks[i];
@@ -48,12 +49,12 @@ CFSetCallBacks kFileNodeCFSetCallbacks =
 static inline FileNode*
 CreateNodeForDirEntry(const char* dirEntryName, size_t nameLength)
 {
-	uint64_t chunkCount = ((uint64_t)nameLength + sizeof(uint64_t)-1) / sizeof(uint64_t);
+	const uint64_t chunkCount = ((uint64_t)nameLength + sizeof(uint64_t)-1) / sizeof(uint64_t);
 	//One mandatory 8-char name chunk is already in the structure. Extend by as many chunks as needed
 	size_t nodeSize = sizeof(FileNode) + (chunkCount - 1)*sizeof(uint64_t);
 	
-	// calloc() only takes 1.1% of the whole algorithom time
-	// optimizing with custom memory manager would not help
+	// calloc() takes insignificant fraction of the whole algorithm time
+	// optimizing with custom memory manager here would not help
 	FileNode *outNode = (FileNode *)calloc(1, nodeSize);
 	if(outNode == NULL)
 		return NULL;
@@ -64,7 +65,7 @@ CreateNodeForDirEntry(const char* dirEntryName, size_t nameLength)
 
 //on-stack version of the above CreateNodeForDirEntry
 #define AllocaFileNode(_stackNode, _dirEntryName, _nameLength) \
-uint64_t _chunkCount = ((uint64_t)_nameLength + sizeof(uint64_t)-1) / sizeof(uint64_t); \
+const uint64_t _chunkCount = ((uint64_t)_nameLength + sizeof(uint64_t)-1) / sizeof(uint64_t); \
 size_t _nodeSize = sizeof(FileNode) + (_chunkCount - 1)*sizeof(uint64_t); \
 _stackNode = (FileNode *)alloca(_nodeSize); \
 _stackNode->nameLength = (uint32_t)_nameLength; \
@@ -79,7 +80,6 @@ static inline FileNode *
 FindOrCreateChildNode(FileNode *parentNode, const uint64_t *nameChunks, size_t nameLength)
 {
 	FileNode *foundNode = NULL;
-	//FileNode *tempNode = NULL;
 	if(parentNode->children == NULL)
 	{
 		parentNode->children = CFSetCreateMutable(kCFAllocatorDefault, 0, &kFileNodeCFSetCallbacks);
@@ -106,6 +106,26 @@ FindOrCreateChildNode(FileNode *parentNode, const uint64_t *nameChunks, size_t n
 FileNode * CreateFileTreeRoot(void)
 {
 	return CreateNodeForDirEntry("/", 1);
+}
+
+static void FileNodeCFSetDeleter(const void *value, void *context)
+{
+	FileNode *node = (FileNode *)value;
+	if(node->children != NULL)
+	{
+		CFSetApplyFunction(node->children, FileNodeCFSetDeleter, NULL);
+		CFRelease(node->children);
+	}
+	free(node);
+}
+
+//Public API
+void DeleteFileTree(FileNode *treeRoot)
+{
+	if(treeRoot != NULL)
+	{
+		FileNodeCFSetDeleter(treeRoot, NULL);
+	}
 }
 
 //Public API
@@ -155,20 +175,66 @@ FindOrInsertFileNodeForPath(FileNode *treeRoot, const char *filePath)
 	return entryNode; //this is the deepest child found
 }
 
+void GetPathForNode(FileNode *fileNode, char *outBuff, size_t outBuffSize)
+{
+	// non-recursive inversion of singly-linked list
+	// does not have to be optimized or return errors when truncating
+	// because it is used for debugging or in error condition
+	
+	typedef struct InvertedNode
+	{
+		FileNode *node;
+		struct InvertedNode *child;
+	} InvertedNode;
+
+	FileNode *node = fileNode;
+	InvertedNode *head = NULL;
+
+	while(node != NULL)
+	{
+		InvertedNode *newHead = malloc(sizeof(InvertedNode));
+		newHead->child = head;
+		newHead->node = node;
+		head = newHead;
+		node = node->parent;
+	};
+
+	InvertedNode *iter = head;
+	char *buffPtr = outBuff;
+	ssize_t remainingSize = (ssize_t)outBuffSize; //do not risk integer underflow when subtracting from unsigned int
+	while((iter != NULL) && (remainingSize > (ssize_t)iter->node->nameLength))
+	{
+		if(iter->node->parent != NULL) //root node is "/". Skip printing it
+		{
+			// snprintf man page says: "The output is always null-terminated"
+			snprintf(buffPtr, remainingSize, "%.*s", iter->node->nameLength, iter->node->name);
+			buffPtr += iter->node->nameLength;
+			remainingSize -= (ssize_t)iter->node->nameLength;
+		}
+
+		if((remainingSize > 0) &&
+		   ((iter->child != NULL) || //if we have a child node, put separator
+		   ((iter->node->parent == NULL) && (iter->child == NULL)))) //or it's a root dir without a child
+		{
+			snprintf(buffPtr, remainingSize, "/");
+			buffPtr++;
+			remainingSize--;
+		}
+		
+		InvertedNode *prevIter = iter;
+		iter = iter->child;
+		free(prevIter);
+	};
+}
+
 #if ENABLE_DEBUG_DUMP
 
 void
 DumpBranchForNode(FileNode *fileNode)
 {
-	FileNode *node = fileNode;
-
-	do
-	{
-		printf("%.*s/", node->nameLength, node->name);
-		node = node->parent;
-	} while(node->parent != NULL);
-
-	printf("\n");
+	char path[2048];
+	GetPathForNode(fileNode, path, sizeof(path));
+	printf("%s\n", path);
 }
 
 #endif //ENABLE_DEBUG_DUMP

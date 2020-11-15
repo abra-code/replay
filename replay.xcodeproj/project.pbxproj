@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1D1212EA25576DA800E46A72 /* SchedulerMedusa.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D1212E925576DA800E46A72 /* SchedulerMedusa.m */; };
+		1D1212F325576E0400E46A72 /* FileTree.c in Sources */ = {isa = PBXBuildFile; fileRef = 1D1212F125576E0400E46A72 /* FileTree.c */; };
+		1D1212F82557725B00E46A72 /* TaskScheduler.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D1212F72557725B00E46A72 /* TaskScheduler.m */; };
+		1D1212FC2557726900E46A72 /* TaskProxy.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D1212FA2557726900E46A72 /* TaskProxy.m */; };
+		1D1213012557B5BA00E46A72 /* ReplayAction.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D1213002557B5BA00E46A72 /* ReplayAction.m */; };
+		1D1213072557C08000E46A72 /* ReplayTask.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D1213062557C08000E46A72 /* ReplayTask.m */; };
+		1D12130C2557C54B00E46A72 /* SerialDispatch.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D12130B2557C54B00E46A72 /* SerialDispatch.m */; };
+		1D1213102557CC7300E46A72 /* StringAndPath.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D12130F2557CC7300E46A72 /* StringAndPath.m */; };
 		1D19043824DE9EE900276D83 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D19043724DE9EE900276D83 /* main.m */; };
 /* End PBXBuildFile section */
 
@@ -23,8 +31,25 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		1D1212E925576DA800E46A72 /* SchedulerMedusa.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SchedulerMedusa.m; sourceTree = "<group>"; };
+		1D1212EC25576DB000E46A72 /* SchedulerMedusa.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SchedulerMedusa.h; sourceTree = "<group>"; };
+		1D1212F125576E0400E46A72 /* FileTree.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = FileTree.c; path = FileTree/FileTree.c; sourceTree = "<group>"; };
+		1D1212F225576E0400E46A72 /* FileTree.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = FileTree.h; path = FileTree/FileTree.h; sourceTree = "<group>"; };
+		1D1212F62557725B00E46A72 /* TaskScheduler.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskScheduler.h; sourceTree = "<group>"; };
+		1D1212F72557725B00E46A72 /* TaskScheduler.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskScheduler.m; sourceTree = "<group>"; };
+		1D1212FA2557726900E46A72 /* TaskProxy.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskProxy.m; sourceTree = "<group>"; };
+		1D1212FB2557726900E46A72 /* TaskProxy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskProxy.h; sourceTree = "<group>"; };
+		1D1213002557B5BA00E46A72 /* ReplayAction.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ReplayAction.m; sourceTree = "<group>"; };
+		1D1213032557B5F200E46A72 /* ReplayAction.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ReplayAction.h; sourceTree = "<group>"; };
+		1D1213052557C08000E46A72 /* ReplayTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ReplayTask.h; sourceTree = "<group>"; };
+		1D1213062557C08000E46A72 /* ReplayTask.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ReplayTask.m; sourceTree = "<group>"; };
+		1D12130A2557C54B00E46A72 /* SerialDispatch.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SerialDispatch.h; sourceTree = "<group>"; };
+		1D12130B2557C54B00E46A72 /* SerialDispatch.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SerialDispatch.m; sourceTree = "<group>"; };
+		1D12130E2557CC7300E46A72 /* StringAndPath.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = StringAndPath.h; sourceTree = "<group>"; };
+		1D12130F2557CC7300E46A72 /* StringAndPath.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = StringAndPath.m; sourceTree = "<group>"; };
 		1D19043424DE9EE900276D83 /* replay */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = replay; sourceTree = BUILT_PRODUCTS_DIR; };
 		1D19043724DE9EE900276D83 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		1DCA6EB4255BFCC60063BBBD /* MedusaTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MedusaTask.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -42,6 +67,23 @@
 			isa = PBXGroup;
 			children = (
 				1D19043724DE9EE900276D83 /* main.m */,
+				1D12130E2557CC7300E46A72 /* StringAndPath.h */,
+				1D12130F2557CC7300E46A72 /* StringAndPath.m */,
+				1D12130A2557C54B00E46A72 /* SerialDispatch.h */,
+				1D12130B2557C54B00E46A72 /* SerialDispatch.m */,
+				1D1213002557B5BA00E46A72 /* ReplayAction.m */,
+				1D1213032557B5F200E46A72 /* ReplayAction.h */,
+				1D1213052557C08000E46A72 /* ReplayTask.h */,
+				1D1213062557C08000E46A72 /* ReplayTask.m */,
+				1D1212EC25576DB000E46A72 /* SchedulerMedusa.h */,
+				1D1212E925576DA800E46A72 /* SchedulerMedusa.m */,
+				1D1212F62557725B00E46A72 /* TaskScheduler.h */,
+				1D1212F72557725B00E46A72 /* TaskScheduler.m */,
+				1DCA6EB4255BFCC60063BBBD /* MedusaTask.h */,
+				1D1212FB2557726900E46A72 /* TaskProxy.h */,
+				1D1212FA2557726900E46A72 /* TaskProxy.m */,
+				1D1212F225576E0400E46A72 /* FileTree.h */,
+				1D1212F125576E0400E46A72 /* FileTree.c */,
 				1D19043524DE9EE900276D83 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -111,7 +153,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1D1212EA25576DA800E46A72 /* SchedulerMedusa.m in Sources */,
+				1D1213102557CC7300E46A72 /* StringAndPath.m in Sources */,
+				1D1212F82557725B00E46A72 /* TaskScheduler.m in Sources */,
+				1D1213012557B5BA00E46A72 /* ReplayAction.m in Sources */,
 				1D19043824DE9EE900276D83 /* main.m in Sources */,
+				1D1212F325576E0400E46A72 /* FileTree.c in Sources */,
+				1D12130C2557C54B00E46A72 /* SerialDispatch.m in Sources */,
+				1D1212FC2557726900E46A72 /* TaskProxy.m in Sources */,
+				1D1213072557C08000E46A72 /* ReplayTask.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -230,8 +280,8 @@
 		1D19043C24DE9EE900276D83 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = T9NM2ZLDTY;
 				ENABLE_HARDENED_RUNTIME = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
@@ -240,8 +290,8 @@
 		1D19043D24DE9EE900276D83 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = T9NM2ZLDTY;
 				ENABLE_HARDENED_RUNTIME = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};

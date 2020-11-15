@@ -9,6 +9,10 @@
 #import <Foundation/Foundation.h>
 #include <pthread.h>
 #include <getopt.h>
+#import "ReplayAction.h"
+#import "TaskProxy.h"
+#import "ReplayTask.h"
+#import "SerialDispatch.h"
 
 #if DEBUG
 	#define TRACE 0
@@ -21,148 +25,13 @@ typedef enum
 	kPlaylistFormatCount
 } PlaylistFormat;
 
-//a helper class to ensure atomic access to shared NSError from multiple threads
-
-@interface AtomicError : NSObject
-	@property(atomic, strong) NSError *error;
-@end
-
-@implementation AtomicError
-
-@end
-
-typedef struct
-{
-	NSDictionary<NSString *,NSString *> *environment;
-	AtomicError *lastError;
-	bool concurrent;
-	bool verbose;
-	bool dryRun;
-	bool stopOnError;
-	bool force;
-} ReplayContext;
-
-
-// this function returns nil if the string is malformed or environment variable is not found
-// in both cases we treat this as a hard error and not allow executing an action with such string
-// becuase it may lead to file operations in unexpected locations
-
-static NSString *
-StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSString *,NSString *> *environment)
-{
-	unichar stackBuffer[PATH_MAX];
-	unichar *uniChars = NULL;
-	NSUInteger length = [origString length];
-	if(length < PATH_MAX)
-	{//in most common case we will fit in on-stack buffer and save
-		uniChars = stackBuffer;
-	}
-	else
-	{
-		uniChars = (unichar*)malloc((length+1)*sizeof(unichar));
-		if(uniChars == NULL)
-			return nil;
-	}
-
-	NSRange wholeRange = NSMakeRange(0, length);
-	[origString getCharacters:uniChars range:wholeRange];
-	
-	//null-terminate just for sanity
-	uniChars[length] = (unichar)0;
-
-	NSMutableArray *stringChunks = [NSMutableArray array];
-	
-	bool isMalformedOrInvalid = false;
-	NSUInteger chunkStart = 0;
-	for(NSUInteger i = 0; i < length; i++)
-	{
-		//minimal env var sequence is 4 chars: ${A}
-		if((uniChars[i] == (unichar)'$') && ((i+3) < length) && (uniChars[i+1] == (unichar)'{'))
-		{
-			//flush previous chunk if any
-			if(i > chunkStart)
-			{
-				NSString *chunk = [NSString stringWithCharacters:&uniChars[chunkStart] length:(i-chunkStart)];
-				[stringChunks addObject:chunk];
-			}
-
-			i += 2;// skip ${
-			chunkStart = i; //chunkStart point to the first char in env name
-			
-			//forward to the end of the ${FOO} block
-			
-			while((i < length) && (uniChars[i] != (unichar)'}'))
-			{
-				++i;
-			}
-			
-			//if '}' found before the end of string, i points to '}' char
-			if(i < length)
-			{
-				NSString *envVarName = [NSString stringWithCharacters:&uniChars[chunkStart] length:(i-chunkStart)];
-				NSString *envValue = environment[envVarName];
-				if(envValue == nil)
-				{
-					fprintf(stderr, "Referenced environment variable \"%s\" not found\n", [envVarName UTF8String]);
-					isMalformedOrInvalid = true;
-					break;
-				}
-				else
-				{//add only found env variable values
-					[stringChunks addObject:envValue];
-				}
-				chunkStart = i+1; //do not increment "i" here. for loop will do it in the next iteration
-			}
-			else //unterminated ${} sequence - return nil
-			{
-				// translate the error to 1-based index
-				fprintf(stderr, "Unterminated environment variable sequence at character %lu in string \"%s\"\n", chunkStart-1, [origString UTF8String]);
-				isMalformedOrInvalid = true;
-				break;
-			}
-		}
-	}
-
-	//finished scanning the string. Check if any tail chunk left not flushed
-	if(chunkStart < length) // example test: ${A}B - len=5, chunkStart=4
-	{
-		NSString *chunk = [NSString stringWithCharacters:&uniChars[chunkStart] length:(length-chunkStart)];
-		[stringChunks addObject:chunk];
-	}
-
-	if(uniChars != stackBuffer)
-	{
-		free(uniChars);
-	}
-
-	NSString *expandedString = nil;
-	if(!isMalformedOrInvalid)
-		expandedString = [stringChunks componentsJoinedByString:@""];
-
-	return expandedString;
-}
-
-static NSString *
-StringByExpandingEnvironmentVariablesWithErrorCheck(NSString *origString, ReplayContext *context)
-{
-	NSString *outStr = StringByExpandingEnvironmentVariables(origString, context->environment);
-	if(outStr == nil)
-	{
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Malformed string or missing evnironment variable" };
-		NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-		context->lastError.error = operationError;
-	}
-	return outStr;
-}
-
-
 //this function is used when the playlist key is non-null so the root container must be a dictionary
 static inline NSDictionary*
 LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 {
 	if(playlistPath == NULL)
 	{
-		fprintf(stderr, "Playlist file path not provided\n");
+		fprintf(stderr, "error: playlist file path not provided\n");
 		return nil;
 	}
 
@@ -224,13 +93,13 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 
-			fprintf(stderr, "Playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
+			fprintf(stderr, "error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
 		}
 		else
 		{
 			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unkown or invalid playlist type" };
 			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-			fprintf(stderr, "Unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key specified, the root container is expected to be a dictionary\n");
+			fprintf(stderr, "error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key specified, the root container is expected to be a dictionary\n");
 		}
 	}
 
@@ -245,7 +114,7 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 {
 	if(playlistPath == NULL)
 	{
-		fprintf(stderr, "Playlist file path not provided\n");
+		fprintf(stderr, "error: playlist file path not provided\n");
 		return nil;
 	}
 
@@ -307,849 +176,17 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 
-			fprintf(stderr, "Playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
+			fprintf(stderr, "error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
 		}
 		else
 		{
 			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unkown or invalid playlist type" };
 			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-			fprintf(stderr, "Unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key not specified, the root container is expected to be an array.\n");
+			fprintf(stderr, "error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key not specified, the root container is expected to be an array.\n");
 		}
 	}
 
 	return playlistArray;
-}
-
-static bool
-CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		fprintf(stdout, "[clone]	%s	%s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String]);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL toURL:(NSURL *)toURL error:&operationError];
-
-		if(!isSuccessful && context->force)
-		{
-			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
-			// we could test first if any of these are true or we can just blindly try brute-force both
-			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
-			if(!removalOK)
-			{//could not remove the destination item - maybe the parent dir does not exist?
-				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
-			}
-
-			isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL toURL:(NSURL *)toURL error:&operationError];
-		}
-
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			fprintf(stderr, "Failed to clone from \"%s\" to \"%s\". Error: %s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String], [errorDesc UTF8String] );
-		}
-	}
-	return isSuccessful;
-}
-
-static bool
-MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		fprintf(stdout, "[move]	%s	%s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String]);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager moveItemAtURL:fromURL toURL:toURL error:&operationError];
-
-		if(!isSuccessful && context->force)
-		{
-			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
-			// we could test first if any of these are true or we can just blindly try brute-force both
-			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
-			if(!removalOK)
-			{//could not remove the destination item - maybe the parent dir does not exist?
-				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
-			}
-
-			isSuccessful = (bool)[fileManager moveItemAtURL:fromURL toURL:toURL error:&operationError];
-		}
-
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			fprintf(stderr, "Failed to move from \"%s\" to \"%s\". Error: %s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String], [errorDesc UTF8String] );
-		}
-	}
-	return isSuccessful;
-}
-
-static bool
-HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		fprintf(stdout, "[hardlink]	%s	%s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String]);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager linkItemAtURL:fromURL toURL:toURL error:&operationError];
-
-		if(!isSuccessful && context->force)
-		{
-			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
-			// we could test first if any of these are true or we can just blindly try brute-force both
-			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
-			if(!removalOK)
-			{//could not remove the destination item - maybe the parent dir does not exist?
-				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
-			}
-
-			isSuccessful = (bool)[fileManager linkItemAtURL:fromURL toURL:toURL error:&operationError];
-		}
-
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			fprintf(stderr, "Failed to create a hardlink from \"%s\" to \"%s\". Error: %s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String], [errorDesc UTF8String] );
-		}
-	}
-	return isSuccessful;
-}
-
-static bool
-SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, NSDictionary *actionSettings)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		fprintf(stdout, "[symlink]	%s	%s\n", [[fromURL path] UTF8String], [[linkURL path] UTF8String]);
-	}
-	
-	bool force = context->force;
-	bool isSuccessful = context->dryRun;
-
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-
-		NSNumber *validateSource = actionSettings[@"validate"];
-		bool validateSymlinkSource = true;
-		if([validateSource isKindOfClass:[NSNumber class]])
-		{
-			validateSymlinkSource = [validateSource boolValue];
-		}
-
-		if(validateSymlinkSource && ![fileManager fileExistsAtPath:[fromURL path]])
-		{
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Strict validation: attempt to create a symlink to nonexistent item" };
-			operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-			isSuccessful = false;
-			force = false;
-		}
-		else
-		{
-			isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
-		}
-
-		if(!isSuccessful && force)
-		{
-			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
-			// we could test first if any of these are true or we can just blindly try brute-force both
-			bool removalOK = [fileManager removeItemAtURL:linkURL error:nil];
-			if(!removalOK)
-			{//could not remove the destination item - maybe the parent dir does not exist?
-				NSURL *parentDirURL = [linkURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
-			}
-			isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
-		}
-
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			fprintf(stderr, "Failed to create a symlink at \"%s\" referring to \"%s\". Error: %s\n", [[linkURL path] UTF8String], [[fromURL path] UTF8String], [errorDesc UTF8String] );
-		}
-	}
-	return isSuccessful;
-}
-
-static bool
-CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, NSDictionary *actionSettings)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		//TODO: escape newlines for multiline text so it will be displayed in one line
-		fprintf(stdout, "[create]	%s	%s\n", [[itemURL path] UTF8String], [content UTF8String]);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSError *operationError = nil;
-		isSuccessful = [content writeToURL:itemURL atomically:NO encoding:NSUTF8StringEncoding error:&operationError];
-		
-		if(!isSuccessful && context->force)
-		{
-			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
-			// we could test first if any of these are true or we can just blindly try brute-force both
-			NSFileManager *fileManager = [NSFileManager defaultManager];
-			bool removalOK = [fileManager removeItemAtURL:itemURL error:nil];
-			if(!removalOK)
-			{//could not remove the destination item - maybe the parent dir does not exist?
-				NSURL *parentDirURL = [itemURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
-			}
-
-			isSuccessful = [content writeToURL:itemURL atomically:NO encoding:NSUTF8StringEncoding error:&operationError];
-		}
-
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			fprintf(stderr, "Failed to create file \"%s\". Error: %s\n", [[itemURL path] UTF8String], [errorDesc UTF8String] );
-		}
-	}
-	return isSuccessful;
-}
-
-static bool
-CreateDirectory(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSettings)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		fprintf(stdout, "[create]	%s\n", [[itemURL path] UTF8String]);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = [fileManager createDirectoryAtURL:itemURL withIntermediateDirectories:YES attributes:nil error:&operationError];
-
-		// this call is not supposed to fail for existing directories if you use withIntermediateDirectories:YES
-		// so the behavior should be the same as mkdir -p
-		
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			fprintf(stderr, "Failed to create directory \"%s\". Error: %s\n", [[itemURL path] UTF8String], [errorDesc UTF8String] );
-		}
-	}
-	return isSuccessful;
-}
-
-static bool
-DeleteItem(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSettings)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		fprintf(stdout, "[delete]	%s\n", [[itemURL path] UTF8String]);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager removeItemAtURL:itemURL error:&operationError];
-		if(!isSuccessful)
-		{
-			if(![fileManager fileExistsAtPath:[itemURL path]])
-				return true; //do not treat it as an error if the object we tried to delete does not exist
-		
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			fprintf(stderr, "Failed to delete \"%s\". Error: %s\n", [[itemURL path] UTF8String], [errorDesc UTF8String] );
-		}
-	}
-	return isSuccessful;
-}
-
-static bool
-ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, NSDictionary *actionSettings)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *allArgsStr = [arguments componentsJoinedByString:@"\t"];
-		fprintf(stdout, "[execute]	%s	%s\n", [toolPath UTF8String], [allArgsStr UTF8String]);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSTask *task = [[NSTask alloc] init];
-		[task setLaunchPath:toolPath];
-		[task setArguments:arguments];
-
-		[task setTerminationHandler: ^(NSTask *task) {
-			int toolStatus = [task terminationStatus];
-			if(toolStatus != EXIT_SUCCESS)
-			{
-				NSString *toolErrorDescription = [NSString stringWithFormat:@"%@ returned error %d", toolPath, toolStatus];
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: toolErrorDescription };
-				NSError *taskError = [NSError errorWithDomain:NSPOSIXErrorDomain code:toolStatus userInfo:userInfo];
-				context->lastError.error = taskError;
-				fprintf(stderr, "Failed to execute \"%s\". Error: %d\n", [toolPath UTF8String], toolStatus);
-			}
-		}];
-
-		NSPipe *stdOutPipe = [NSPipe pipe];
-		[task setStandardOutput:stdOutPipe];
-
-		NSFileHandle *stdOutFileHandle = [stdOutPipe fileHandleForReading];
-
-		NSError *operationError = nil;
-		isSuccessful = (bool)[task launchAndReturnError:&operationError];
-		if(isSuccessful)
-		{
-			NSData *stdOutData = [stdOutFileHandle readDataToEndOfFileAndReturnError:&operationError];
-			if(stdOutData != nil)
-			{
-				if(context->verbose)
-				{
-					//since we captured stdout and waited on it, now replay it to stdout
-					//because it was synchronous, all output will be printed at once after the tool finished
-					NSString *stdOutString = [[NSString alloc] initWithData:stdOutData encoding:NSUTF8StringEncoding];
-					fprintf(stdout, "%s\n", [stdOutString UTF8String]);
-				}
-			}
-			else
-			{
-				isSuccessful = false;
-			}
-		}
-		
-		if (!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			fprintf(stderr, "Failed to execute \"%s\". Error: %s\n", [toolPath UTF8String], [errorDesc UTF8String] );
-		}
-	}
-	return isSuccessful;
-}
-
-static NSArray<NSURL*> *
-ItemPathsToURLs(NSArray<NSString*> *itemPaths, ReplayContext *context)
-{
-	NSUInteger fileCount = [itemPaths count];
-	NSMutableArray *itemURLs = [NSMutableArray arrayWithCapacity:fileCount];
-	
-	for(NSString *itemPath in itemPaths)
-	{
-		NSString *expandedFileName = StringByExpandingEnvironmentVariablesWithErrorCheck(itemPath, context);
-		if(expandedFileName != nil)
-		{
-			NSURL *itemURL = [NSURL fileURLWithPath:expandedFileName];
-			[itemURLs addObject:itemURL];
-		}
-		else if(context->stopOnError)
-		{
-			return nil;
-		}
-	}
-
-	return itemURLs;
-}
-
-//when an operation is specified as a list of source items and destination dir
-//create explicit list of destination URLs corresponding to source file names
-//if more than one source file happens to have the same name, items will be overwritten
-
-static NSArray<NSURL*> *
-GetDestinationsForMultipleItems(NSArray<NSURL*> *sourceItemURLs, NSURL *destinationDirectoryURL, ReplayContext *context)
-{
-	if((sourceItemURLs == nil) || (destinationDirectoryURL == nil))
-		return nil;
-
-	NSUInteger itemCount = [sourceItemURLs count];
-	NSMutableArray *destinationURLs = [NSMutableArray arrayWithCapacity:itemCount];
-	
-	for(NSURL *srcItemURL in sourceItemURLs)
-	{
-		NSString *fileName = [srcItemURL lastPathComponent];
-    	NSURL *destURL = [destinationDirectoryURL URLByAppendingPathComponent:fileName];
-		[destinationURLs addObject:destURL];
-	}
-
-	return destinationURLs;
-}
-
-
-typedef enum
-{
-	kActionInvalid,
-	kFileActionClone,
-	kFileActionMove,
-	kFileActionHardlink,
-	kFileActionSymlink,
-	kFileActionCreate,
-	kFileActionDelete,
-	kActionExecuteTool
-} Action;
-
-
-static inline void
-DispatchAction(dispatch_queue_t queue, dispatch_group_t group, dispatch_block_t action)
-{
-	if(action != NULL)
-	{
-		if(group != NULL)
-		{//concurrent queue
-			dispatch_group_async(group, queue, action);
-		}
-		else
-		{//serial queue
-			dispatch_async(queue, action);
-		}
-	}
-}
-
-static void
-DispatchOneSourceDestinationAction(dispatch_queue_t queue, dispatch_group_t group, Action fileAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context, NSDictionary *actionSettings)
-{
-	if((sourceURL == nil) || (destinationURL == nil))
-		return;
-
-	dispatch_block_t action = NULL;
-	switch(fileAction)
-	{
-		case kFileActionClone:
-		{
-			action = ^{
-				__unused bool isOK = CloneItem(sourceURL, destinationURL, context, actionSettings);
-			};
-		}
-		break;
-
-		case kFileActionMove:
-		{
-			action = ^{
-				__unused bool isOK = MoveItem(sourceURL, destinationURL, context, actionSettings);
-			};
-		}
-		break;
-		
-		case kFileActionHardlink:
-		{
-			action = ^{
-				__unused bool isOK = HardlinkItem(sourceURL, destinationURL, context, actionSettings);
-			};
-		}
-		break;
-
-		case kFileActionSymlink:
-		{
-			action = ^{
-				__unused bool isOK = SymlinkItem(sourceURL, destinationURL, context, actionSettings);
-			};
-		}
-		break;
-		
-		default:
-		{
-		}
-		break;
-	}
-	DispatchAction(queue, group, action);
-}
-
-static void
-DispatchStep(NSDictionary *stepDescription, dispatch_queue_t queue, dispatch_group_t group, ReplayContext *context)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return;
-
-	NSString *actionName = stepDescription[@"action"];
-	if(actionName == nil)
-	{
-		fprintf(stderr, "Action not specified in a step.\n");
-		return;
-	}
-
-	Action fileAction = kActionInvalid;
-	bool isSrcDestAction = false;
-
-	if([actionName isEqualToString:@"clone"] || [actionName isEqualToString:@"copy"])
-	{
-		fileAction = kFileActionClone;
-		isSrcDestAction = true;
-	}
-	else if([actionName isEqualToString:@"move"])
-	{
-		fileAction = kFileActionMove;
-		isSrcDestAction = true;
-	}
-	else if([actionName isEqualToString:@"hardlink"])
-	{
-		fileAction = kFileActionHardlink;
-		isSrcDestAction = true;
-	}
-	else if([actionName isEqualToString:@"symlink"])
-	{
-		fileAction = kFileActionSymlink;
-		isSrcDestAction = true;
-	}
-	else if([actionName isEqualToString:@"create"])
-	{
-		fileAction = kFileActionCreate;
-		isSrcDestAction = false;
-	}
-	else if([actionName isEqualToString:@"delete"])
-	{
-		fileAction = kFileActionDelete;
-		isSrcDestAction = false;
-	}
-	else if([actionName isEqualToString:@"execute"])
-	{
-		fileAction = kActionExecuteTool;
-		isSrcDestAction = false;
-	}
-	else
-	{
-		fileAction = kActionInvalid;
-		fprintf(stderr, "Unrecognized step action: %s\n", [actionName UTF8String]);
-	}
-	
-	if(fileAction == kActionInvalid)
-		return;
-	
-	Class stringClass = [NSString class];
-	Class arrayClass = [NSArray class];
-
-	dispatch_block_t action = NULL;
-
-	if(isSrcDestAction)
-	{
-		NSString *sourcePath = stepDescription[@"from"];
-		NSString *destinationPath = stepDescription[@"to"];
-		if([sourcePath isKindOfClass:stringClass] && [destinationPath isKindOfClass:stringClass])
-		{//simple one-to-one form
-			NSURL *sourceURL = nil;
-			NSURL *destinationURL = nil;
-			sourcePath = StringByExpandingEnvironmentVariablesWithErrorCheck(sourcePath, context);
-			if(sourcePath != nil)
-				sourceURL = [NSURL fileURLWithPath:sourcePath];
-			
-			destinationPath = StringByExpandingEnvironmentVariablesWithErrorCheck(destinationPath, context);
-			if(destinationPath != nil)
-				destinationURL = [NSURL fileURLWithPath:destinationPath];
-			
-			// handles nil sourceURL or destinationURL by skipping action
-			DispatchOneSourceDestinationAction(queue, group, fileAction, sourceURL, destinationURL, context, stepDescription);
-		}
-		else
-		{//multiple items to destintation directory form
-			NSArray<NSString*> *itemPaths = stepDescription[@"items"];
-			NSString *destinationDirPath = stepDescription[@"destination directory"];
-			if([itemPaths isKindOfClass:arrayClass] && [destinationDirPath isKindOfClass:stringClass])
-			{
-				NSArray<NSURL*> *srcItemURLs = ItemPathsToURLs(itemPaths, context);
-				if(srcItemURLs != nil)
-				{
-					NSURL *destinationDirectoryURL = nil;
-					NSString *expandedDestinationDirPath = StringByExpandingEnvironmentVariablesWithErrorCheck(destinationDirPath, context);
-					if(expandedDestinationDirPath != nil)
-						destinationDirectoryURL = [NSURL fileURLWithPath:expandedDestinationDirPath isDirectory:YES];
-					
-					//handles nil destinationDirectoryURL by returning empty array
-					NSArray<NSURL*> *destItemURLs = GetDestinationsForMultipleItems(srcItemURLs, destinationDirectoryURL, context);
-					NSUInteger destIndex = 0;
-					for(NSURL *srcItemURL in srcItemURLs)
-					{
-						NSURL *destinationURL = [destItemURLs objectAtIndex:destIndex];
-						++destIndex;
-						DispatchOneSourceDestinationAction(queue, group, fileAction, srcItemURL, destinationURL, context, stepDescription);
-					}
-				}
-			}
-		}
-	}
-	else
-	{
-		if(fileAction == kFileActionDelete)
-		{
-			NSArray<NSString*> *itemPaths = stepDescription[@"items"];
-			if([itemPaths isKindOfClass:arrayClass])
-			{
-				for(NSString *onePath in itemPaths)
-				{
-					NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(onePath, context);
-					if(expandedPath != nil)
-					{
-						NSURL *oneURL = [NSURL fileURLWithPath:expandedPath];
-						action = ^{
-							__unused bool isOK = DeleteItem(oneURL, context, stepDescription);
-						};
-						DispatchAction(queue, group, action);
-					}
-					else if(context->stopOnError)
-					{ // one invalid path stops all actions
-						break;
-					}
-				}
-			}
-			else
-			{
-				fprintf(stderr, "\"items\" is expected to be an array of paths\n");
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unexpected items type" };
-				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-				context->lastError.error = operationError;
-			}
-		}
-		else if(fileAction == kFileActionCreate)
-		{
-			NSString *filePath = stepDescription[@"file"];
-			if([filePath isKindOfClass:stringClass])
-			{
-				NSString *content = stepDescription[@"content"];
-				if(content == nil)
-					content = @""; //content is optional
-				if(![content isKindOfClass:stringClass])
-				{
-					fprintf(stderr, "\"content\" is expected to be a string\n");
-					content = @"";
-				}
-				
-				bool expandContent = true;
-				id useRawText = stepDescription[@"raw content"];
-				if([useRawText isKindOfClass:[NSNumber class]])
-				{
-					expandContent = ![useRawText boolValue];
-				}
-
-				if(expandContent)
-					content = StringByExpandingEnvironmentVariablesWithErrorCheck(content, context);
-				
-				NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(filePath, context);
-				
-				// content is nil only if string is malformed or missing environment variable
-				// otherwise the string may be empty but non-nil
-				if((content != nil) && (expandedPath != nil))
-				{
-					NSURL *fileURL = [NSURL fileURLWithPath:expandedPath];
-					action = ^{
-						__unused bool isOK = CreateFile(fileURL, content, context, stepDescription);
-					};
-					DispatchAction(queue, group, action);
-				}
-			}
-			else
-			{
-				NSString *dirPath = stepDescription[@"directory"];
-				if([dirPath isKindOfClass:stringClass])
-				{
-					NSString *expandedDirPath = StringByExpandingEnvironmentVariablesWithErrorCheck(dirPath, context);
-					if(expandedDirPath != nil)
-					{
-						NSURL *dirURL = [NSURL fileURLWithPath:expandedDirPath];
-						action = ^{
-							__unused bool isOK = CreateDirectory(dirURL, context, stepDescription);
-						};
-						DispatchAction(queue, group, action);
-					}
-				}
-				else
-				{
-					fprintf(stderr, "\"create\" action must specify \"file\" or \"directory\" \n");
-					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid create action specification" };
-					NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-					context->lastError.error = operationError;
-				}
-			}
-		}
-		else if(fileAction == kActionExecuteTool)
-		{
-			NSString *toolPath = stepDescription[@"tool"];
-			if([toolPath isKindOfClass:stringClass])
-			{
-				NSArray<NSString*> *arguments = stepDescription[@"arguments"];
-				if((arguments != nil) && ![arguments isKindOfClass:arrayClass])
-				{
-					fprintf(stderr, "\"execute\" action must specify \"arguments\" as a string array\n");
-					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid execute action specification" };
-					NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-					context->lastError.error = operationError;
-				}
-				else
-				{
-					NSString *expandedToolPath = StringByExpandingEnvironmentVariablesWithErrorCheck(toolPath, context);
-					if(expandedToolPath != nil)
-					{
-						bool argsOK = true;
-						NSMutableArray *expandedArgs = [NSMutableArray arrayWithCapacity:[arguments count]];
-						for(NSString *oneArg in arguments)
-						{
-							NSString *expandedArg = StringByExpandingEnvironmentVariablesWithErrorCheck(oneArg, context);
-							if(expandedArg != nil)
-							{
-								[expandedArgs addObject:expandedArg];
-							}
-							else if(context->stopOnError)
-							{ // one invalid string expansion stops all actions
-								argsOK = false;
-								break;
-							}
-						}
-
-						if(argsOK)
-						{
-							action = ^{
-								__unused bool isOK = ExcecuteTool(expandedToolPath, expandedArgs, context, stepDescription);
-							};
-							DispatchAction(queue, group, action);
-						}
-					}
-				}
-			}
-			else
-			{
-				fprintf(stderr, "\"execute\" action must specify \"tool\" value with path to executable\n");
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid execute action specification" };
-				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-				context->lastError.error = operationError;
-			}
-		}
-	}
-}
-
-
-static inline void
-DispatchSteps(NSArray<NSDictionary*> *playlist, ReplayContext *context)
-{
-	dispatch_group_t group = NULL;
-	dispatch_queue_t queue = NULL;
-
-	if(context->concurrent)
-	{
-		group = dispatch_group_create();
-		queue = dispatch_queue_create("concurrent.playback", DISPATCH_QUEUE_CONCURRENT);
-	}
-	else
-	{ //serial
-		queue = dispatch_queue_create("serial.playback", DISPATCH_QUEUE_SERIAL);
-	}
-
-#if TRACE
-	printf("start dispatching async tasks\n");
-#endif
-
-	Class dictionaryClass = [NSDictionary class];
-
-	for(id oneStep in playlist)
-	{
-		if([oneStep isKindOfClass:dictionaryClass])
-		{
-			DispatchStep((NSDictionary *)oneStep, queue, group, context);
-		}
-		else
-		{
-			fprintf(stderr, "Invalid non-dictionary step in the playlist\n");
-		}
-	}
-
-#if TRACE
-	printf("done dispatching async tasks\n");
-#endif
-
-	if(context->concurrent)
-	{
-		dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
-#if TRACE
-		printf("done waiting in dispatch_group_wait()\n");
-#endif
-	}
-	else
-	{ //serial
-		dispatch_sync(queue, ^{
-#if TRACE
-			printf("executing terminating sync task\n");
-#endif
-		});
-	}
-	
-
 }
 
 
@@ -1176,29 +213,29 @@ DisplayHelp(void)
 		"\n"
 		"Options:\n"
 		"\n"
-		"  -s, --serial       execute actions serially in the order specified in the playlist (slow)\n"
-		"                     default behavior is to execute actions concurrently with no order guarantee (fast)\n"
-		"  -k, --playlist-key KEY   declare a key in root dictionary of the playlist file for action steps array\n"
-		"                     if absent, the playlist file root container is assumed to be an array of action steps\n"
-		"                     the key may be specified multiple times to execute more than one playlist in the file\n"
-		"  -e, --stop-on-error   stop executing the remaining playlist actions on first error\n"
-		"  -f, --force        if the file operation fails, delete destination and try again\n"
-		"  -n, --dry-run      show a log of actions which would be performed without running them\n"
-		"  -v, --verbose      show a log of actions while they are executed\n"
-		"  -h, --help         display this help\n"
+		"  -s, --serial       Execute actions serially in the order specified in the playlist (slow).\n"
+		"                     Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast)\n"
+		"  -k, --playlist-key KEY   Use a key in root dictionary of the playlist file for action steps array.\n"
+		"                     If absent, the playlist file root container is assumed to be an array of action steps.\n"
+		"                     The key may be specified multiple times to execute more than one playlist in the file.\n"
+		"  -e, --stop-on-error   Stop executing the remaining playlist actions on first error.\n"
+		"  -f, --force        If the file operation fails, delete destination and try again.\n"
+		"  -n, --dry-run      Show a log of actions which would be performed without running them.\n"
+		"  -v, --verbose      Show a log of actions while they are executed.\n"
+		"  -h, --help         Display this help\n"
 		"\n"
 	);
 
 	printf(
 		"Playlist format:\n"
 		"\n"
-		"  Playlists can be composed in plist or JSON files\n"
+		"  Playlists can be composed in plist or JSON files.\n"
 		"  In the usual form the root container of a plist or JSON file is a dictionary,\n"
 		"  where you can put one or more playlists with unique keys.\n"
 		"  A playlist is an array of action steps.\n"
 		"  Each step is a dictionary with action type and parameters. See below for actions and examples.\n"
-		"  If you don't specify the playlist key the root container is expected to be an array of action steps.\n"
-		"  More than one playlist may be present in a root dictionary. For example you may want preparation steps\n"
+		"  If you don't specify the playlist key, the root container is expected to be an array of action steps.\n"
+		"  More than one playlist may be present in a root dictionary. For example, you may want preparation steps\n"
 		"  in one playlist to be executed by \"replay\" invocation with --serial option\n"
 		"  and have another concurrent playlist with the bulk of work executed by a second \"replay\" invocation\n"
 		"\n"
@@ -1207,50 +244,79 @@ DisplayHelp(void)
 	printf(
 		"Environment variables expansion:\n"
 		"\n"
-		"  Environment variables in form of ${VARIABLE} are expanded in all paths\n"
-		"  New file content may also contain environment variables in its body (with an option to turn off expansion)\n"
-		"  Missing environment variables or malformed text is considered an error and the action will not be executed\n"
+		"  Environment variables in form of ${VARIABLE} are expanded in all paths.\n"
+		"  New file content may also contain environment variables in its body (with an option to turn off expansion).\n"
+		"  Missing environment variables or malformed text is considered an error and the action will not be executed.\n"
 		"  It is easy to make a mistake and allowing evironment variables resolved to empty would result in invalid paths,\n"
-		"  potentially leading to destructive file operations\n"
+		"  potentially leading to destructive file operations.\n"
+		"\n"
+	);
+
+	printf(
+		"Dependency analysis:\n"
+		"\n"
+		"  In default execution mode (without --serial option) \"replay\" performs dependency analysis\n"
+		"  and constructs an execution graph based on files consumed and produced by actions.\n"
+		"  If a file produced by action A is needed by action B, action B will not be executed until action A is finished.\n"
+		"  For example: if your playlist contains an action to create a directory and other actions write files\n"
+		"  into this directory, all these file actions will wait for directory creation to be finished and then they will\n"
+		"  be executed concurrently if otherwise independent from each other.\n"
+		"  Concurrent execution imposes a couple of rules on actions:\n"
+		"  1. No two actions may produce the same output. With concurrent execution this would produce undeterministic results\n"
+		"     depending on which action happened to run first or fail if they accessed the same file for writing concurrently.\n"
+		"     \"replay\" will not run any actions when this condition is detected during dependency analysis.\n"
+		"  2. Deletion and creation of the same file or directory in one playlist will result in creation first and\n"
+		"     deletion second because the deletion consumes the output of creation. If deletion is a required preparation step\n"
+		"     it should be executed in a separate playlist before the main tasks are scheduled. You may pass --playlist-key\n"
+		"     multiple times as a parameter and the playlists will be executed one after another in the order specified.\n"
+		"  3. Moving or deleting an item makes it unusable for other actions at the original path. Such actions are exclusive\n"
+		"     consumers of given input paths and cannot share their inputs with other actions. Producing additional items under\n"
+		"     such exclusive input paths is also not allowed. \"replay\" will report an error during dependency analysis\n"
+		"     and will not execute an action graph with exclusive input violations.\n"
 		"\n"
 	);
 
 	printf(
 		"Actions and parameters:\n"
 		"\n"
-		"  clone       Copy file(s) from one location to another. Cloning is supported on APFS volumes\n"
+		"  clone       Copy file(s) from one location to another. Cloning is supported on APFS volumes.\n"
 		"              Source and destination for this action can be specified in 2 ways.\n"
 		"              One to one:\n"
-		"    from      source item path\n"
-		"    to        destination item path\n"
+		"    from      Source item path.\n"
+		"    to        Destination item path.\n"
 		"              Or many items to destination directory:\n"
-		"    items     array of source item paths\n"
-		"    destination directory   path to output folder\n"
+		"    items     Array of source item paths.\n"
+		"    destination directory   Path to output folder.\n"
 		"  copy        Synonym for clone. Functionally identical.\n"
-		"  move        Move a file or directory\n"
-		"              Source and destination for this action can be specified the same way as for \"clone\"\n"
-		"  hardlink    Create a hardlink to source file\n"
-		"              Source and destination for this action can be specified the same way as for \"clone\"\n"
-		"  symlink     Create a symlink pointing to original file\n"
-		"              Source and destination for this action can be specified the same way as for \"clone\"\n"
-      	"    validate   bool value to indicate whether to check for the existence of source file. Default is true\n"
-      	"              it is usually a mistake if you try to create a symlink to nonexistent file\n"
-      	"              that is why \"validate\" is true by default but it is possible to create a dangling symlink\n"
-      	"              if you know what you are doing and really want that behavior, set \"validate\" to false\n"
-		"  create      Create a file or a directory\n"
-      	"              you can create either a file with optional content or a directory but not both in one action step\n"
-      	"    file      new file path (only for files)\n"
-      	"    content   new file content string (only for files)\n"
-      	"    raw content   bool value to indicate whether environment variables should be expanded or not\n"
-      	"              default value is false, meaning that environment variables are expanded\n"
-      	"              use true if you want to write a script with some ${VARIABLE} usage\n"
-      	"    directory   new directory path. All directories leading to the deepest one are created if they don't exist\n"
+		"  move        Move a file or directory.\n"
+		"              Source and destination for this action can be specified the same way as for \"clone\".\n"
+		"              Source path(s) are invalidated by \"move\" so they are marked as exclusive in concurrent execution.\n"
+		"  hardlink    Create a hardlink to source file.\n"
+		"              Source and destination for this action can be specified the same way as for \"clone\".\n"
+		"  symlink     Create a symlink pointing to original file.\n"
+		"              Source and destination for this action can be specified the same way as for \"clone\".\n"
+      	"    validate   Bool value to indicate whether to check for the existence of source file. Default is true.\n"
+      	"              It is usually a mistake if you try to create a symlink to nonexistent file,\n"
+      	"              that is why \"validate\" is true by default but it is possible to create a dangling symlink.\n"
+      	"              If you know what you are doing and really want that behavior, set \"validate\" to false.\n"
+		"  create      Create a file or a directory.\n"
+      	"              You can create either a file with optional content or a directory but not both in one action step.\n"
+      	"    file      New file path (only for files).\n"
+      	"    content   New file content string (only for files).\n"
+      	"    raw content   Bool value to indicate whether environment variables should be expanded or not.\n"
+      	"              Default value is \"false\", meaning that environment variables are expanded.\n"
+      	"              Pass \"true\" if you want to write a script with some ${VARIABLE} usage\n"
+      	"    directory   New directory path. All directories leading to the deepest one are created if they don't exist.\n"
 		"  delete      Delete a file or directory (with its content).\n"
-		"              CAUTION: There is no warning or user confirmation requested before deletion\n"
-		"    items     array of item paths to delete (files or directories with their content)\n"
-		"  execute     Run an executable as a child process\n"
-		"    tool      Full path to a tool to start\n"
-		"    arguments   array of arguments to pass to the tool (optional)\n"
+		"              CAUTION: There is no warning or user confirmation requested before deletion.\n"
+		"    items     Array of item paths to delete (files or directories with their content).\n"
+		"              Item path(s) are invalidated by \"delete\" so they are marked as exclusive in concurrent execution.\n"
+		"  execute     Run an executable as a child process.\n"
+		"    tool      Full path to a tool to execute.\n"
+		"    arguments   Array of arguments to pass to the tool (optional).\n"
+		"    inputs    Array of file paths read by the tool during execution (optional).\n"
+		"    exclusive inputs    Array of file paths invalidated (items deleted or moved) by the tool (rare, optional).\n"
+		"    outputs   Array of file paths writen by the tool during execution (optional).\n"
 		"\n"
 	);
 
@@ -1339,10 +405,10 @@ DisplayHelp(void)
 
 	printf(
 		"Example execution:\n"
-		"./replay --dry-run --serial --playlist-key \"Shepherd Playlist\" shepherd.plist\n"
+		"./replay --dry-run --playlist-key \"Shepherd Playlist\" shepherd.plist\n"
 		"\n"
-		"In the above example playlist some output files are inputs to later actions\n"
-		"so serial execution is required for achieve the expected outcome\n"
+		"In the above example playlist some output files are inputs to later actions.\n"
+		"The dependency analysis will create an execution graph to run dependent actions after the required outputs are produced.\n"
 		"\n"
 		"\n"
 	);
@@ -1353,6 +419,7 @@ int main(int argc, const char * argv[])
 	ReplayContext context;
 	context.environment = [[NSProcessInfo processInfo] environment];
 	context.lastError = [AtomicError new];
+	context.fileTreeRoot = NULL;
 	context.concurrent = true;
 	context.verbose = false;
 	context.dryRun = false;
@@ -1423,7 +490,10 @@ int main(int argc, const char * argv[])
 			NSArray<NSDictionary*> *playlist = playlistRootDict[oneKey];
 			if(playlist != nil)
 			{
-				DispatchSteps(playlist, &context);
+				if(context.concurrent)
+					ExecuteTasksConcurrently(playlist, &context);
+				else
+					ExecuteTasksSerially(playlist, &context);
 			}
 			else
 			{
@@ -1443,11 +513,20 @@ int main(int argc, const char * argv[])
 			printf("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
 			return EXIT_SUCCESS;
 		}
-		DispatchSteps(playlist, &context);
+		
+		if(context.concurrent)
+			ExecuteTasksConcurrently(playlist, &context);
+		else
+			ExecuteTasksSerially(playlist, &context);
 	}
 
-	if(context.lastError.error != nil)
-		return EXIT_FAILURE;
+	// It looks like a lot of unnecessary Obj-C memory cleanup is happening at exit
+	// and takes long time so skip it and just terminate the app now
 
-	return EXIT_SUCCESS;
+	if(context.lastError.error != nil)
+		exit(EXIT_FAILURE);
+
+	exit(EXIT_SUCCESS);
+
+	return EXIT_SUCCESS; //unreachable
 }

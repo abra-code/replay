@@ -27,7 +27,9 @@ typedef struct FileNode
 	void *producer; //different producer object depending on implementation
 	
 	uint8_t anyParentHasProducer;
-	uint8_t padding[3];
+	uint8_t isExclusiveInput; //some consumers demand nodes to be exclusive inputs. e.g. delete or move - nobody else can use deleted or moved item
+	uint8_t hasConsumer;
+	uint8_t padding;
 	uint32_t nameLength;
 
 	union
@@ -41,14 +43,19 @@ typedef struct FileNode
 // FileNode is a variable size structure with one name chunk in the base declaration
 // and the additional ones following in memory if needed
 
-//caller should hold to the tree for as long as needed
+// caller should hold to the tree for as long as needed
 FileNode * CreateFileTreeRoot(void);
 
-//call FindOrInsertFileNodeForPath() repeatedly with paths to construct in-memory tree
+// free the constructed tree memory
+void DeleteFileTree(FileNode *treeRoot);
+
+// call FindOrInsertFileNodeForPath() repeatedly with paths to construct in-memory tree
 FileNode * FindOrInsertFileNodeForPath(FileNode *treeRoot, const char *filePath);
 
+void GetPathForNode(FileNode *fileNode, char *outBuff, size_t outBuffSize);
+
 #if ENABLE_DEBUG_DUMP
-//debug to see the node branch (a reversed path)
+// debug to see the node branch
 void DumpBranchForNode(FileNode *fileNode);
 #endif
 

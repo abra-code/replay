@@ -9,8 +9,6 @@
 #import "TaskScheduler.h"
 #import "TaskProxy.h"
 
-//#define TRACE_PROXY 1
-
 dispatch_queue_t sQueue = nil;
 dispatch_group_t sGroup = nil;
 

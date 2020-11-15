@@ -32,6 +32,10 @@ extern dispatch_group_t sGroup;
 		_executed = false;
 	}
 
+#if TRACE_PROXY
+	printf("init proxy = %p\n", (__bridge void *)self);
+#endif
+
 	return self;
 }
 
@@ -119,6 +123,28 @@ extern dispatch_group_t sGroup;
 	 printf("dealloc proxy = %p\n", (__bridge void *)self);
 }
 #endif
+
+#if ENABLE_DEBUG_DUMP
+
+- (void)dumpDescription
+{
+	printf("TaskProxy self=%p\n", (__bridge void *)self);
+	
+	printf("  inputs:\n");
+	for(NSUInteger i = 0; i < _inputCount; i++)
+	{
+		printf("    ");
+		DumpBranchForNode(_inputs[i]);
+	}
+
+	printf("  outputs:\n");
+	for(NSUInteger i = 0; i < _outputCount; i++)
+	{
+		printf("    ");
+		DumpBranchForNode(_outputs[i]);
+	}
+}
+#endif //ENABLE_DEBUG_DUMP
 
 @end //@implementation TaskProxy
 

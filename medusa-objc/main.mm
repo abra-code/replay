@@ -23,7 +23,7 @@ static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path
 	const char *posixPath = [lowercasePath fileSystemRepresentation];
 	FileNode *outNode = FindOrInsertFileNodeForPath(fileTreeRoot, posixPath);
 	//Input nodes don't have a producer.
-	//Recursive medusa does not set MedusaTask right there. Tney will be filled later in first pass with OutputInfo *
+	//Recursive medusa does not set MedusaTask right there. They will be filled later in first pass with OutputInfo *
 	//important not to reset to NULL to not override what might have been set already
 	if(producer != nil)
 	{

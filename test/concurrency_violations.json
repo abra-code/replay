@@ -1,0 +1,137 @@
+{
+  "two actions with the same output":
+  [
+    {
+      "action": "create",
+      "content": "unique output",
+      "file": "${HOME}/artifact.txt",
+    },
+    {
+      "action": "move",
+      "from": "${HOME}/source.txt",
+      "to": "${HOME}/artifact.txt",
+    },
+  ],
+  "exclusive input in two actions":
+  [
+    {
+      "action": "clone",
+      "from": "${HOME}/exclusive-for-move.txt",
+      "to": "${HOME}/clone.txt",
+    },
+    {
+      "action": "move",
+      "from": "${HOME}/exclusive-for-move.txt",
+      "to": "${HOME}/moved.txt",
+    },
+  ],
+  "create under exclusive input":
+  [
+    {
+      "action": "delete",
+      "items": [
+        "${HOME}/exclusive-for-delete",
+        ],
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/exclusive-for-delete",
+    },
+    {
+      "action": "create",
+      "content": "invalid",
+      "file": "${HOME}/exclusive-for-delete/invalid-input.txt",
+    },
+  ],
+  "consumer under exclusive input":
+  [
+    {
+      "action": "create",
+      "directory": "${HOME}/exclusive-for-delete",
+    },
+    {
+      "action": "delete",
+      "items": [
+        "${HOME}/exclusive-for-delete",
+        ],
+    },
+    {
+      "action": "clone",
+      "from": "${HOME}/exclusive-for-delete/invalidated-file.txt",
+      "to": "${HOME}/invalid-clone.txt",
+    },
+  ],
+  "explicit exclusive input in two actions":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/rm",
+      "arguments": [
+        "-rf",
+        "${HOME}/exclusive-for-rm",
+      ],
+      "exclusive inputs": [
+        "${HOME}/exclusive-for-rm",
+      ]
+    },
+    {
+      "action": "clone",
+      "from": "${HOME}/exclusive-for-rm",
+      "to": "${HOME}/ether",
+    },
+  ],
+  "explicit and implict exclusive input in two actions":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/rm",
+      "arguments": [
+        "-rf",
+        "${HOME}/exclusive",
+      ],
+      "exclusive inputs": [
+        "${HOME}/exclusive",
+      ]
+    },
+    {
+      "action": "move",
+      "from": "${HOME}/exclusive",
+      "to": "${HOME}/nowhere",
+    },
+  ],
+  "one producer with nested dirs allowed":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/mkdir",
+      "arguments": [
+        "-p",
+        "${HOME}/exclusive/nested",
+      ],
+      "outputs": [
+        "${HOME}/exclusive",
+        "${HOME}/exclusive/nested",
+        "${HOME}/exclusive/nested/grandchild",
+      ],
+    },
+    {
+      "action": "delete",
+      "items": [
+        "${HOME}/exclusive",
+      ],
+    },
+  ],
+  "one producer one exclusive consumer allowed":
+  [
+    {
+      "action": "delete",
+      "items": [
+        "${HOME}/create-delete",
+      ],
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/create-delete",
+    },
+  ],
+}
