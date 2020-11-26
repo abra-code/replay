@@ -65,7 +65,7 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 
 			TaskProxy *oneTask = [[TaskProxy alloc] initWithTask:action];
 			[tasksFromStep addObject:oneTask];
-			
+
 			NSUInteger regularInputCount = 0;
 			if(inputs != nil)
 				regularInputCount = inputs.count;
@@ -142,7 +142,7 @@ ExecuteTasksWithScheduler(NSArray<TaskProxy*> *allTasks, FileNode *fileTreeRoot,
 }
 
 void
-ExecuteTasksConcurrently(NSArray<NSDictionary*> *playlist, ReplayContext *context)
+DispatchTasksConcurrentlyWithDependencyAnalysis(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 {
 	assert(context->concurrent);
 	DeleteFileTree(context->fileTreeRoot);
@@ -174,6 +174,6 @@ ExecuteTasksConcurrently(NSArray<NSDictionary*> *playlist, ReplayContext *contex
 	
 	// thew whole input and output paths tree is constructed at this stage
 	// with all explicit producers referred in their respective nodes
-
+	
 	ExecuteTasksWithScheduler(taskList, context->fileTreeRoot, totalInputCount, totalOutputCount);
 }

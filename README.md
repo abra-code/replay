@@ -21,12 +21,16 @@ Usage: replay [options] <playlist_file.json|plist>
 Options:
 
   -s, --serial       Execute actions serially in the order specified in the playlist (slow).
-                     Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast)
+                     Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast).
+  -p, --no-dependency   An option for concurrent execution to skip dependency analysis. Actions must be independent.
   -k, --playlist-key KEY   Use a key in root dictionary of the playlist file for action steps array.
                      If absent, the playlist file root container is assumed to be an array of action steps.
                      The key may be specified multiple times to execute more than one playlist in the file.
   -e, --stop-on-error   Stop executing the remaining playlist actions on first error.
   -f, --force        If the file operation fails, delete destination and try again.
+  -o, --ordered-output  In simple concurrent execution mode preserve the order of printed task outputs as specified
+                     in the playlist. The tasks are still executed concurrently without order guarantee
+                     but printing is ordered. Ignored in serial execution and concurrent execution with dependencies.
   -n, --dry-run      Show a log of actions which would be performed without running them.
   -v, --verbose      Show a log of actions while they are executed.
   -h, --help         Display this help

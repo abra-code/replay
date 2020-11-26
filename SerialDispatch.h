@@ -1,4 +1,8 @@
 #import "ReplayAction.h"
 
-void ExecuteTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context);
+void StartSerialDispatch(ReplayContext *context);
+void FinishSerialDispatchAndWait(ReplayContext *context);
+
+void DispatchTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context);
+void DispatchTaskSerially(NSDictionary *stepDescription, ReplayContext *context);
 

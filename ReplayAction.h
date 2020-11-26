@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #include "FileTree/FileTree.h"
+#import "OutputSerializer.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -26,12 +27,24 @@ typedef struct
 	NSDictionary<NSString *,NSString *> *environment;
 	AtomicError *lastError;
 	FileNode * __nullable fileTreeRoot;
+	OutputSerializer *__nullable outputSerializer; //not used in serial execution
+	dispatch_queue_t queue; //not used for execution with dependency analysis
+	dispatch_group_t group; //not used for execution with dependency analysis
+	NSInteger actionCounter; //counter incremented with each serially created action
 	bool concurrent;
+	bool analyzeDependencies;
 	bool verbose;
 	bool dryRun;
 	bool stopOnError;
 	bool force;
+	bool orderedOutput;
 } ReplayContext;
+
+typedef struct
+{
+	NSDictionary *settings;
+	NSInteger index;
+} ActionContext;
 
 typedef void (^action_handler_t)(__nullable dispatch_block_t action,
 								NSArray<NSString*> * __nullable inputs,
@@ -41,13 +54,13 @@ typedef void (^action_handler_t)(__nullable dispatch_block_t action,
 void
 HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler);
 
-bool CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings);
-bool MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings);
-bool HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings);
-bool SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, NSDictionary *actionSettings);
-bool CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, NSDictionary *actionSettings);
-bool CreateDirectory(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSettings);
-bool DeleteItem(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSettings);
-bool ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, NSDictionary *actionSettings);
+bool CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext);
+bool MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext);
+bool HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext);
+bool SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContext *actionContext);
+bool CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionContext *actionContext);
+bool CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext);
+bool DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext);
+bool ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext);
 
 NS_ASSUME_NONNULL_END

@@ -211,6 +211,7 @@ echo "replay --playlist-key \"explicit and implict exclusive input in two action
 "$REPLAY_TOOL" --dry-run --playlist-key "explicit and implict exclusive input in two actions" "$REPLAY_TEST_DIR_PATH/concurrency_violations.json"
 verify_failed "$?" "'explicit and implict exclusive input in two actions' was expected to fail!"
 
+echo ""
 echo "------------------------------"
 echo ""
 echo "Concurrency non-violations expected to pass"
@@ -227,5 +228,17 @@ echo "replay --playlist-key \"one producer one exclusive consumer allowed\""
 verify_succeeded "$?" "'one producer one exclusive consumer allowed' test failed"
 echo ""
 
+echo ""
+echo "------------------------------"
+echo ""
+echo "Concurrent outputs printed to stdout should be sequential"
+echo "Path: \"$REPLAY_TEST_DIR_PATH/concurrent_output_order.json\""
+echo ""
+
+echo "replay --verbose --dry-run --no-dependency --ordered-output --playlist-key \"ordered output\""
+"$REPLAY_TOOL" --verbose --dry-run --no-dependency --ordered-output --playlist-key "ordered output" "$REPLAY_TEST_DIR_PATH/concurrent_output_order.json"
+verify_succeeded "$?" "'ordered output' test failed"
+echo ""
+#TODO: parse and verify the numbers are incremented in the output
 
 report_test_stats

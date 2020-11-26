@@ -13,6 +13,7 @@
 #import "TaskProxy.h"
 #import "ReplayTask.h"
 #import "SerialDispatch.h"
+#import "ConcurrentDispatchWithNoDependency.h"
 
 #if DEBUG
 	#define TRACE 0
@@ -195,9 +196,11 @@ static struct option sLongOptions[] =
 	{"verbose",			no_argument,		NULL, 'v'},
 	{"dry-run",			no_argument,		NULL, 'n'},
 	{"serial",			no_argument,		NULL, 's'},
+	{"no-dependency",	no_argument,		NULL, 'p'},
 	{"playlist-key",	required_argument,	NULL, 'k'},
 	{"stop-on-error",   no_argument,		NULL, 'e'},
 	{"force",           no_argument,		NULL, 'f'},
+	{"ordered-output",  no_argument,		NULL, 'o'},
 	{"help",			no_argument,		NULL, 'h'},
 	{NULL, 				0, 					NULL,  0 }
 };
@@ -214,12 +217,16 @@ DisplayHelp(void)
 		"Options:\n"
 		"\n"
 		"  -s, --serial       Execute actions serially in the order specified in the playlist (slow).\n"
-		"                     Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast)\n"
+		"                     Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast).\n"
+		"  -p, --no-dependency   An option for concurrent execution to skip dependency analysis. Actions must be independent.\n"
 		"  -k, --playlist-key KEY   Use a key in root dictionary of the playlist file for action steps array.\n"
 		"                     If absent, the playlist file root container is assumed to be an array of action steps.\n"
 		"                     The key may be specified multiple times to execute more than one playlist in the file.\n"
 		"  -e, --stop-on-error   Stop executing the remaining playlist actions on first error.\n"
 		"  -f, --force        If the file operation fails, delete destination and try again.\n"
+		"  -o, --ordered-output  In simple concurrent execution mode preserve the order of printed task outputs as specified\n"
+		"                     in the playlist. The tasks are still executed concurrently without order guarantee\n"
+		"                     but printing is ordered. Ignored in serial execution and concurrent execution with dependencies.\n"
 		"  -n, --dry-run      Show a log of actions which would be performed without running them.\n"
 		"  -v, --verbose      Show a log of actions while they are executed.\n"
 		"  -h, --help         Display this help\n"
@@ -414,17 +421,54 @@ DisplayHelp(void)
 	);
 }
 
+static void ProcessPlaylist(NSArray<NSDictionary*> *playlist, ReplayContext *context)
+{
+	if(context->concurrent)
+	{
+		context->outputSerializer = [OutputSerializer sharedOutputSerializer];
+		context->actionCounter = -1;
+
+		if(context->analyzeDependencies)
+		{
+			// if someone set this as a param, we need to ignore it when executing a graph of tasks
+			context->orderedOutput = false;
+			DispatchTasksConcurrentlyWithDependencyAnalysis(playlist, context);
+		}
+		else
+		{
+			DispatchTasksConcurrentlyWithNoDependency(playlist, context);
+		}
+
+		FlushSerializedOutputs(context->outputSerializer);
+	}
+	else
+	{
+ 		// output is ordered by the virtue of serial execution
+ 		// but we don't want to trigger the complex infra for ordering of concurrent task outputs
+ 		context->outputSerializer = nil;
+		context->actionCounter = -1;
+		context->orderedOutput = false;
+		DispatchTasksSerially(playlist, context);
+	}
+}
+
 int main(int argc, const char * argv[])
 {
 	ReplayContext context;
 	context.environment = [[NSProcessInfo processInfo] environment];
 	context.lastError = [AtomicError new];
 	context.fileTreeRoot = NULL;
+	context.outputSerializer = nil;
+	context.queue = nil;
+	context.group = nil;
+	context.actionCounter = -1;
 	context.concurrent = true;
+	context.analyzeDependencies = true;
 	context.verbose = false;
 	context.dryRun = false;
 	context.stopOnError = false;
 	context.force = false;
+	context.orderedOutput = false;
 
 	NSMutableArray *playlistKeys = [NSMutableArray new];
 
@@ -448,7 +492,11 @@ int main(int argc, const char * argv[])
 			case 's':
 				context.concurrent = false;
 			break;
-			
+
+			case 'p':
+				context.analyzeDependencies = false;
+			break;
+
 			case 'k':
 				//multiple playlists are allowed and stored in array to dispatch one after another
 				[playlistKeys addObject:@(optarg)];
@@ -460,6 +508,10 @@ int main(int argc, const char * argv[])
 			
 			case 'f':
 				context.force = true;
+			break;
+			
+			case 'o':
+				context.orderedOutput = true;
 			break;
 			
 			case 'h':
@@ -488,21 +540,13 @@ int main(int argc, const char * argv[])
 		for(NSString *oneKey in playlistKeys)
 		{
 			NSArray<NSDictionary*> *playlist = playlistRootDict[oneKey];
-			if(playlist != nil)
-			{
-				if(context.concurrent)
-					ExecuteTasksConcurrently(playlist, &context);
-				else
-					ExecuteTasksSerially(playlist, &context);
-			}
-			else
+			if(playlist == nil)
 			{
 				printf("Invalid or empty playlist for key \"%s\". No steps to replay\n", [oneKey UTF8String]);
 				if(context.stopOnError)
-				{
 					break;
-				}
 			}
+			ProcessPlaylist(playlist, &context);
 		}
 	}
 	else
@@ -513,11 +557,7 @@ int main(int argc, const char * argv[])
 			printf("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
 			return EXIT_SUCCESS;
 		}
-		
-		if(context.concurrent)
-			ExecuteTasksConcurrently(playlist, &context);
-		else
-			ExecuteTasksSerially(playlist, &context);
+		ProcessPlaylist(playlist, &context);
 	}
 
 	// It looks like a lot of unnecessary Obj-C memory cleanup is happening at exit

@@ -1,12 +1,33 @@
 #import <Foundation/Foundation.h>
 #import "ReplayAction.h"
 #import "StringAndPath.h"
+#import "OutputSerializer.h"
 
 //a helper class to ensure atomic access to shared NSError from multiple threads
 @implementation AtomicError
 
 @end
 
+static inline void PrintToStdOut(ReplayContext *context, NSString *string, NSInteger actionIndex)
+{
+	if(context->orderedOutput)
+	{
+		assert(context->outputSerializer != nil);
+		assert(actionIndex >=0);
+	}
+
+	PrintSerializedString(context->outputSerializer, string, context->orderedOutput ? actionIndex : -1);
+}
+
+static inline void ActionWithNoOutput(ReplayContext *context, NSInteger actionIndex)
+{
+	if(context->orderedOutput)
+	{
+		assert(context->outputSerializer != nil);
+		assert(actionIndex >=0);
+		PrintSerializedString(context->outputSerializer, nil, actionIndex);
+	}
+}
 
 static inline Action
 StepAction(NSDictionary *stepDescription, bool *isSrcDestActionPtr)
@@ -68,7 +89,7 @@ StepAction(NSDictionary *stepDescription, bool *isSrcDestActionPtr)
 
 
 static inline dispatch_block_t
-CreateSourceDestinationAction(Action fileAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context, NSDictionary *actionSettings)
+CreateSourceDestinationAction(Action fileAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context, NSDictionary *actionSettings, NSInteger actionIndex)
 {
 	if((sourceURL == nil) || (destinationURL == nil))
 		return nil;
@@ -79,7 +100,8 @@ CreateSourceDestinationAction(Action fileAction, NSURL *sourceURL, NSURL *destin
 		case kFileActionClone:
 		{
 			action = ^{
-				__unused bool isOK = CloneItem(sourceURL, destinationURL, context, actionSettings);
+				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
+				__unused bool isOK = CloneItem(sourceURL, destinationURL, context, &localContext);
 			};
 		}
 		break;
@@ -87,7 +109,8 @@ CreateSourceDestinationAction(Action fileAction, NSURL *sourceURL, NSURL *destin
 		case kFileActionMove:
 		{
 			action = ^{
-				__unused bool isOK = MoveItem(sourceURL, destinationURL, context, actionSettings);
+				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
+				__unused bool isOK = MoveItem(sourceURL, destinationURL, context, &localContext);
 			};
 		}
 		break;
@@ -95,7 +118,8 @@ CreateSourceDestinationAction(Action fileAction, NSURL *sourceURL, NSURL *destin
 		case kFileActionHardlink:
 		{
 			action = ^{
-				__unused bool isOK = HardlinkItem(sourceURL, destinationURL, context, actionSettings);
+				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
+				__unused bool isOK = HardlinkItem(sourceURL, destinationURL, context, &localContext);
 			};
 		}
 		break;
@@ -103,7 +127,8 @@ CreateSourceDestinationAction(Action fileAction, NSURL *sourceURL, NSURL *destin
 		case kFileActionSymlink:
 		{
 			action = ^{
-				__unused bool isOK = SymlinkItem(sourceURL, destinationURL, context, actionSettings);
+				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
+				__unused bool isOK = SymlinkItem(sourceURL, destinationURL, context, &localContext);
 			};
 		}
 		break;
@@ -136,6 +161,9 @@ GetExpandedPathsFromRawPaths(NSArray<NSString*> *rawPaths, ReplayContext *contex
 	return nil;
 }
 
+// this function resolves each step and calls provided actionHandler
+// one or more times for each action in the step
+// one step may have multiple actions like copying a list of files to one directory
 void
 HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler)
 {
@@ -173,7 +201,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				destinationURL = [NSURL fileURLWithPath:destinationPath];
 			
 			// handles nil sourceURL or destinationURL by skipping action
-			action = CreateSourceDestinationAction(fileAction, sourceURL, destinationURL, context, stepDescription);
+			NSInteger actionIndex = ++(context->actionCounter);
+			action = CreateSourceDestinationAction(fileAction, sourceURL, destinationURL, context, stepDescription, actionIndex);
 			
 			if(context->concurrent)
 			{
@@ -206,7 +235,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					{
 						NSURL *destinationURL = [destItemURLs objectAtIndex:destIndex];
 						++destIndex;
-						action = CreateSourceDestinationAction(fileAction, srcItemURL, destinationURL, context, stepDescription);
+						NSInteger actionIndex = ++(context->actionCounter);
+						action = CreateSourceDestinationAction(fileAction, srcItemURL, destinationURL, context, stepDescription, actionIndex);
 						
 						if(context->concurrent)
 						{
@@ -235,8 +265,10 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					if(expandedPath != nil)
 					{
 						NSURL *oneURL = [NSURL fileURLWithPath:expandedPath];
+						NSInteger actionIndex = ++(context->actionCounter);
 						action = ^{
-							__unused bool isOK = DeleteItem(oneURL, context, stepDescription);
+							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+							__unused bool isOK = DeleteItem(oneURL, context, &actionContext);
 						};
 						
 						if(context->concurrent)
@@ -290,8 +322,10 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				if((content != nil) && (expandedPath != nil))
 				{
 					NSURL *fileURL = [NSURL fileURLWithPath:expandedPath];
+					NSInteger actionIndex = ++(context->actionCounter);
 					action = ^{
-						__unused bool isOK = CreateFile(fileURL, content, context, stepDescription);
+						ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+						__unused bool isOK = CreateFile(fileURL, content, context, &actionContext);
 					};
 					
 					if(context->concurrent)
@@ -310,8 +344,10 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					if(expandedDirPath != nil)
 					{
 						NSURL *dirURL = [NSURL fileURLWithPath:expandedDirPath];
+						NSInteger actionIndex = ++(context->actionCounter);
 						action = ^{
-							__unused bool isOK = CreateDirectory(dirURL, context, stepDescription);
+							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+							__unused bool isOK = CreateDirectory(dirURL, context, &actionContext);
 						};
 						
 						if(context->concurrent)
@@ -366,8 +402,10 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
 						if(argsOK)
 						{
+							NSInteger actionIndex = ++(context->actionCounter);
 							action = ^{
-								__unused bool isOK = ExcecuteTool(expandedToolPath, expandedArgs, context, stepDescription);
+								ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+								__unused bool isOK = ExcecuteTool(expandedToolPath, expandedArgs, context, &actionContext);
 							};
 							
 							if(context->concurrent)
@@ -395,14 +433,19 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
 
 bool
-CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings)
+CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
 
 	if(context->verbose || context->dryRun)
 	{
-		fprintf(stdout, "[clone]	%s	%s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String]);
+		NSString *stdoutStr = [NSString stringWithFormat:@"[clone]	%@	%@\n", [fromURL path], [toURL path]];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
 	}
 
 	bool isSuccessful = context->dryRun;
@@ -441,14 +484,19 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *ac
 }
 
 bool
-MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings)
+MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
 
 	if(context->verbose || context->dryRun)
 	{
-		fprintf(stdout, "[move]	%s	%s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String]);
+		NSString *stdoutStr = [NSString stringWithFormat:@"[move]	%@	%@\n", [fromURL path], [toURL path]];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
 	}
 
 	bool isSuccessful = context->dryRun;
@@ -487,14 +535,19 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *act
 }
 
 bool
-HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary *actionSettings)
+HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
 
 	if(context->verbose || context->dryRun)
 	{
-		fprintf(stdout, "[hardlink]	%s	%s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String]);
+		NSString *stdoutStr = [NSString stringWithFormat:@"[hardlink]	%@	%@\n", [fromURL path], [toURL path] ];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
 	}
 
 	bool isSuccessful = context->dryRun;
@@ -533,14 +586,19 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, NSDictionary 
 }
 
 bool
-SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, NSDictionary *actionSettings)
+SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
 
 	if(context->verbose || context->dryRun)
 	{
-		fprintf(stdout, "[symlink]	%s	%s\n", [[fromURL path] UTF8String], [[linkURL path] UTF8String]);
+		NSString *stdoutStr = [NSString stringWithFormat:@"[symlink]	%@	%@\n", [fromURL path], [linkURL path]];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
 	}
 	
 	bool force = context->force;
@@ -551,7 +609,7 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, NSDictionary
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
 
-		NSNumber *validateSource = actionSettings[@"validate"];
+		NSNumber *validateSource = actionContext->settings[@"validate"];
 		bool validateSymlinkSource = true;
 		if([validateSource isKindOfClass:[NSNumber class]])
 		{
@@ -598,7 +656,7 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, NSDictionary
 }
 
 bool
-CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, NSDictionary *actionSettings)
+CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
@@ -606,7 +664,12 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, NSDictiona
 	if(context->verbose || context->dryRun)
 	{
 		//TODO: escape newlines for multiline text so it will be displayed in one line
-		fprintf(stdout, "[create]	%s	%s\n", [[itemURL path] UTF8String], [content UTF8String]);
+		NSString *stdoutStr = [NSString stringWithFormat:@"[create]	%@	%@\n", [itemURL path], content];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
 	}
 
 	bool isSuccessful = context->dryRun;
@@ -645,14 +708,19 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, NSDictiona
 }
 
 bool
-CreateDirectory(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSettings)
+CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
 
 	if(context->verbose || context->dryRun)
 	{
-		fprintf(stdout, "[create]	%s\n", [[itemURL path] UTF8String]);
+		NSString *stdoutStr = [NSString stringWithFormat:@"[create]	%@\n", [itemURL path]];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
 	}
 
 	bool isSuccessful = context->dryRun;
@@ -680,14 +748,19 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSett
 }
 
 bool
-DeleteItem(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSettings)
+DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
 
 	if(context->verbose || context->dryRun)
 	{
-		fprintf(stdout, "[delete]	%s\n", [[itemURL path] UTF8String]);
+		NSString *stdoutStr = [NSString stringWithFormat:@"[delete]	%@\n", [itemURL path] ];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
 	}
 
 	bool isSuccessful = context->dryRun;
@@ -714,7 +787,7 @@ DeleteItem(NSURL *itemURL, ReplayContext *context, NSDictionary *actionSettings)
 }
 
 bool
-ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, NSDictionary *actionSettings)
+ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
@@ -722,7 +795,12 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 	if(context->verbose || context->dryRun)
 	{
 		NSString *allArgsStr = [arguments componentsJoinedByString:@"\t"];
-		fprintf(stdout, "[execute]	%s	%s\n", [toolPath UTF8String], [allArgsStr UTF8String]);
+		NSString *stdoutStr = [NSString stringWithFormat:@"[execute]	%@	%@\n", toolPath, allArgsStr];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
 	}
 
 	bool isSuccessful = context->dryRun;
@@ -760,8 +838,12 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 				{
 					//since we captured stdout and waited on it, now replay it to stdout
 					//because it was synchronous, all output will be printed at once after the tool finished
-					NSString *stdOutString = [[NSString alloc] initWithData:stdOutData encoding:NSUTF8StringEncoding];
-					fprintf(stdout, "%s\n", [stdOutString UTF8String]);
+					NSString *stdoutStr = [[NSString alloc] initWithData:stdOutData encoding:NSUTF8StringEncoding];
+					PrintToStdOut(context, stdoutStr, actionContext->index);
+				}
+				else
+				{
+					ActionWithNoOutput(context, actionContext->index);
 				}
 			}
 			else

@@ -1,0 +1,249 @@
+{
+  "ordered output":
+  [
+    {
+      "action": "create",
+      "content": "1",
+      "file": "${HOME}/1.txt",
+    },
+    {
+      "action": "create",
+      "content": "2",
+      "file": "${HOME}/2.txt",
+    },
+    {
+      "action": "create",
+      "content": "3",
+      "file": "${HOME}/3.txt",
+    },
+    {
+      "action": "create",
+      "content": "4",
+      "file": "${HOME}/4.txt",
+    },
+    {
+      "action": "create",
+      "content": "5",
+      "file": "${HOME}/5.txt",
+    },
+    {
+      "action": "create",
+      "content": "6",
+      "file": "${HOME}/6.txt",
+    },
+    {
+      "action": "create",
+      "content": "7",
+      "file": "${HOME}/7.txt",
+    },
+    {
+      "action": "create",
+      "content": "8",
+      "file": "${HOME}/8.txt",
+    },
+    {
+      "action": "create",
+      "content": "9",
+      "file": "${HOME}/9.txt",
+    },
+    {
+      "action": "create",
+      "content": "10",
+      "file": "${HOME}/10.txt",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/11",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/12",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/13",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/14",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/15",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/16",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/17",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/18",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/19",
+    },
+    {
+      "action": "create",
+      "directory": "${HOME}/20",
+    },
+    {
+      "action": "delete",
+      "items": [
+        "${HOME}/21",
+      ],
+    },
+    {
+      "action": "delete",
+      "items": [
+        "${HOME}/22",
+        "${HOME}/23",
+        "${HOME}/24",
+        "${HOME}/25",
+        "${HOME}/26",
+        "${HOME}/27",
+        "${HOME}/28",
+        "${HOME}/29",
+        "${HOME}/30",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": [
+        "${HOME}/31",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": [
+        "${HOME}/32",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": [
+        "${HOME}/33",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": [
+        "${HOME}/34",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": [
+        "${HOME}/35",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": [
+        "${HOME}/36",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": [
+        "${HOME}/37",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": [
+        "${HOME}/38",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": [
+        "${HOME}/39",
+      ],
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": [
+        "${HOME}/40",
+      ],
+    },
+    {
+      "action": "clone",
+      "items": [
+        "${HOME}/41",
+        "${HOME}/42",
+        "${HOME}/43",
+        "${HOME}/44",
+        "${HOME}/45",
+        "${HOME}/46",
+        "${HOME}/47",
+        "${HOME}/48",
+        "${HOME}/49",
+        "${HOME}/50",
+      ],
+      "destination directory": "${HOME}/clones",
+    },
+    {
+      "action": "symlink",
+      "items": [
+        "${HOME}/51",
+        "${HOME}/52",
+        "${HOME}/53",
+        "${HOME}/54",
+        "${HOME}/55",
+        "${HOME}/56",
+        "${HOME}/57",
+        "${HOME}/58",
+        "${HOME}/59",
+        "${HOME}/60",
+      ],
+      "destination directory": "${HOME}/symlinks",
+    },
+    {
+      "action": "hardlink",
+      "items": [
+        "${HOME}/61",
+        "${HOME}/62",
+        "${HOME}/63",
+        "${HOME}/64",
+        "${HOME}/65",
+        "${HOME}/66",
+        "${HOME}/67",
+        "${HOME}/68",
+        "${HOME}/69",
+        "${HOME}/70",
+      ],
+      "destination directory": "${HOME}/hardlinks",
+    },
+    {
+      "action": "move",
+      "items": [
+        "${HOME}/71",
+        "${HOME}/72",
+        "${HOME}/73",
+        "${HOME}/74",
+        "${HOME}/75",
+        "${HOME}/76",
+        "${HOME}/77",
+        "${HOME}/78",
+        "${HOME}/79",
+        "${HOME}/80",
+      ],
+      "destination directory": "${HOME}/moved",
+    },
+  ],
+}

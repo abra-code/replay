@@ -106,7 +106,7 @@
       "tool": "/bin/mkdir",
       "arguments": [
         "-p",
-        "${HOME}/exclusive/nested",
+        "${HOME}/exclusive/nested/grandchild",
       ],
       "outputs": [
         "${HOME}/exclusive",

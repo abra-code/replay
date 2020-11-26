@@ -1,10 +1,27 @@
 #import "SerialDispatch.h"
 
 void
-ExecuteTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context)
+StartSerialDispatch(ReplayContext *context)
 {
 	assert(!context->concurrent); //serial
-	dispatch_queue_t queue = dispatch_queue_create("serial.playback", DISPATCH_QUEUE_SERIAL);
+	assert(context->queue == NULL);
+	context->queue = dispatch_queue_create("serial.playback", DISPATCH_QUEUE_SERIAL);
+}
+
+void
+FinishSerialDispatchAndWait(ReplayContext *context)
+{
+	dispatch_sync(context->queue, ^{
+#if TRACE
+			printf("executing terminating sync task\n");
+#endif
+		});
+}
+
+void
+DispatchTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context)
+{
+	StartSerialDispatch(context);
 
 #if TRACE
 	printf("start dispatching async tasks\n");
@@ -27,7 +44,7 @@ ExecuteTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 						// with serial queue the tasks still execute one after another, never overlapping
 						// dispatch_async allows us to keep iterating, building and adding new tasks
 						// while the ones dispatched are already executing on the background thread
-						dispatch_async(queue, action);
+						dispatch_async(context->queue, action);
 					}
 				});
 		}
@@ -41,9 +58,24 @@ ExecuteTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 	printf("done dispatching async tasks\n");
 #endif
 
-	dispatch_sync(queue, ^{
-#if TRACE
-			printf("executing terminating sync task\n");
-#endif
+	FinishSerialDispatchAndWait(context);
+}
+
+void
+DispatchTaskSerially(NSDictionary *stepDescription, ReplayContext *context)
+{
+	HandleActionStep(stepDescription, context,
+		^(dispatch_block_t action,
+		__unused NSArray<NSString*> *inputs,
+		__unused NSArray<NSString*> *exclusiveInputs,
+		__unused NSArray<NSString*> *outputs)
+		{
+			if(action != NULL)
+			{
+				// with serial queue the tasks still execute one after another, never overlapping
+				// dispatch_async allows us to keep iterating, building and adding new tasks
+				// while the ones dispatched are already executing on the background thread
+				dispatch_async(context->queue, action);
+			}
 		});
 }
