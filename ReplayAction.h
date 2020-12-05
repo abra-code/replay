@@ -51,8 +51,8 @@ typedef void (^action_handler_t)(__nullable dispatch_block_t action,
 								NSArray<NSString*> * __nullable exclusiveInputs,
 								NSArray<NSString*> * __nullable outputs);
 
-void
-HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler);
+NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen);
+void HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler);
 
 bool CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext);
 bool MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext);

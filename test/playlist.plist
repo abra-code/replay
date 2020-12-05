@@ -94,7 +94,7 @@
 			<string>create</string>
 			<key>content</key>
 			<string>This is test file 8 at ${HOME}/${REPLAY_TEST} with unexpanded env vars</string>
-			<key>raw content</key>
+			<key>raw</key>
 			<true/>
 			<key>file</key>
 			<string>${HOME}/${REPLAY_TEST}/test-create-unexpanded.txt</string>

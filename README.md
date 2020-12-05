@@ -16,7 +16,7 @@ Type `replay --help` in Terminal to read the following:
 
 replay -- execute a declarative script of actions, aka a playlist
 
-Usage: replay [options] <playlist_file.json|plist>
+Usage: replay [options] [playlist_file.json|plist]
 
 Options:
 
@@ -57,7 +57,7 @@ Environment variables expansion:
 
 Dependency analysis:
 
-  In default execution mode (without --serial option) "replay" performs dependency analysis
+  In default execution mode (without --serial or --no-dependency option) "replay" performs dependency analysis
   and constructs an execution graph based on files consumed and produced by actions.
   If a file produced by action A is needed by action B, action B will not be executed until action A is finished.
   For example: if your playlist contains an action to create a directory and other actions write files
@@ -102,7 +102,7 @@ Actions and parameters:
               You can create either a file with optional content or a directory but not both in one action step.
     file      New file path (only for files).
     content   New file content string (only for files).
-    raw content   Bool value to indicate whether environment variables should be expanded or not.
+    raw       Bool value to indicate whether environment variables should be expanded or not in content text.
               Default value is "false", meaning that environment variables are expanded.
               Pass "true" if you want to write a script with some ${VARIABLE} usage
     directory   New directory path. All directories leading to the deepest one are created if they don't exist.
@@ -116,6 +116,43 @@ Actions and parameters:
     inputs    Array of file paths read by the tool during execution (optional).
     exclusive inputs    Array of file paths invalidated (items deleted or moved) by the tool (rare, optional).
     outputs   Array of file paths writen by the tool during execution (optional).
+    stdout    Bool value to indicate whether the output of the tool should be printed to stdout (optional).
+              Default value is "true", indicating the output from child process is printed to stdout.
+
+Streaming actions through stdin pipe:
+
+"replay" allows sending a stream of actions via stdin when the playlist file is not specified.
+Actions may be executed serially or concurrently but without dependency analysis.
+Dependency analysis requires a complete set of actions to create a graph while streaming
+starts execution immediately as the action requests arrive.
+Concurrent execution is default, which does not guarantee the order of actions but a new option:
+--ordered-output has been added to ensure the output order is the same as action scheduling order.
+For example, while streaming actions A, B, C in that order, the execution may happen like this: A, C, B
+but the printed output will still be preserved as A, B, C. This implies that that output of C
+will be delayed if B is taking long to finish.
+
+The format of streamed/piped commands is one command per line (not plist of json!), as follows:
+- ignore whitespace characters at the beginning of the line, if any
+- action and options come first in square brackets, e.g.: [clone], [move], [delete], [create file] [create directory]
+- the first character following the closing square bracket ']' is used as a field delimiter for the parameters to the action
+- variable length parameters are following, separated by the same field separator, specific to given action
+Param interpretation per action
+(examples use "tab" as a separator)
+1. [clone], [move], [hardlink], [symlink] allows only simple from-to specification,
+with first param interpretted as "from" and second as "to" e.g.:
+[clone]	/path/to/src/file.txt	/path/to/dest/file.txt
+2. [delete] is followed by one or many paths to items, e.g.:
+[delete]	/path/to/delete/file1.txt	/path/to/delete/file2.txt
+3. [create] has 2 variants: [create file] and [create directory].
+If "file" or "directory" option is not specified, it falls back to "file"
+A. [create file] requires path followed by optional content, e.g.:
+[create file]	/path/to/create/file.txt	Created by replay!
+B. [create directory] requires just a single path, e.g.:
+[create directory]	/path/to/create/directory
+4. [execute] requires tool path and may have optional parameters separated with the same delimiter (not space delimited!), e.g.:
+[execute]	/bin/echo	Hello from replay!
+In the following example uses a different separator: "+" to explicitly show delimited parameters:
+[execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep ".txt"
 
 Example JSON playlist:
 
@@ -199,5 +236,6 @@ Example execution:
 
 In the above example playlist some output files are inputs to later actions.
 The dependency analysis will create an execution graph to run dependent actions after the required outputs are produced.
+
 
 ```

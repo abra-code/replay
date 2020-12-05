@@ -212,7 +212,7 @@ DisplayHelp(void)
 		"\n"
 		"replay -- execute a declarative script of actions, aka a playlist\n"
 		"\n"
-		"Usage: replay [options] <playlist_file.json|plist>\n"
+		"Usage: replay [options] [playlist_file.json|plist]\n"
 		"\n"
 		"Options:\n"
 		"\n"
@@ -262,7 +262,7 @@ DisplayHelp(void)
 	printf(
 		"Dependency analysis:\n"
 		"\n"
-		"  In default execution mode (without --serial option) \"replay\" performs dependency analysis\n"
+		"  In default execution mode (without --serial or --no-dependency option) \"replay\" performs dependency analysis\n"
 		"  and constructs an execution graph based on files consumed and produced by actions.\n"
 		"  If a file produced by action A is needed by action B, action B will not be executed until action A is finished.\n"
 		"  For example: if your playlist contains an action to create a directory and other actions write files\n"
@@ -310,7 +310,7 @@ DisplayHelp(void)
       	"              You can create either a file with optional content or a directory but not both in one action step.\n"
       	"    file      New file path (only for files).\n"
       	"    content   New file content string (only for files).\n"
-      	"    raw content   Bool value to indicate whether environment variables should be expanded or not.\n"
+      	"    raw       Bool value to indicate whether environment variables should be expanded or not in content text.\n"
       	"              Default value is \"false\", meaning that environment variables are expanded.\n"
       	"              Pass \"true\" if you want to write a script with some ${VARIABLE} usage\n"
       	"    directory   New directory path. All directories leading to the deepest one are created if they don't exist.\n"
@@ -324,6 +324,48 @@ DisplayHelp(void)
 		"    inputs    Array of file paths read by the tool during execution (optional).\n"
 		"    exclusive inputs    Array of file paths invalidated (items deleted or moved) by the tool (rare, optional).\n"
 		"    outputs   Array of file paths writen by the tool during execution (optional).\n"
+		"    stdout    Bool value to indicate whether the output of the tool should be printed to stdout (optional).\n"
+		"              Default value is \"true\", indicating the output from child process is printed to stdout.\n"
+		"\n"
+	);
+
+
+	printf(
+		"Streaming actions through stdin pipe:\n"
+		"\n"
+		"\"replay\" allows sending a stream of actions via stdin when the playlist file is not specified.\n"
+		"Actions may be executed serially or concurrently but without dependency analysis.\n"
+		"Dependency analysis requires a complete set of actions to create a graph while streaming\n"
+		"starts execution immediately as the action requests arrive.\n"
+		"Concurrent execution is default, which does not guarantee the order of actions but a new option:\n"
+		"--ordered-output has been added to ensure the output order is the same as action scheduling order.\n"
+		"For example, while streaming actions A, B, C in that order, the execution may happen like this: A, C, B\n"
+		"but the printed output will still be preserved as A, B, C. This implies that that output of C\n"
+		"will be delayed if B is taking long to finish.\n"
+		"\n"
+		"The format of streamed/piped commands is one command per line (not plist of json!), as follows:\n"
+		"- ignore whitespace characters at the beginning of the line, if any\n"
+		"- action and options come first in square brackets, e.g.: [clone], [move], [delete], [create file] [create directory]\n"
+		"- the first character following the closing square bracket ']' is used as a field delimiter for the parameters to the action\n"
+		"- variable length parameters are following, separated by the same field separator, specific to given action\n"
+
+		"Param interpretation per action\n"
+		"(examples use \"tab\" as a separator)\n"
+		"1. [clone], [move], [hardlink], [symlink] allows only simple from-to specification,\n"
+		"with first param interpretted as \"from\" and second as \"to\" e.g.:\n"
+		"[clone]	/path/to/src/file.txt	/path/to/dest/file.txt\n"
+		"2. [delete] is followed by one or many paths to items, e.g.:\n"
+		"[delete]	/path/to/delete/file1.txt	/path/to/delete/file2.txt\n"
+		"3. [create] has 2 variants: [create file] and [create directory].\n"
+		"If \"file\" or \"directory\" option is not specified, it falls back to \"file\"\n"
+		"A. [create file] requires path followed by optional content, e.g.:\n"
+		"[create file]	/path/to/create/file.txt	Created by replay!\n"
+		"B. [create directory] requires just a single path, e.g.:\n"
+		"[create directory]	/path/to/create/directory\n"
+		"4. [execute] requires tool path and may have optional parameters separated with the same delimiter (not space delimited!), e.g.:\n"
+		"[execute]	/bin/echo	Hello from replay!\n"
+		"In the following example uses a different separator: \"+\" to explicitly show delimited parameters:\n"
+		"[execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep \".txt\"\n"
 		"\n"
 	);
 
@@ -452,6 +494,69 @@ static void ProcessPlaylist(NSArray<NSDictionary*> *playlist, ReplayContext *con
 	}
 }
 
+void
+StreamTasksFromStdIn(ReplayContext *context)
+{
+	if(context->concurrent)
+	{
+		context->outputSerializer = [OutputSerializer sharedOutputSerializer];
+		context->actionCounter = -1;
+		context->analyzeDependencies = false; // building dependency graph is not supported when tasks are streamed
+		StartConcurrentDispatchWithNoDependency(context);
+	}
+	else
+	{
+ 		// output is ordered by the virtue of serial execution
+ 		// but we don't want to trigger the complex infra for ordering of concurrent task outputs
+ 		context->outputSerializer = nil;
+		context->actionCounter = -1;
+		context->orderedOutput = false;
+		StartSerialDispatch(context);
+	}
+
+	char *line = NULL;
+	size_t linecap = 0;
+	ssize_t linelen;
+	while ((linelen = getline(&line, &linecap, stdin)) > 0)
+	{
+		NSDictionary *actionDescription = ActionDescriptionFromLine(line, linelen);
+		if(actionDescription != nil)
+		{
+			if(context->concurrent)
+				DispatchTaskConcurrentlyWithNoDependency(actionDescription, context);
+			else
+				DispatchTaskSerially(actionDescription, context);
+		}
+		else
+		{
+			if(context->stopOnError)
+			{
+				fprintf(stderr, "error: malformed action description on stdin: %s\n", line);
+				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Malformed action description on stdin" };
+				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				break;
+			}
+			else
+			{
+				fprintf(stderr, "warning: ignoring malformed action description on stdin: %s\n", line);
+			}
+		}
+	}
+
+	if(context->concurrent)
+	{
+		FinishConcurrentDispatchWithNoDependencyAndWait(context);
+		FlushSerializedOutputs(context->outputSerializer);
+	}
+	else
+	{
+		FinishSerialDispatchAndWait(context);
+	}
+
+	//do not bother free-ing the line buffer - the process is ending
+}
+
+
 int main(int argc, const char * argv[])
 {
 	ReplayContext context;
@@ -527,8 +632,12 @@ int main(int argc, const char * argv[])
 		playlistPath = argv[optind];
 		optind++;
 	}
-
-	if ([playlistKeys count] > 0)
+	
+	if(playlistPath == NULL)
+	{
+		StreamTasksFromStdIn(&context);
+	}
+	else if ([playlistKeys count] > 0)
 	{
 		NSDictionary* playlistRootDict = LoadPlaylistRootDictionary(playlistPath, &context);
 		if(playlistRootDict == nil)
