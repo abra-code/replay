@@ -305,7 +305,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				}
 				
 				bool expandContent = true;
-				id useRawText = stepDescription[@"raw content"];
+				id useRawText = stepDescription[@"raw"];
 				if([useRawText isKindOfClass:[NSNumber class]])
 				{
 					expandContent = ![useRawText boolValue];
@@ -888,7 +888,7 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 
 #pragma mark -
 
-// The format of streamed/piped commands is one command per line, as follows:
+// The format of streamed/piped actions is one action per line, as follows:
 // - ignore whitespace characters at the beginning of the line, if any
 // - action and options come first in square brackets, e.g.: [clone], [move], [delete], [create file] [create directory]
 // - the first character following the closing square bracket ']' is used as a field delimiter for the parameters to the action

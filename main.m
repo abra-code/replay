@@ -343,7 +343,7 @@ DisplayHelp(void)
 		"but the printed output will still be preserved as A, B, C. This implies that that output of C\n"
 		"will be delayed if B is taking long to finish.\n"
 		"\n"
-		"The format of streamed/piped commands is one command per line (not plist of json!), as follows:\n"
+		"The format of streamed/piped actions is one action per line (not plist of json!), as follows:\n"
 		"- ignore whitespace characters at the beginning of the line, if any\n"
 		"- action and options come first in square brackets, e.g.: [clone], [move], [delete], [create file] [create directory]\n"
 		"- the first character following the closing square bracket ']' is used as a field delimiter for the parameters to the action\n"
