@@ -241,4 +241,45 @@ verify_succeeded "$?" "'ordered output' test failed"
 echo ""
 #TODO: parse and verify the numbers are incremented in the output
 
+echo ""
+echo "------------------------------"
+echo ""
+echo "Streamed actions from action_stream.txt"
+echo ""
+
+echo "cat \"$REPLAY_TEST_DIR_PATH/action_stream.txt\" | replay --verbose --dry-run"
+cat "$REPLAY_TEST_DIR_PATH/action_stream.txt" | "$REPLAY_TOOL" --verbose --dry-run
+verify_succeeded "$?" "action stream test failed"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Unordered output from streamed sequential number echo actions in action_stream_ordering.txt"
+echo ""
+
+echo "cat \"$REPLAY_TEST_DIR_PATH/action_stream_ordering.txt\" | replay"
+cat "$REPLAY_TEST_DIR_PATH/action_stream_ordering.txt" | "$REPLAY_TOOL"
+verify_succeeded "$?" "unoredered output action stream test failed"
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Ordered output from streamed sequential number echo actions in action_stream_ordering.txt"
+echo ""
+
+echo "cat \"$REPLAY_TEST_DIR_PATH/action_stream_ordering.txt\" | replay --ordered-output"
+cat "$REPLAY_TEST_DIR_PATH/action_stream_ordering.txt" | "$REPLAY_TOOL" --ordered-output
+verify_succeeded "$?" "ordered output action stream test failed"
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Stream all files starting with dot from $HOME directory to execute echo action"
+echo ""
+
+echo "/bin/ls -a \"$HOME\" | /usr/bin/grep -E '^\..*' | /usr/bin/sed -E 's|(.+)|[execute]\t/bin/echo\t\1|' | replay --ordered-output"
+/bin/ls -a "$HOME" | /usr/bin/grep -E '^\..*' | /usr/bin/sed -E 's|(.+)|[execute]\t/bin/echo\t\1|' | "$REPLAY_TOOL" --ordered-output
+verify_succeeded "$?" "streaming files to execute action failed"
+
 report_test_stats

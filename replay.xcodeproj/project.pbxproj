@@ -56,6 +56,7 @@
 		1D74C1AF256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ConcurrentDispatchWithNoDependency.m; sourceTree = "<group>"; };
 		1D74C1B0256B890D003EB527 /* ConcurrentDispatchWithNoDependency.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ConcurrentDispatchWithNoDependency.h; sourceTree = "<group>"; };
 		1DCA6EB4255BFCC60063BBBD /* MedusaTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MedusaTask.h; sourceTree = "<group>"; };
+		1DFE39EF257D98E500BFE48E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,6 +73,7 @@
 		1D19042B24DE9EE900276D83 = {
 			isa = PBXGroup;
 			children = (
+				1DFE39EF257D98E500BFE48E /* README.md */,
 				1D19043724DE9EE900276D83 /* main.m */,
 				1D12130E2557CC7300E46A72 /* StringAndPath.h */,
 				1D12130F2557CC7300E46A72 /* StringAndPath.m */,

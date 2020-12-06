@@ -123,7 +123,7 @@ Streaming actions through stdin pipe:
 
 "replay" allows sending a stream of actions via stdin when the playlist file is not specified.
 Actions may be executed serially or concurrently but without dependency analysis.
-Dependency analysis requires a complete set of actions to create a graph while streaming
+Dependency analysis requires a complete set of actions to create a graph, while streaming
 starts execution immediately as the action requests arrive.
 Concurrent execution is default, which does not guarantee the order of actions but a new option:
 --ordered-output has been added to ensure the output order is the same as action scheduling order.
@@ -134,6 +134,7 @@ will be delayed if B is taking long to finish.
 The format of streamed/piped actions is one action per line (not plist of json!), as follows:
 - ignore whitespace characters at the beginning of the line, if any
 - action and options come first in square brackets, e.g.: [clone], [move], [delete], [create file] [create directory]
+  some options can be added as key=value as described in "Actions and parmeters" section above with examples below
 - the first character following the closing square bracket ']' is used as a field delimiter for the parameters to the action
 - variable length parameters are following, separated by the same field separator, specific to given action
 Param interpretation per action
@@ -141,16 +142,19 @@ Param interpretation per action
 1. [clone], [move], [hardlink], [symlink] allows only simple from-to specification,
 with first param interpretted as "from" and second as "to" e.g.:
 [clone]	/path/to/src/file.txt	/path/to/dest/file.txt
+[symlink validate=false]	/path/to/src/file.txt	/path/to/symlink/file.txt
 2. [delete] is followed by one or many paths to items, e.g.:
 [delete]	/path/to/delete/file1.txt	/path/to/delete/file2.txt
 3. [create] has 2 variants: [create file] and [create directory].
 If "file" or "directory" option is not specified, it falls back to "file"
 A. [create file] requires path followed by optional content, e.g.:
 [create file]	/path/to/create/file.txt	Created by replay!
+[create file raw=true]	/path/to/file.txt	Do not expand environment variables like ${HOME}
 B. [create directory] requires just a single path, e.g.:
 [create directory]	/path/to/create/directory
 4. [execute] requires tool path and may have optional parameters separated with the same delimiter (not space delimited!), e.g.:
 [execute]	/bin/echo	Hello from replay!
+[execute stdout=false]	/bin/echo	This will not be printed
 In the following example uses a different separator: "+" to explicitly show delimited parameters:
 [execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep ".txt"
 

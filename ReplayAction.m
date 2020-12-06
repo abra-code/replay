@@ -596,9 +596,22 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
 
+	NSNumber *validateSource = actionContext->settings[@"validate"];
+	bool validateSymlinkSource = true;
+	if([validateSource isKindOfClass:[NSNumber class]])
+	{
+		validateSymlinkSource = [validateSource boolValue];
+	}
+
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[symlink]	%@	%@\n", [fromURL path], [linkURL path]];
+		NSString *settingsStr = @"";
+		if(validateSource != nil) //explicitly set
+		{
+			settingsStr = validateSymlinkSource ? @" validate=true" : @" validate=false";
+		}
+		
+		NSString *stdoutStr = [NSString stringWithFormat:@"[symlink%@]	%@	%@\n", settingsStr, [fromURL path], [linkURL path]];
 		PrintToStdOut(context, stdoutStr, actionContext->index);
 	}
 	else
@@ -613,13 +626,6 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 	{
 		NSFileManager *fileManager = [NSFileManager defaultManager];
 		NSError *operationError = nil;
-
-		NSNumber *validateSource = actionContext->settings[@"validate"];
-		bool validateSymlinkSource = true;
-		if([validateSource isKindOfClass:[NSNumber class]])
-		{
-			validateSymlinkSource = [validateSource boolValue];
-		}
 
 		if(validateSymlinkSource && ![fileManager fileExistsAtPath:[fromURL path]])
 		{
@@ -668,8 +674,16 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 
 	if(context->verbose || context->dryRun)
 	{
+		id useRawText = actionContext->settings[@"raw"];
+		NSString *settingsStr = @"";
+		if([useRawText isKindOfClass:[NSNumber class]])
+		{
+			bool rawContent = [useRawText boolValue];
+			settingsStr = rawContent ? @" raw=true" : @" raw=false";
+		}
+
 		//TODO: escape newlines for multiline text so it will be displayed in one line
-		NSString *stdoutStr = [NSString stringWithFormat:@"[create]	%@	%@\n", [itemURL path], content];
+		NSString *stdoutStr = [NSString stringWithFormat:@"[create file%@]	%@	%@\n", settingsStr, [itemURL path], content];
 		PrintToStdOut(context, stdoutStr, actionContext->index);
 	}
 	else
@@ -720,7 +734,7 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[create]	%@\n", [itemURL path]];
+		NSString *stdoutStr = [NSString stringWithFormat:@"[create directory]	%@\n", [itemURL path]];
 		PrintToStdOut(context, stdoutStr, actionContext->index);
 	}
 	else
@@ -797,10 +811,20 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 	if(context->stopOnError && (context->lastError.error != nil))
 		return false;
 
+	NSNumber *useStdOutNum = actionContext->settings[@"stdout"];
+	bool useStdOut = true;
+	if([useStdOutNum isKindOfClass:[NSNumber class]])
+		useStdOut = [useStdOutNum boolValue];
+
 	if(context->verbose || context->dryRun)
 	{
+		NSString *settingsStr = @"";
+		if(useStdOutNum != nil) //if the setting was explicitly specified
+		{
+			settingsStr = useStdOut ? @" stdout=true" : @" stdout=false";
+		}
 		NSString *allArgsStr = [arguments componentsJoinedByString:@"\t"];
-		NSString *stdoutStr = [NSString stringWithFormat:@"[execute]	%@	%@\n", toolPath, allArgsStr];
+		NSString *stdoutStr = [NSString stringWithFormat:@"[execute%@]	%@	%@\n", settingsStr, toolPath, allArgsStr];
 		PrintToStdOut(context, stdoutStr, actionContext->index);
 	}
 	else
@@ -846,11 +870,6 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 			NSData *stdOutData = [stdOutFileHandle readDataToEndOfFileAndReturnError:&operationError];
 			if(stdOutData != nil)
 			{
-				NSNumber *useStdOutNum = actionContext->settings[@"stdout"];
-				bool useStdOut = true;
-				if([useStdOutNum isKindOfClass:[NSNumber class]])
-					useStdOut = [useStdOutNum boolValue];
-
 				if(useStdOut)
 				{
 					//since we captured stdout and waited on it, now replay it to stdout
@@ -887,6 +906,50 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 }
 
 #pragma mark -
+
+static inline void
+AddOptionsToActionDescription(NSMutableDictionary *actionDescription, NSArray<NSString *> *actionAndOptionsArray)
+{
+	NSUInteger itemCount = actionAndOptionsArray.count;
+	if(itemCount < 2)
+		return; //no options
+
+	//skipping the first word (action), examine if optional settings contain key=value
+	for(NSUInteger i = 1; i < itemCount; i++)
+	{
+		NSString *oneOption = actionAndOptionsArray[i];
+		if([oneOption containsString:@"="])
+		{
+			NSArray<NSString*> *keyValuesArray = [oneOption componentsSeparatedByString:@"="];
+			if(keyValuesArray.count == 2)
+			{
+				NSString *keyStr = keyValuesArray[0];
+				NSString *valStr = keyValuesArray[1];
+				NSDecimalNumber *num = nil;
+				if([valStr compare:@"true" options:NSCaseInsensitiveSearch] == NSOrderedSame)
+				{
+					actionDescription[keyStr] = @YES;
+				}
+				else if([valStr compare:@"false" options:NSCaseInsensitiveSearch] == NSOrderedSame)
+				{
+					actionDescription[keyStr] = @NO;
+				}
+				else if((num = [NSDecimalNumber decimalNumberWithString:valStr]) != nil)
+				{//it is a number
+					actionDescription[keyStr] = num;
+				}
+				else
+				{//fall back to string
+					actionDescription[keyStr] = valStr;
+				}
+			}
+			else
+			{
+				fprintf(stderr, "warning: invalid option: %s\n", [oneOption UTF8String]);
+			}
+		}
+	}
+}
 
 // The format of streamed/piped actions is one action per line, as follows:
 // - ignore whitespace characters at the beginning of the line, if any
@@ -972,7 +1035,7 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 		return nil;
 
 	//action must be the first word, options are space separated and optional
-	NSArray *actionAndOptionsArray = [actionAndOptionsStr componentsSeparatedByString:@" "];
+	NSArray<NSString*> *actionAndOptionsArray = [actionAndOptionsStr componentsSeparatedByString:@" "];
 	NSUInteger actionAndOptionsCount = [actionAndOptionsArray count];
 	NSString *actionName = nil;
 	if(actionAndOptionsCount > 0) //should always be
@@ -1016,8 +1079,6 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 		if(action == kFileActionDelete)
 		{ // variable element input - all params are paths to delete
 			actionDescription[@"items"] = paramArray;
-			
-			//TODO: for symlink handle validate=false option
 		}
 		else if(action == kFileActionCreate)
 		{
@@ -1032,8 +1093,6 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 					actionDescription[@"file"] = paramArray[0];
 				if(paramCount > 1)
 					actionDescription[@"content"] = paramArray[1];
-				
-				//TODO: handle raw=true option
 			}
 		}
 		else if(action == kActionExecuteTool)
@@ -1050,6 +1109,8 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 			}
 		}
 	}
+
+	AddOptionsToActionDescription(actionDescription, actionAndOptionsArray);
 
 	return actionDescription;
 }

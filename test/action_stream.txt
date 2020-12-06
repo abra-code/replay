@@ -1,0 +1,15 @@
+[clone]	${REPLAY_TEST_FILES_DIR}/test-clone.txt	/Users/${USER}/${REPLAY_TEST}/test-clone.txt
+[move]	/Users/${USER}/${REPLAY_TEST}/test-move.txt	/Users/${USER}/${REPLAY_TEST}/test-moved.txt
+[hardlink]	${REPLAY_TEST_FILES_DIR}/test-hardlink.txt	/Users/${USER}/${REPLAY_TEST}/test-hardlink.txt
+[symlink]	${REPLAY_TEST_FILES_DIR}/test-symlink.txt	/Users/${USER}/${REPLAY_TEST}/test-symlink.txt
+[symlink validate=false]	${REPLAY_TEST_FILES_DIR}/non-existing-file.txt	/Users/${USER}/${REPLAY_TEST}/test-symlink.txt
+[clone]	${REPLAY_TEST_FILES_DIR}/test-clone-bulk1.txt	${HOME}/${REPLAY_TEST}/test-clone-bulk1.txt
+[clone]	${REPLAY_TEST_FILES_DIR}/test-clone-bulk2.txt	${HOME}/${REPLAY_TEST}/test-clone-bulk2.txt
+[clone]	${REPLAY_TEST_FILES_DIR}/test-clone-bulk3.txt	${HOME}/${REPLAY_TEST}/test-clone-bulk3.txt
+[create directory]	${HOME}/${REPLAY_TEST}/test-dir
+[create file]	${HOME}/${REPLAY_TEST}/test-create-expanded.txt	This is test file 7 at ${HOME}/${REPLAY_TEST} with expanded env vars
+[create file raw=true]	${HOME}/${REPLAY_TEST}/test-create-unexpanded.txt	This is test file 8 at ${HOME}/${REPLAY_TEST} with unexpanded env vars
+[delete]	${HOME}/${REPLAY_TEST}/test-delete.txt
+[execute]	/usr/bin/echo	Hello replay stream
+[execute stdout=false]	/bin/echo	This string from child process should not be printed
+[execute stdout=false option=something number=123]	/bin/echo	Dummy test
