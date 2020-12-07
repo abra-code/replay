@@ -98,37 +98,37 @@ CreateSourceDestinationAction(Action fileAction, NSURL *sourceURL, NSURL *destin
 	{
 		case kFileActionClone:
 		{
-			action = ^{
+            action = ^{ @autoreleasepool {
 				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
 				__unused bool isOK = CloneItem(sourceURL, destinationURL, context, &localContext);
-			};
+            }};
 		}
 		break;
 
 		case kFileActionMove:
 		{
-			action = ^{
+            action = ^{ @autoreleasepool {
 				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
 				__unused bool isOK = MoveItem(sourceURL, destinationURL, context, &localContext);
-			};
+            }};
 		}
 		break;
 		
 		case kFileActionHardlink:
 		{
-			action = ^{
+            action = ^{ @autoreleasepool {
 				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
 				__unused bool isOK = HardlinkItem(sourceURL, destinationURL, context, &localContext);
-			};
+            }};
 		}
 		break;
 
 		case kFileActionSymlink:
 		{
-			action = ^{
+            action = ^{ @autoreleasepool {
 				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
 				__unused bool isOK = SymlinkItem(sourceURL, destinationURL, context, &localContext);
-			};
+            }};
 		}
 		break;
 		
@@ -169,6 +169,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 	if(context->stopOnError && (context->lastError.error != nil))
 		return;
 
+ @autoreleasepool {
 	bool isSrcDestAction = false;
 	Action fileAction = ActionFromName(stepDescription[@"action"], &isSrcDestAction);
 
@@ -265,10 +266,11 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					{
 						NSURL *oneURL = [NSURL fileURLWithPath:expandedPath];
 						NSInteger actionIndex = ++(context->actionCounter);
-						action = ^{
+                        action = ^{ @autoreleasepool {
 							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
 							__unused bool isOK = DeleteItem(oneURL, context, &actionContext);
-						};
+						
+                        }};
 						
 						if(context->concurrent)
 						{
@@ -322,10 +324,10 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				{
 					NSURL *fileURL = [NSURL fileURLWithPath:expandedPath];
 					NSInteger actionIndex = ++(context->actionCounter);
-					action = ^{
+                    action = ^{ @autoreleasepool {
 						ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
 						__unused bool isOK = CreateFile(fileURL, content, context, &actionContext);
-					};
+                    }};
 					
 					if(context->concurrent)
 					{
@@ -344,10 +346,10 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					{
 						NSURL *dirURL = [NSURL fileURLWithPath:expandedDirPath];
 						NSInteger actionIndex = ++(context->actionCounter);
-						action = ^{
+                        action = ^{ @autoreleasepool {
 							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
 							__unused bool isOK = CreateDirectory(dirURL, context, &actionContext);
-						};
+                        }};
 						
 						if(context->concurrent)
 						{
@@ -402,10 +404,10 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						if(argsOK)
 						{
 							NSInteger actionIndex = ++(context->actionCounter);
-							action = ^{
-								ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
-								__unused bool isOK = ExcecuteTool(expandedToolPath, expandedArgs, context, &actionContext);
-							};
+							action = ^{ @autoreleasepool {
+                                    ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+                                    __unused bool isOK = ExcecuteTool(expandedToolPath, expandedArgs, context, &actionContext);
+                            }};
 							
 							// [execute] action is expected to print two strings:
 							// - verbose action description (or null string if not verbose)
@@ -434,6 +436,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 		}
 	}
+ } //autoreleasepool
 }
 
 
