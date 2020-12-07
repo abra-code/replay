@@ -2,7 +2,7 @@
 
 echo ""
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-echo "  Stress-resting replay tool "
+echo "  Stress-testing replay tool "
 echo "  These tests may take long! "
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""

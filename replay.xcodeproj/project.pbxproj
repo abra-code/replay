@@ -57,6 +57,7 @@
 		1D74C1B0256B890D003EB527 /* ConcurrentDispatchWithNoDependency.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ConcurrentDispatchWithNoDependency.h; sourceTree = "<group>"; };
 		1DCA6EB4255BFCC60063BBBD /* MedusaTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MedusaTask.h; sourceTree = "<group>"; };
 		1DFE39EF257D98E500BFE48E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		1DFE39F2257E26C000BFE48E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -74,6 +75,7 @@
 			isa = PBXGroup;
 			children = (
 				1DFE39EF257D98E500BFE48E /* README.md */,
+				1DFE39F2257E26C000BFE48E /* Info.plist */,
 				1D19043724DE9EE900276D83 /* main.m */,
 				1D12130E2557CC7300E46A72 /* StringAndPath.h */,
 				1D12130F2557CC7300E46A72 /* StringAndPath.m */,
@@ -300,7 +302,12 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_PREPROCESS = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abracode.replay;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Debug;
@@ -310,7 +317,12 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_PREPROCESS = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abracode.replay;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
