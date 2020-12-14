@@ -326,6 +326,10 @@ DisplayHelp(void)
 		"    outputs   Array of file paths writen by the tool during execution (optional).\n"
 		"    stdout    Bool value to indicate whether the output of the tool should be printed to stdout (optional).\n"
 		"              Default value is \"true\", indicating the output from child process is printed to stdout.\n"
+		"  echo        Print a string to stdout.\n"
+		"    text      The text to print.\n"
+      	"    raw       Bool value to indicate whether environment variables should be expanded in the text. Default is \"true\".\n"
+      	"    newline   Bool value to indicate whether the output string should be followed by newline. Default is \"true\".\n"
 		"\n"
 	);
 

@@ -70,6 +70,12 @@
         "${HOME}/${REPLAY_TEST}/test-delete.txt",
         ],
     },
+    {
+      "action": "echo",
+      "text": [
+        "Hello replay. HOME is ${HOME}",
+        ],
+    },
   ],
   "force tests":
   [

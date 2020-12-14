@@ -18,7 +18,8 @@ typedef enum
 	kFileActionSymlink,
 	kFileActionCreate,
 	kFileActionDelete,
-	kActionExecuteTool
+	kActionExecuteTool,
+	kActionEcho
 } Action;
 
 
@@ -62,5 +63,6 @@ bool CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, Actio
 bool CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext);
 bool DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext);
 bool ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext);
+bool Echo(NSString *content, ReplayContext *context, ActionContext *actionContext);
 
 NS_ASSUME_NONNULL_END

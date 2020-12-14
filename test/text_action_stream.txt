@@ -1,0 +1,4 @@
+[echo]	Hello replay. Home is ${HOME}
+[echo raw=true]	This home is raw: ${HOME}
+[echo newline=false]	This echo is with no newline.
+[echo]	 Continue the line.

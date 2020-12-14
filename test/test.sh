@@ -255,6 +255,17 @@ verify_succeeded "$?" "action stream test failed"
 echo ""
 echo "------------------------------"
 echo ""
+echo "Streamed actions from text_action_stream.txt"
+echo ""
+
+echo "cat \"$REPLAY_TEST_DIR_PATH/text_action_stream.txt\" | replay --ordered-output"
+cat "$REPLAY_TEST_DIR_PATH/text_action_stream.txt" | "$REPLAY_TOOL" --ordered-output
+verify_succeeded "$?" "text action stream test failed"
+
+
+echo ""
+echo "------------------------------"
+echo ""
 echo "Unordered output from streamed sequential number echo actions in action_stream_ordering.txt"
 echo ""
 

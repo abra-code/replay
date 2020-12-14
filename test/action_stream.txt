@@ -13,3 +13,6 @@
 [execute]	/usr/bin/echo	Hello replay stream
 [execute stdout=false]	/bin/echo	This string from child process should not be printed
 [execute stdout=false option=something number=123]	/bin/echo	Dummy test
+[echo]	Hello replay. Home is ${HOME}
+[echo raw=true]	This home is raw: ${HOME}
+[echo newline=false]	This echo is with no newline

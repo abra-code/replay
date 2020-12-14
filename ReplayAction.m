@@ -19,6 +19,18 @@ static inline void PrintToStdOut(ReplayContext *context, NSString *string, NSInt
 	PrintSerializedString(context->outputSerializer, string, context->orderedOutput ? actionIndex : -1);
 }
 
+static inline void PrintStringsToStdOut(ReplayContext *context, NSArray<NSString *> *array, NSInteger actionIndex)
+{
+	if(context->orderedOutput)
+	{
+		assert(context->outputSerializer != nil);
+		assert(actionIndex >=0);
+	}
+
+	PrintSerializedStrings(context->outputSerializer, array, context->orderedOutput ? actionIndex : -1);
+}
+
+
 static inline void ActionWithNoOutput(ReplayContext *context, NSInteger actionIndex)
 {
 	if(context->orderedOutput)
@@ -38,63 +50,68 @@ ActionFromName(NSString *actionName, bool *isSrcDestActionPtr)
 		return kActionInvalid;
 	}
 
-	Action fileAction = kActionInvalid;
+	Action replayAction = kActionInvalid;
 	bool isSrcDestAction = false;
 
 	if([actionName isEqualToString:@"clone"] || [actionName isEqualToString:@"copy"])
 	{
-		fileAction = kFileActionClone;
+		replayAction = kFileActionClone;
 		isSrcDestAction = true;
 	}
 	else if([actionName isEqualToString:@"move"])
 	{
-		fileAction = kFileActionMove;
+		replayAction = kFileActionMove;
 		isSrcDestAction = true;
 	}
 	else if([actionName isEqualToString:@"hardlink"])
 	{
-		fileAction = kFileActionHardlink;
+		replayAction = kFileActionHardlink;
 		isSrcDestAction = true;
 	}
 	else if([actionName isEqualToString:@"symlink"])
 	{
-		fileAction = kFileActionSymlink;
+		replayAction = kFileActionSymlink;
 		isSrcDestAction = true;
 	}
 	else if([actionName isEqualToString:@"create"])
 	{
-		fileAction = kFileActionCreate;
+		replayAction = kFileActionCreate;
 		isSrcDestAction = false;
 	}
 	else if([actionName isEqualToString:@"delete"])
 	{
-		fileAction = kFileActionDelete;
+		replayAction = kFileActionDelete;
 		isSrcDestAction = false;
 	}
 	else if([actionName isEqualToString:@"execute"])
 	{
-		fileAction = kActionExecuteTool;
+		replayAction = kActionExecuteTool;
+		isSrcDestAction = false;
+	}
+	else if([actionName isEqualToString:@"echo"])
+	{
+		replayAction = kActionEcho;
 		isSrcDestAction = false;
 	}
 	else
 	{
-		fileAction = kActionInvalid;
+		replayAction = kActionInvalid;
 		fprintf(stderr, "error: unrecognized step action: %s\n", [actionName UTF8String]);
 	}
 
 	*isSrcDestActionPtr = isSrcDestAction;
-	return fileAction;
+	return replayAction;
 }
 
 
 static inline dispatch_block_t
-CreateSourceDestinationAction(Action fileAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context, NSDictionary *actionSettings, NSInteger actionIndex)
+CreateSourceDestinationAction(Action replayAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context, NSDictionary *actionSettings, NSInteger actionIndex)
 {
 	if((sourceURL == nil) || (destinationURL == nil))
 		return nil;
 
 	dispatch_block_t action = NULL;
-	switch(fileAction)
+	switch(replayAction)
 	{
 		case kFileActionClone:
 		{
@@ -171,9 +188,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
  @autoreleasepool {
 	bool isSrcDestAction = false;
-	Action fileAction = ActionFromName(stepDescription[@"action"], &isSrcDestAction);
+	Action replayAction = ActionFromName(stepDescription[@"action"], &isSrcDestAction);
 
-	if(fileAction == kActionInvalid)
+	if(replayAction == kActionInvalid)
 		return;
 	
 	Class stringClass = [NSString class];
@@ -202,11 +219,11 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			
 			// handles nil sourceURL or destinationURL by skipping action
 			NSInteger actionIndex = ++(context->actionCounter);
-			action = CreateSourceDestinationAction(fileAction, sourceURL, destinationURL, context, stepDescription, actionIndex);
+			action = CreateSourceDestinationAction(replayAction, sourceURL, destinationURL, context, stepDescription, actionIndex);
 			
 			if(context->concurrent)
 			{
-				if(fileAction == kFileActionMove)
+				if(replayAction == kFileActionMove)
 					exclusiveInputs = @[sourceURL.absoluteURL.path];
 				else
 					inputs = @[sourceURL.absoluteURL.path];
@@ -236,11 +253,11 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						NSURL *destinationURL = [destItemURLs objectAtIndex:destIndex];
 						++destIndex;
 						NSInteger actionIndex = ++(context->actionCounter);
-						action = CreateSourceDestinationAction(fileAction, srcItemURL, destinationURL, context, stepDescription, actionIndex);
+						action = CreateSourceDestinationAction(replayAction, srcItemURL, destinationURL, context, stepDescription, actionIndex);
 						
 						if(context->concurrent)
 						{
-							if(fileAction == kFileActionMove)
+							if(replayAction == kFileActionMove)
 								exclusiveInputs = @[srcItemURL.absoluteURL.path];
 							else
 								inputs = @[srcItemURL.absoluteURL.path];
@@ -254,7 +271,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 	}
 	else
 	{
-		if(fileAction == kFileActionDelete)
+		if(replayAction == kFileActionDelete)
 		{
 			NSArray<NSString*> *itemPaths = stepDescription[@"items"];
 			if([itemPaths isKindOfClass:arrayClass])
@@ -292,7 +309,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				context->lastError.error = operationError;
 			}
 		}
-		else if(fileAction == kFileActionCreate)
+		else if(replayAction == kFileActionCreate)
 		{
 			NSString *filePath = stepDescription[@"file"];
 			if([filePath isKindOfClass:stringClass])
@@ -367,7 +384,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				}
 			}
 		}
-		else if(fileAction == kActionExecuteTool)
+		else if(replayAction == kActionExecuteTool)
 		{
 			NSString *toolPath = stepDescription[@"tool"];
 			if([toolPath isKindOfClass:stringClass])
@@ -433,6 +450,48 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid execute action specification" };
 				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
 				context->lastError.error = operationError;
+			}
+		}
+		else if(replayAction == kActionEcho)
+		{
+			NSString *text = stepDescription[@"text"];
+
+			if(text == nil)
+				text = @"";
+
+			if(![text isKindOfClass:stringClass])
+			{
+				fprintf(stderr, "error: \"text\" is expected to be a string\n");
+				text = @"";
+			}
+			
+			bool expandText = true;
+			id useRawText = stepDescription[@"raw"];
+			if([useRawText isKindOfClass:[NSNumber class]])
+			{
+				expandText = ![useRawText boolValue];
+			}
+
+			if(expandText)
+				text = StringByExpandingEnvironmentVariablesWithErrorCheck(text, context);
+
+			// text is nil only if string is malformed or missing environment variable
+			// otherwise the string may be empty but non-nil
+			if(text != nil)
+			{
+				NSInteger actionIndex = ++(context->actionCounter);
+				action = ^{ @autoreleasepool {
+					ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+					__unused bool isOK = Echo(text, context, &actionContext);
+				}};
+				
+				// [echo] action is expected to print two strings:
+				// - verbose action description (or null string if not verbose)
+				// - actual text printed to stdout
+				// so we need to increase the counter second time
+				++(context->actionCounter);
+
+				actionHandler(action, nil, nil, outputs);
 			}
 		}
 	}
@@ -908,6 +967,69 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 	return isSuccessful;
 }
 
+
+
+bool
+Echo(NSString *text, ReplayContext *context, ActionContext *actionContext)
+{
+	if(context->stopOnError && (context->lastError.error != nil))
+		return false;
+
+	bool addNewline = true;
+	id newlineVal = actionContext->settings[@"newline"];
+	if([newlineVal isKindOfClass:[NSNumber class]])
+	{
+		addNewline = [newlineVal boolValue];
+	}
+
+	if(context->verbose || context->dryRun)
+	{
+		id useRawText = actionContext->settings[@"raw"];
+		NSString *rawSetting = @"";
+		if([useRawText isKindOfClass:[NSNumber class]])
+		{
+			bool rawContent = [useRawText boolValue];
+			rawSetting = rawContent ? @" raw=true" : @" raw=false";
+		}
+
+		NSString *newlineSetting = @"";
+		if(newlineVal != nil) // only if explicitly set
+		{
+			newlineSetting = addNewline ? @" newline=true" : @" newline=false";
+		}
+
+		//TODO: escape newlines for multiline text so it will be displayed in one line
+		NSString *stdoutStr = [NSString stringWithFormat:@"[echo%@%@]	%@\n", rawSetting, newlineSetting, text];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
+	}
+
+	// echo is expected to print two strings to stdout (verbose status and actual string)
+	actionContext->index++;
+
+	if(!context->dryRun)
+	{
+		if(addNewline)
+		{
+			NSArray <NSString *> *array = @[text, @"\n"];
+			PrintStringsToStdOut(context, array, actionContext->index);
+		}
+		else
+		{
+			PrintToStdOut(context, text, actionContext->index);
+		}
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
+	}
+
+	return true;
+}
+
 #pragma mark -
 
 static inline void
@@ -1110,6 +1232,11 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 				NSArray<NSString *> *args = [paramArray subarrayWithRange:NSMakeRange(1, paramCount-1)];
 				actionDescription[@"arguments"] = args;
 			}
+		}
+		else if(action == kActionEcho)
+		{
+			if(paramCount > 0)
+				actionDescription[@"text"] = paramArray[0];
 		}
 	}
 

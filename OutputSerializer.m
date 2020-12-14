@@ -31,7 +31,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 //helper object because we can only pass one param to [NSTread performSelector:onThread:withObject:waitUntilDone:]
 @interface ActionOutputSpec : NSObject
-	@property(nonatomic, strong) NSString *string;
+	@property(nonatomic, strong) NSString *string; //the idea is to provide either a single string or an array but not both
+	@property(nonatomic, strong) NSArray<NSString *> *array;
 	@property(nonatomic) NSInteger actionIndex;
 @end
 
@@ -96,59 +97,91 @@ static void EmptyCallback(__unused void *info)
 	CFRelease(source);
 }
 
+static inline
+void printStringOrArray(NSString *actionOutputString, NSArray<NSString *> *outputArray)
+{
+	if(actionOutputString != nil)
+	{
+		fprintf(stdout, "%s", [actionOutputString UTF8String]);
+	}
+	else if(outputArray != nil)
+	{
+		for(NSString *oneString in outputArray)
+		{
+			fprintf(stdout, "%s", [oneString UTF8String]);
+		}
+	}
+}
+
+static inline
+void printPendingOutput(id pendingOutput)
+{
+	if((NSNull *)pendingOutput != [NSNull null])
+	{
+		if([pendingOutput isKindOfClass:[NSString class]])
+		{
+			fprintf(stdout, "%s", [(NSString*)pendingOutput UTF8String]);
+		}
+		else if([pendingOutput isKindOfClass:[NSArray class]])
+		{
+			NSArray<NSString *> *array = (NSArray<NSString *> *)pendingOutput;
+			for(NSString *oneString in array)
+			{
+				fprintf(stdout, "%s", [oneString UTF8String]);
+			}
+		}
+	}
+}
+
 // executing on the serial thread
 - (void)printString:(nonnull ActionOutputSpec *)actionOutputSpec
 {
 	NSInteger actionIndex = actionOutputSpec.actionIndex;
 	NSString *actionOutputString = actionOutputSpec.string;
+	NSArray<NSString *> *outputArray = actionOutputSpec.array;
 
 	if(actionIndex < 0)
 	{ // client does not request ordering. Process in FIFO order
-		assert(actionOutputString != nil);
-		fprintf(stdout, "%s", [actionOutputString UTF8String]);
+		assert((actionOutputString != nil) || (outputArray != nil));
+		printStringOrArray(actionOutputString, outputArray);
 	}
 	else if((_lastPrintedActionIndex + 1) == actionIndex)
 	{ // in order, print it
-		if(actionOutputString != nil) //when nil, the caller has no output, just wants to bump up the action index
-		{
-			fprintf(stdout, "%s", [actionOutputString UTF8String]);
-		}
+		printStringOrArray(actionOutputString, outputArray);
 		_lastPrintedActionIndex = actionIndex;
 		
 		// check if there are any pending strings we can print if the order is now satisifed
-		NSString* pendingString = nil;
+		id pendingOutput = nil;
 		do
 		{
 			NSInteger nextTaskIndex = _lastPrintedActionIndex + 1;
-			pendingString = CFDictionaryGetValue(_pendingOutputs, (const void *)nextTaskIndex);
-			if(pendingString != nil)
+			pendingOutput = (__bridge id)CFDictionaryGetValue(_pendingOutputs, (const void *)nextTaskIndex);
+			if(pendingOutput != nil)
 			{
-				if ((NSNull *)pendingString != [NSNull null])
-				{
-					fprintf(stdout, "%s", [pendingString UTF8String]);
-				}
+				printPendingOutput(pendingOutput);
 				CFDictionaryRemoveValue(_pendingOutputs, (const void *)nextTaskIndex);
 				_lastPrintedActionIndex = nextTaskIndex;
 			}
 		}
-		while(pendingString != nil);
+		while(pendingOutput != nil);
 	}
 	else if(actionIndex <= _lastPrintedActionIndex)
 	{//this is a contract violation - the action indexes cannot be lower than the already processed ones
-		if(actionOutputString != nil)
-		{ //still process this but do not add to pending items or change _lastPrintedActionIndex
-			fprintf(stdout, "%s", [actionOutputString UTF8String]);
-		}
+		printStringOrArray(actionOutputString, outputArray);
 		// logic error, so abort in debug
 		assert(actionIndex > _lastPrintedActionIndex);
 	}
 	else
 	{ // out of order, store the string in pending dict but cannot print anything yet
-		if(actionOutputString == nil)
-		{ // an action without output, we need to make sure we still process it so the indexes are sequential, so add as empty/null
-			actionOutputString = (NSString*)[NSNull null];
-		}
-		CFDictionarySetValue(_pendingOutputs, (const void *)actionIndex, (const void*)(__bridge CFStringRef)actionOutputString);
+		CFTypeRef objToAdd = nil;
+		if(actionOutputString != nil)
+			objToAdd = (__bridge CFStringRef)actionOutputString;
+		else if(outputArray != nil)
+			objToAdd = (__bridge CFArrayRef)outputArray;
+		else // an action without output, we need to make sure we still process it so the indexes are sequential, so add as empty/null
+			objToAdd = (__bridge CFTypeRef)[NSNull null];
+
+		CFDictionarySetValue(_pendingOutputs, (const void *)actionIndex, objToAdd);
 	}
 }
 
@@ -170,13 +203,10 @@ static void EmptyCallback(__unused void *info)
 		do
 		{
 			NSInteger nextActionIndex = _lastPrintedActionIndex + 1;
-			NSString* pendingString = CFDictionaryGetValue(_pendingOutputs, (const void *)nextActionIndex);
-			if(pendingString != nil)
+			id pendingOutput = (__bridge id)CFDictionaryGetValue(_pendingOutputs, (const void *)nextActionIndex);
+			if(pendingOutput != nil)
 			{
-				if ((NSNull *)pendingString != [NSNull null])
-				{
-					fprintf(stdout, "%s", [pendingString UTF8String]);
-				}
+				printPendingOutput(pendingOutput);
 				CFDictionaryRemoveValue(_pendingOutputs, (const void *)nextActionIndex);
 				_lastPrintedActionIndex = nextActionIndex;
 				remainingPendingCount = CFDictionaryGetCount(_pendingOutputs);
@@ -205,6 +235,19 @@ static void EmptyCallback(__unused void *info)
 	[self performSelector:@selector(printString:) onThread:_thread withObject:actionOutputSpec waitUntilDone:NO];
 }
 
+// executing on calling thread
+- (void)scheduleOutputStrings:(nullable NSArray<NSString*> *)array withActionIndex:(NSInteger)actionIndex
+{
+	ActionOutputSpec *actionOutputSpec = [ActionOutputSpec new];
+	actionOutputSpec.array = array;
+	actionOutputSpec.actionIndex = actionIndex;
+
+	//this is not atomic but should be good enough to test if the thread entered the runloop already
+	assert(self.thread.executing);
+
+	[self performSelector:@selector(printString:) onThread:_thread withObject:actionOutputSpec waitUntilDone:NO];
+}
+
 @end // OutputSerializer
 
 
@@ -221,6 +264,21 @@ PrintSerializedString(OutputSerializer * _Nullable serializer,  NSString * _Null
 	else
 	{
 		fprintf(stdout, "%s", [string UTF8String]);
+	}
+}
+
+void PrintSerializedStrings(OutputSerializer * _Nullable serializer, NSArray<NSString *> * _Nullable array, NSInteger actionIndex)
+{
+	if(serializer != nil)
+	{
+		[serializer scheduleOutputStrings:array withActionIndex:actionIndex];
+	}
+	else
+	{
+		for(NSString *oneString in array)
+		{
+			fprintf(stdout, "%s", [oneString UTF8String]);
+		}
 	}
 }
 
