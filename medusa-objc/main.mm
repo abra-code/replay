@@ -199,7 +199,7 @@ static void ExecuteMedusasWithScheduler(NSArray<TaskProxy*> *allTasks, FileNode 
 {
 	ConnectImplicitProducers(fileTreeRoot);
 
-	TaskScheduler *scheduler = [TaskScheduler sharedScheduler];
+	TaskScheduler *scheduler = [TaskScheduler new];
 
 	//graph root task is created by the scheduler
 	//we build the graph by adding children tasks to the root
@@ -214,6 +214,11 @@ static void ExecuteMedusasWithScheduler(NSArray<TaskProxy*> *allTasks, FileNode 
 	 
 	double seconds = timer.elapsed();
 	std::cout << "Finished medusa execution in " << seconds << " seconds\n";
+	
+	hi_res_timer releaseTimer;
+	scheduler = nil;
+	seconds = releaseTimer.elapsed();
+	std::cout << "Finished releasing TaskScheduler with task graph in " << seconds << " seconds\n";
 }
 
 

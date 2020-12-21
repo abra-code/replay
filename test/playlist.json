@@ -72,9 +72,7 @@
     },
     {
       "action": "echo",
-      "text": [
-        "Hello replay. HOME is ${HOME}",
-        ],
+      "text": "Hello replay. HOME is ${HOME}",
     },
   ],
   "force tests":

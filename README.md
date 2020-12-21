@@ -1,11 +1,14 @@
 # replay
-A macOS tool to execute a list of declared actions, primarily file operations like clone, move, create, delete
+A macOS tool to execute a list of declared actions. Currently supported actions are:
+- file operations like clone, move, create, delete,
+- execution of a child tool,
+- text operations like echo
 
 Key features:
-- concurrent file operations for fastest execution with automatic dependency resolution
-- serial file operations supported if a sequence is required
+- concurrent operations for fastest execution with automatic dependency resolution
+- serial operations supported if a sequence is required
 - designed to replace custom shell scripts serially moving/copying files around
-- self contained code - not calling external binaries to perform file operations
+- self contained code - not calling external tools to perform file operations
 - supports cloning on APFS so duplicates don't take unnecessary space on disk
 - small binary
 
@@ -67,11 +70,17 @@ Dependency analysis:
   1. No two actions may produce the same output. With concurrent execution this would produce undeterministic results
      depending on which action happened to run first or fail if they accessed the same file for writing concurrently.
      "replay" will not run any actions when this condition is detected during dependency analysis.
-  2. Deletion and creation of the same file or directory in one playlist will result in creation first and
+  2. Action dependencies must not create a cycle. In other words the dependency graph must be a proper DAG.
+     An example cycle is one action copying file A to B and another action copying file B to A.
+     Replay algorithm tracks the number of unsatisifed dependencies for each action. When the number drops to zero,
+     the action is dispatched for execution. For actions in a cycle that number never drops to zero and they can
+     never be dispatched. After all dispatched tasks are done "replay" verifies all actions in the playlist
+     were executed and reports a failure if they were not, listing the ones which were skipped.
+  3. Deletion and creation of the same file or directory in one playlist will result in creation first and
      deletion second because the deletion consumes the output of creation. If deletion is a required preparation step
      it should be executed in a separate playlist before the main tasks are scheduled. You may pass --playlist-key
      multiple times as a parameter and the playlists will be executed one after another in the order specified.
-  3. Moving or deleting an item makes it unusable for other actions at the original path. Such actions are exclusive
+  4. Moving or deleting an item makes it unusable for other actions at the original path. Such actions are exclusive
      consumers of given input paths and cannot share their inputs with other actions. Producing additional items under
      such exclusive input paths is also not allowed. "replay" will report an error during dependency analysis
      and will not execute an action graph with exclusive input violations.
@@ -161,6 +170,7 @@ B. [create directory] requires just a single path, e.g.:
 [execute stdout=false]	/bin/echo	This will not be printed
 In the following example uses a different separator: "+" to explicitly show delimited parameters:
 [execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep ".txt"
+5. [echo] requires one string after separator. Supported modifiers are raw=true and newline=false
 
 Example JSON playlist:
 

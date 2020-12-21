@@ -13,7 +13,6 @@
 
 @property(nonatomic, readonly, strong) TaskProxy *rootTask;
 
-+ (TaskScheduler *)sharedScheduler;
 - (void)startExecutionAndWait;
 
 @end //TaskScheduler

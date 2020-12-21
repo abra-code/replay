@@ -177,6 +177,18 @@ GetExpandedPathsFromRawPaths(NSArray<NSString*> *rawPaths, ReplayContext *contex
 	return nil;
 }
 
+static inline
+NSArray<NSString*> *PathArrayFromFileURL(NSURL *inURL)
+{
+	if(inURL != nil)
+	{
+		NSString *path = inURL.absoluteURL.path;
+		if(path != nil)
+			return @[path];
+	}
+	return nil;
+}
+
 // this function resolves each step and calls provided actionHandler
 // one or more times for each action in the step
 // one step may have multiple actions like copying a list of files to one directory
@@ -224,10 +236,10 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			if(context->concurrent)
 			{
 				if(replayAction == kFileActionMove)
-					exclusiveInputs = @[sourceURL.absoluteURL.path];
+					exclusiveInputs = PathArrayFromFileURL(sourceURL);
 				else
-					inputs = @[sourceURL.absoluteURL.path];
-				outputs = @[destinationURL.absoluteURL.path];
+					inputs = PathArrayFromFileURL(sourceURL);
+				outputs = PathArrayFromFileURL(destinationURL);
 			}
 			actionHandler(action, inputs, exclusiveInputs, outputs);
 		}
@@ -258,10 +270,10 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						if(context->concurrent)
 						{
 							if(replayAction == kFileActionMove)
-								exclusiveInputs = @[srcItemURL.absoluteURL.path];
+								exclusiveInputs = PathArrayFromFileURL(srcItemURL);
 							else
-								inputs = @[srcItemURL.absoluteURL.path];
-							outputs = @[destinationURL.absoluteURL.path];
+								inputs = PathArrayFromFileURL(srcItemURL);
+							outputs = PathArrayFromFileURL(destinationURL);
 						}
 						actionHandler(action, inputs, exclusiveInputs, outputs);
 					}
@@ -291,7 +303,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						
 						if(context->concurrent)
 						{
-							exclusiveInputs = @[oneURL.absoluteURL.path];
+							exclusiveInputs = PathArrayFromFileURL(oneURL);
 						}
 						actionHandler(action,  nil, exclusiveInputs, nil);
 					}
@@ -348,7 +360,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					
 					if(context->concurrent)
 					{
-						outputs = @[fileURL.absoluteURL.path];
+						outputs = PathArrayFromFileURL(fileURL);
 					}
 					actionHandler(action, nil, nil, outputs);
 				}
@@ -370,7 +382,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						
 						if(context->concurrent)
 						{
-							outputs = @[dirURL.absoluteURL.path];
+							outputs = PathArrayFromFileURL(dirURL);
 						}
 						actionHandler(action, nil, nil, outputs);
 					}
@@ -981,6 +993,9 @@ Echo(NSString *text, ReplayContext *context, ActionContext *actionContext)
 	{
 		addNewline = [newlineVal boolValue];
 	}
+
+	if(text == nil)
+		text = @"";
 
 	if(context->verbose || context->dryRun)
 	{

@@ -64,6 +64,7 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 				return;
 
 			TaskProxy *oneTask = [[TaskProxy alloc] initWithTask:action];
+			oneTask.stepDescription = replayStep;
 			[tasksFromStep addObject:oneTask];
 
 			NSUInteger regularInputCount = 0;
@@ -130,15 +131,42 @@ ExecuteTasksWithScheduler(NSArray<TaskProxy*> *allTasks, FileNode *fileTreeRoot,
 {
 	ConnectImplicitProducers(fileTreeRoot);
 
-	TaskScheduler *scheduler = [TaskScheduler sharedScheduler];
+	TaskScheduler *scheduler = [TaskScheduler new];
 
 	//graph root task is created by the scheduler
 	//we build the graph by adding children tasks to the root
 
-	ConnectDynamicInputsForScheduler( allTasks, //input list of all raw unconnected medusas
+	ConnectDynamicInputsForScheduler(allTasks, //input list of all raw unconnected medusas
 									scheduler.rootTask);
 
 	[scheduler startExecutionAndWait];
+}
+
+static inline void
+VerifyAllTasksExecuted(NSArray<TaskProxy*> *allTasks)
+{
+	BOOL atLeastOneNotExecuted = NO;
+	for(__unsafe_unretained TaskProxy* oneTask in allTasks)
+	{
+		if(!oneTask.executed)
+		{
+			if(atLeastOneNotExecuted == NO)
+			{ //the first one we encountered
+				fprintf(stderr, "error: not all tasks have been executed.\n"
+				"Most likely there are circular dependencies in the action tree.\n"
+				"See \"replay --help\" for more information about action graph restictions.\n"
+				"Not executed tasks:\n"
+				);
+				atLeastOneNotExecuted = YES;
+			}
+			[oneTask describeTaskToStdErr];
+		}
+	}
+	
+	if(atLeastOneNotExecuted)
+	{
+		exit(EXIT_FAILURE);
+	}
 }
 
 void
@@ -172,8 +200,13 @@ DispatchTasksConcurrentlyWithDependencyAnalysis(NSArray<NSDictionary*> *playlist
 		}
 	}
 	
-	// thew whole input and output paths tree is constructed at this stage
+	// at that point the whole input and output paths tree is already constructed
 	// with all explicit producers referred in their respective nodes
 	
 	ExecuteTasksWithScheduler(taskList, context->fileTreeRoot, totalInputCount, totalOutputCount);
+
+	// Post-execution verification
+	// in case of circular dependencies some tasks were not scheduled for execution
+	// because their dependencies have not been satisifed (the dependency counter never dropped to 0)
+	VerifyAllTasksExecuted(taskList);
 }

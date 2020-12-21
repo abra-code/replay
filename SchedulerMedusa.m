@@ -126,7 +126,7 @@ ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *allTasks, //input li
     size_t static_input_count = 0;
 #endif //TRACE
 
-	for(__weak TaskProxy *oneTask in allTasks)
+	for(__unsafe_unretained TaskProxy *oneTask in allTasks)
 	{
         bool taskHasStaticInputsOnly = true;
 

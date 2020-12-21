@@ -27,7 +27,7 @@ typedef enum
 } PlaylistFormat;
 
 //this function is used when the playlist key is non-null so the root container must be a dictionary
-static inline NSDictionary*
+static inline NSDictionary<NSString *, NSArray *> *
 LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 {
 	if(playlistPath == NULL)
@@ -36,7 +36,7 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 		return nil;
 	}
 
-	NSDictionary *playlistDict = nil;
+	NSDictionary<NSString *, NSArray *> *playlistDict = nil;
 	NSURL *playlistURL = [NSURL fileURLWithFileSystemRepresentation:playlistPath isDirectory:NO relativeToURL:NULL];
 	
 	PlaylistFormat hint = kPlaylistFormatPlist; //default to plist
@@ -53,6 +53,8 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 		if(hint == kPlaylistFormatPlist)
 		{
 			playlistDict = [NSDictionary dictionaryWithContentsOfURL:playlistURL];
+			NSError *loadingError = nil;
+			playlistDict = [NSDictionary dictionaryWithContentsOfURL:playlistURL error:&loadingError];
 			if(playlistDict != nil)
 				break;
 			numberOfTries++;
@@ -135,7 +137,8 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 	{
 		if(hint == kPlaylistFormatPlist)
 		{
-			playlistArray = [NSArray arrayWithContentsOfURL:playlistURL];
+			NSError *error = nil;
+			playlistArray = [NSArray arrayWithContentsOfURL:playlistURL error:&error];
 			if(playlistArray != nil)
 				break;
 			numberOfTries++;
@@ -272,11 +275,17 @@ DisplayHelp(void)
 		"  1. No two actions may produce the same output. With concurrent execution this would produce undeterministic results\n"
 		"     depending on which action happened to run first or fail if they accessed the same file for writing concurrently.\n"
 		"     \"replay\" will not run any actions when this condition is detected during dependency analysis.\n"
-		"  2. Deletion and creation of the same file or directory in one playlist will result in creation first and\n"
+		"  2. Action dependencies must not create a cycle. In other words the dependency graph must be a proper DAG.\n"
+		"     An example cycle is one action copying file A to B and another action copying file B to A.\n"
+		"     Replay algorithm tracks the number of unsatisifed dependencies for each action. When the number drops to zero,\n"
+		"     the action is dispatched for execution. For actions in a cycle that number never drops to zero and they can\n"
+		"     never be dispatched. After all dispatched tasks are done \"replay\" verifies all actions in the playlist\n"
+		"     were executed and reports a failure if they were not, listing the ones which were skipped.\n"
+		"  3. Deletion and creation of the same file or directory in one playlist will result in creation first and\n"
 		"     deletion second because the deletion consumes the output of creation. If deletion is a required preparation step\n"
 		"     it should be executed in a separate playlist before the main tasks are scheduled. You may pass --playlist-key\n"
 		"     multiple times as a parameter and the playlists will be executed one after another in the order specified.\n"
-		"  3. Moving or deleting an item makes it unusable for other actions at the original path. Such actions are exclusive\n"
+		"  4. Moving or deleting an item makes it unusable for other actions at the original path. Such actions are exclusive\n"
 		"     consumers of given input paths and cannot share their inputs with other actions. Producing additional items under\n"
 		"     such exclusive input paths is also not allowed. \"replay\" will report an error during dependency analysis\n"
 		"     and will not execute an action graph with exclusive input violations.\n"
@@ -374,6 +383,7 @@ DisplayHelp(void)
 		"[execute stdout=false]	/bin/echo	This will not be printed\n"
 		"In the following example uses a different separator: \"+\" to explicitly show delimited parameters:\n"
 		"[execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep \".txt\"\n"
+		"5. [echo] requires one string after separator. Supported modifiers are raw=true and newline=false\n"
 		"\n"
 	);
 
@@ -647,17 +657,19 @@ int main(int argc, const char * argv[])
 	}
 	else if ([playlistKeys count] > 0)
 	{
-		NSDictionary* playlistRootDict = LoadPlaylistRootDictionary(playlistPath, &context);
+		NSDictionary<NSString *, NSArray *> *playlistRootDict = LoadPlaylistRootDictionary(playlistPath, &context);
 		if(playlistRootDict == nil)
 		{
 			printf("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
 			return EXIT_SUCCESS;
 		}
+		
+		Class arrayClass = [NSArray class];
 
 		for(NSString *oneKey in playlistKeys)
 		{
 			NSArray<NSDictionary*> *playlist = playlistRootDict[oneKey];
-			if(playlist == nil)
+			if((playlist == nil) || !([playlist isKindOfClass:arrayClass]))
 			{
 				printf("Invalid or empty playlist for key \"%s\". No steps to replay\n", [oneKey UTF8String]);
 				if(context.stopOnError)

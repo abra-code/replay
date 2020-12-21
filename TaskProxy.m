@@ -17,7 +17,6 @@ extern dispatch_group_t sGroup;
 	@property(nonatomic, strong) NSMutableSet<TaskProxy*> *nextTasks;
 	@property(nonatomic, strong) dispatch_block_t taskBlock;
 	@property(nonatomic) NSInteger pendingDependenciesCount;
-	@property(nonatomic) bool executed;
 @end
 
 @implementation TaskProxy
@@ -39,13 +38,51 @@ extern dispatch_group_t sGroup;
 	return self;
 }
 
+#if 0
+- (BOOL)taskExistsInNextTaskTree:(TaskProxy*)task
+{
+	if(self == task)
+		return YES;
+
+	__block BOOL isFound = NO;
+	if(_nextTasks != nil)
+	{
+		__weak TaskProxy* weakTask = task;
+		[_nextTasks enumerateObjectsUsingBlock:^(TaskProxy * _Nonnull obj, BOOL * _Nonnull stop) {
+			isFound = [obj taskExistsInNextTaskTree:weakTask];
+			if(isFound)
+				*stop = YES;
+		}];
+	}
+
+	return isFound;
+}
+#endif
+
 - (void)linkNextTask:(TaskProxy*)nextTask
 {
+	assert(nextTask != nil);
+	// never add self as a dependency of self or this will result in circular dependency
+	// and this task will never be dispatched (its dependency count will not reach 0)
+	if(nextTask == self)
+		return;
+
 	if(_nextTasks == nil)
 	{
 		_nextTasks = [[NSMutableSet<TaskProxy*> alloc] init];
 	}
-	
+
+#if 0 //too expensive for non-trivial graphs
+	// verify that this task is not in a list of the nextTask's nextTasks
+	// next task depends on this one, so this task cannot already exist in downstream tree of the next task
+	BOOL isCircularDependency = [nextTask taskExistsInNextTaskTree:self];
+	if(isCircularDependency)
+	{
+		fprintf(stderr, "error: circular dependency has been detected in the action graph.\n");
+		exit(EXIT_FAILURE);
+	}
+#endif
+
 	//it is a bummer we have to use two calls to the collection to learn if the the object to insert is unique
 	//CoreFoundation or Foundation collections do not return value indicating if inserted object is unique
 	//or if it was there already
@@ -75,6 +112,7 @@ extern dispatch_group_t sGroup;
 	@synchronized (self)
 	{
 		--_pendingDependenciesCount;
+		assert(_pendingDependenciesCount >= 0); // programmer error if it goes below 0
 		if(_pendingDependenciesCount == 0)
 		{//all dependencies satisfied, now we can execute our task
 			//dispatch queue operations themselves are thread safe per Apple's documentation
@@ -110,7 +148,7 @@ extern dispatch_group_t sGroup;
 		// because freeing memory from background threads has a big perf penalty
 
 		//when we are done executing, tell all nextTasks there is one less dependency to wait on
-		for (TaskProxy *nextTask in _nextTasks)
+		for(TaskProxy *nextTask in _nextTasks)
 		{
 			[nextTask decrementDependencyCount];
 		}
@@ -145,6 +183,29 @@ extern dispatch_group_t sGroup;
 	}
 }
 #endif //ENABLE_DEBUG_DUMP
+
+- (void)describeTaskToStdErr
+{
+	char path[2048];
+
+	NSString *actionName = self.stepDescription[@"action"];
+	fprintf(stderr, "[%s]\n", actionName.UTF8String);
+	fprintf(stderr, "  unsatisfied dependency count: %ld\n", _pendingDependenciesCount);
+
+	fprintf(stderr, "  inputs:\n");
+	for(NSUInteger i = 0; i < _inputCount; i++)
+	{
+		GetPathForNode(_inputs[i], path, sizeof(path));
+		fprintf(stderr, "    %s\n", path);
+	}
+
+	fprintf(stderr, "  outputs:\n");
+	for(NSUInteger i = 0; i < _outputCount; i++)
+	{
+		GetPathForNode(_outputs[i], path, sizeof(path));
+		fprintf(stderr, "    %s\n", path);
+	}
+}
 
 @end //@implementation TaskProxy
 

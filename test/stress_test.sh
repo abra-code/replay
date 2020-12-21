@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/sh
 
 echo ""
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
@@ -54,12 +54,19 @@ date
 echo "time /usr/bin/find -s \"$HOME/Library\" | /usr/bin/sed -E 's|(.+)|[execute]\t/bin/echo\t\1|' | replay --dry-run --ordered-output | /usr/bin/wc -l"
 time /usr/bin/find -s "$HOME/Library" | /usr/bin/sed -E 's|(.+)|[execute]\t/bin/echo\t\1|' | "$REPLAY_TOOL" --dry-run --ordered-output | /usr/bin/wc -l
 
+echo ""
+echo "Test 3: Print path with built-in echo per each file"
+echo "Start time:"
+date
+echo "time /usr/bin/find -s \"$HOME/Library\" | /usr/bin/sed -E 's|(.+)|[echo]\t\1|' | replay --ordered-output | /usr/bin/wc -l"
+time /usr/bin/find -s "$HOME/Library" | /usr/bin/sed -E 's|(.+)|[echo]\t\1|' | "$REPLAY_TOOL" --ordered-output | /usr/bin/wc -l
+
 # This test takes long. My Macbook Pro 2016 4-core i7 took 12 minutes for about 1 million files
 # Subtracting the baseline 2 min for 'find', it means about 1 million child process executions in 10 minutes
 # at the rate of about 1700 simple child processes (echo) per second
 
 echo ""
-echo "Test 3: Execute child process with echo per each file"
+echo "Test 4: Execute child process with echo per each file"
 echo "This test may take 12 min or longer per 1 million files!"
 echo "Start time:"
 date

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>triangle</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<string>clone</string>
+			<key>from</key>
+			<string>${HOME}/cycle_orig.txt</string>
+			<key>to</key>
+			<string>${HOME}/cycle_clone1.txt</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>clone</string>
+			<key>from</key>
+			<string>${HOME}/cycle_clone1.txt</string>
+			<key>to</key>
+			<string>${HOME}/cycle_clone2.txt</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>clone</string>
+			<key>from</key>
+			<string>${HOME}/cycle_clone2.txt</string>
+			<key>to</key>
+			<string>${HOME}/cycle_orig.txt</string>
+		</dict>
+	</array>
+	<key>balloon</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<string>create</string>
+			<key>content</key>
+			<string>handle</string>
+			<key>file</key>
+			<string>${HOME}/start_file.txt</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>execute</string>
+			<key>tool</key>
+			<string>/bin/sh</string>
+			<key>arguments</key>
+			<array>
+				<string>-c</string>
+				<string>cat ${HOME}/start_file.txt ${HOME}/other_file.txt > ${HOME}/merged_file.txt</string>
+			</array>
+			<key>inputs</key>
+			<array>
+				<string>${HOME}/start_file.txt</string>
+				<string>${HOME}/other_file.txt</string>
+			</array>
+			<key>outputs</key>
+			<array>
+				<string>${HOME}/merged_file.txt</string>
+			</array>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>clone</string>
+			<key>from</key>
+			<string>${HOME}/merged_file.txt</string>
+			<key>to</key>
+			<string>${HOME}/other_file.txt</string>
+		</dict>
+	</array>
+
+</dict>
+</plist>

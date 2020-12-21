@@ -1,0 +1,89 @@
+{
+  "clone":
+  [
+    {
+      "action": "clone",
+      "from": "${REPLAY_TEST_FILES_DIR}/test-clone.txt",
+      "to": "/Users/${USER}/${VARIABLE_NOT_DEFINED}/test-clone.txt",
+    },
+  ],
+  "move":
+  [
+    {
+      "action": "move",
+      "from": "/Users/${USER}/${VARIABLE_NOT_DEFINED}/test-move.txt",
+      "to": "/Users/${USER}/${REPLAY_TEST}/test-moved.txt",
+    },
+  ],
+  "hardlink":
+  [
+    {
+      "action": "hardlink",
+      "from": "${VARIABLE_NOT_DEFINED}/test-hardlink.txt",
+      "to": "/Users/${USER}/${REPLAY_TEST}/test-hardlink.txt",
+    },
+  ],
+  "symlink":
+  [
+    {
+      "action": "symlink",
+      "from": "${REPLAY_TEST_FILES_DIR}/test-symlink.txt",
+      "to": "/Users/${USER}/${VARIABLE_NOT_DEFINED}/test-symlink.txt",
+    },
+  ],
+  "clone":
+  [
+    {
+      "action": "clone",
+      "items": [
+        "${REPLAY_TEST_FILES_DIR}/test-clone-bulk1.txt",
+        "${VARIABLE_NOT_DEFINED}/test-clone-bulk2.txt",
+        "${REPLAY_TEST_FILES_DIR}/test-clone-bulk3.txt",
+        ],
+      "destination directory": "${HOME}/${VARIABLE_NOT_DEFINED}",
+    },
+  ],
+  "create-expanded":
+  [
+    {
+      "action": "create",
+      "content": "This is test file 7 at ${HOME}/${VARIABLE_NOT_DEFINED} with expanded env vars",
+      "file": "${HOME}/${VARIABLE_NOT_DEFINED}/test-create-expanded.txt",
+    },
+  ],
+  "create-unexpanded":
+  [
+    {
+      "action": "create",
+      "content": "This is test file 8 at ${HOME}/${VARIABLE_NOT_DEFINED} with unexpanded env vars",
+      "raw": true,
+      "file": "${HOME}/${VARIABLE_NOT_DEFINED}/test-create-unexpanded.txt",
+    },
+  ],
+  "delete":
+  [
+    {
+      "action": "delete",
+      "items": [
+        "${HOME}/${VARIABLE_NOT_DEFINED}/test-delete.txt",
+        ],
+    },
+  ],
+  "echo":
+  [
+    {
+      "action": "echo",
+      "text": "Hello replay. VARIABLE_NOT_DEFINED is ${VARIABLE_NOT_DEFINED}",
+    },
+  ],
+  "execute":
+  [
+    {
+      "action": "execute",
+      "tool": "/usr/bin/touch",
+      "arguments": [
+        "${HOME}/${VARIABLE_NOT_DEFINED}",
+      ],
+    },
+  ],
+}

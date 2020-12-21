@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/sh
 
 success_counter=0
 failure_counter=0
@@ -80,22 +80,22 @@ echo "Testing playlist in JSON format"
 echo "Path: \"$REPLAY_TEST_DIR_PATH/playlist.json\""
 
 echo ""
-echo "replay --serial --playlist-key \"setup\""
+echo "replay --serial --playlist-key \"setup\" --verbose \"$REPLAY_TEST_DIR_PATH/playlist.json\""
 "$REPLAY_TOOL" --serial --playlist-key "setup" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
 verify_succeeded "$?" "'setup' failed"
 
 echo ""
-echo "replay --playlist-key \"tests\""
+echo "replay --playlist-key \"tests\" --verbose \"$REPLAY_TEST_DIR_PATH/playlist.json\""
 "$REPLAY_TOOL" --playlist-key "tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
 verify_succeeded "$?" "'tests' failed"
 
 echo ""
-echo "replay --force --serial --playlist-key \"force tests\""
+echo "replay --force --serial --playlist-key \"force tests\" --verbose \"$REPLAY_TEST_DIR_PATH/playlist.json\""
 "$REPLAY_TOOL" --force --serial --playlist-key "force tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
 verify_succeeded "$?" "'force tests' failed"
 
 echo ""
-echo "replay --playlist-key \"execute tests\""
+echo "replay --playlist-key \"execute tests\" --verbose \"$REPLAY_TEST_DIR_PATH/playlist.json\""
 "$REPLAY_TOOL" --playlist-key "execute tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
 verify_succeeded "$?" "'execute tests' failed"
 
@@ -103,7 +103,7 @@ echo "------------------------------"
 echo ""
 echo "Dry run testing multiple playlists executed together in JSON format"
 echo ""
-echo "replay --dry-run --playlist-key \"tests\" --playlist-key \"symlink tests\""
+echo "replay --dry-run --playlist-key \"tests\" --playlist-key \"symlink tests\" --verbose \"$REPLAY_TEST_DIR_PATH/playlist.json\""
 "$REPLAY_TOOL" --dry-run --playlist-key "tests" --playlist-key "symlink tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.json"
 verify_succeeded "$?" "multiple playlists test failed"
 
@@ -119,22 +119,22 @@ echo "Validating plist with plutil"
 verify_succeeded "$?" "plutil playlist.plist failed"
 
 echo ""
-echo "replay --serial --playlist-key \"setup\""
+echo "replay --serial --playlist-key \"setup\" --verbose \"$REPLAY_TEST_DIR_PATH/playlist.plist\""
 "$REPLAY_TOOL" --serial --playlist-key "setup" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
 verify_succeeded "$?" "'setup' failed"
 
 echo ""
-echo "replay --playlist-key \"tests\""
+echo "replay --playlist-key \"tests\" --verbose \"$REPLAY_TEST_DIR_PATH/playlist.plist\""
 "$REPLAY_TOOL" --playlist-key "tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
 verify_succeeded "$?" "'tests' failed"
 
 echo ""
-echo "replay --force --serial --playlist-key \"force tests\""
+echo "replay --force --serial --playlist-key \"force tests\" --verbose \"$REPLAY_TEST_DIR_PATH/playlist.plist\""
 "$REPLAY_TOOL" --force --serial --playlist-key "force tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
 verify_succeeded "$?" "'force tests' failed"
 
 echo ""
-echo "replay --playlist-key \"execute tests\""
+echo "replay --playlist-key \"execute tests\" --verbose \"$REPLAY_TEST_DIR_PATH/playlist.plist\""
 "$REPLAY_TOOL" --playlist-key "execute tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
 verify_succeeded "$?" "'execute tests' failed"
 
@@ -142,7 +142,7 @@ echo "------------------------------"
 echo ""
 echo "Dry run testing multiple playlists executed together in plist format"
 echo ""
-echo "replay --dry-run --playlist-key \"tests\" --playlist-key \"symlink tests\""
+echo "replay --dry-run --playlist-key \"tests\" --playlist-key \"symlink tests\" --verbose \"$REPLAY_TEST_DIR_PATH/playlist.plist\""
 "$REPLAY_TOOL" --dry-run --playlist-key "tests" --playlist-key "symlink tests" --verbose "$REPLAY_TEST_DIR_PATH/playlist.plist"
 verify_succeeded "$?" "replay multiple playlists test failed"
 
@@ -153,7 +153,7 @@ echo ""
 echo "Dry run testing playlist array in JSON format"
 echo "Path: \"$REPLAY_TEST_DIR_PATH/playlist_array.json\""
 echo ""
-echo "replay --dry-run"
+echo "replay --dry-run --verbose \"$REPLAY_TEST_DIR_PATH/playlist_array.json\""
 "$REPLAY_TOOL" --dry-run --verbose "$REPLAY_TEST_DIR_PATH/playlist_array.json"
 verify_succeeded "$?" "replay 'playlist_array.json' test failed"
 
@@ -170,9 +170,28 @@ echo "Validating plist with plutil"
 verify_succeeded "$?" "plutil 'playlist_array.plist' failed"
 
 echo ""
-echo "replay --dry-run"
+echo "replay --dry-run --verbose \"$REPLAY_TEST_DIR_PATH/playlist_array.plist\""
 "$REPLAY_TOOL" --dry-run --verbose "$REPLAY_TEST_DIR_PATH/playlist_array.plist"
 verify_succeeded "$?" "replay 'playlist_array.plist' test failed"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Missing environment variables expected to fail"
+echo "Path: \"$REPLAY_TEST_DIR_PATH/env_var_errors.json\""
+echo ""
+
+
+for ONE_KEY in "clone" "move" "hardlink" "symlink" "clone" "create-expanded" "create-unexpanded" "delete" "echo" "execute"
+do
+
+echo ""
+echo "replay --dry-run --verbose --playlist-key \"$ONE_KEY\" \"$REPLAY_TEST_DIR_PATH/env_var_errors.json\""
+"$REPLAY_TOOL" --dry-run --verbose --playlist-key "$ONE_KEY" "$REPLAY_TEST_DIR_PATH/env_var_errors.json"
+verify_failed "$?" "replay \"$ONE_KEY\" test is expected to fail"
+
+done
 
 
 echo ""
@@ -182,32 +201,32 @@ echo "Concurrency violations expected to fail"
 echo "Path: \"$REPLAY_TEST_DIR_PATH/concurrency_violations.json\""
 echo ""
 
-echo "replay --playlist-key \"two actions with the same output\""
+echo "replay --dry-run --playlist-key \"two actions with the same output\" \"$REPLAY_TEST_DIR_PATH/concurrency_violations.json\""
 "$REPLAY_TOOL" --dry-run --playlist-key "two actions with the same output" "$REPLAY_TEST_DIR_PATH/concurrency_violations.json"
 verify_failed "$?" "'two actions with the same output' was expected to fail!"
 
 echo ""
-echo "replay --playlist-key \"exclusive input in two actions\""
+echo "replay --dry-run --playlist-key \"exclusive input in two actions\" \"$REPLAY_TEST_DIR_PATH/concurrency_violations.json\""
 "$REPLAY_TOOL" --dry-run --playlist-key "exclusive input in two actions" "$REPLAY_TEST_DIR_PATH/concurrency_violations.json"
 verify_failed "$?" "'exclusive input in two actions' was expected to fail!"
 
 echo ""
-echo "replay --playlist-key \"create under exclusive input\""
+echo "replay --dry-run --playlist-key \"create under exclusive input\" \"$REPLAY_TEST_DIR_PATH/concurrency_violations.json\""
 "$REPLAY_TOOL" --dry-run --playlist-key "create under exclusive input" "$REPLAY_TEST_DIR_PATH/concurrency_violations.json"
 verify_failed "$?" "'create under exclusive input' was expected to fail!"
 
 echo ""
-echo "replay --playlist-key \"consumer under exclusive input\""
+echo "replay --dry-run --playlist-key \"consumer under exclusive input\" \"$REPLAY_TEST_DIR_PATH/concurrency_violations.json\""
 "$REPLAY_TOOL" --dry-run --playlist-key "consumer under exclusive input" "$REPLAY_TEST_DIR_PATH/concurrency_violations.json"
 verify_failed "$?" "'consumer under exclusive input' was expected to fail!"
 
 echo ""
-echo "replay --playlist-key \"explicit exclusive input in two actions\""
+echo "replay --dry-run --playlist-key \"explicit exclusive input in two actions\" \"$REPLAY_TEST_DIR_PATH/concurrency_violations.json\""
 "$REPLAY_TOOL" --dry-run --playlist-key "explicit exclusive input in two actions" "$REPLAY_TEST_DIR_PATH/concurrency_violations.json"
 verify_failed "$?" "'explicit exclusive input in two actions' was expected to fail!"
 
 echo ""
-echo "replay --playlist-key \"explicit and implict exclusive input in two actions\""
+echo "replay --dry-run --playlist-key \"explicit and implict exclusive input in two actions\" \"$REPLAY_TEST_DIR_PATH/concurrency_violations.json\""
 "$REPLAY_TOOL" --dry-run --playlist-key "explicit and implict exclusive input in two actions" "$REPLAY_TEST_DIR_PATH/concurrency_violations.json"
 verify_failed "$?" "'explicit and implict exclusive input in two actions' was expected to fail!"
 
@@ -218,15 +237,30 @@ echo "Concurrency non-violations expected to pass"
 echo "Path: \"$REPLAY_TEST_DIR_PATH/concurrency_violations.json\""
 echo ""
 
-echo "replay --playlist-key \"one producer with nested dirs allowed\""
+echo "replay --dry-run --playlist-key \"one producer with nested dirs allowed\" \"$REPLAY_TEST_DIR_PATH/concurrency_violations.json\""
 "$REPLAY_TOOL" --dry-run --playlist-key "one producer with nested dirs allowed" "$REPLAY_TEST_DIR_PATH/concurrency_violations.json"
 verify_succeeded "$?" "'one producer with nested dirs allowed' test failed"
 echo ""
 
-echo "replay --playlist-key \"one producer one exclusive consumer allowed\""
+echo "replay --dry-run --playlist-key \"one producer one exclusive consumer allowed\" \"$REPLAY_TEST_DIR_PATH/concurrency_violations.json\""
 "$REPLAY_TOOL" --dry-run --playlist-key "one producer one exclusive consumer allowed" "$REPLAY_TEST_DIR_PATH/concurrency_violations.json"
 verify_succeeded "$?" "'one producer one exclusive consumer allowed' test failed"
 echo ""
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Cycles in concurrent graph are not allowed"
+echo "Path: \"$REPLAY_TEST_DIR_PATH/cycle.plist\""
+echo ""
+
+echo "replay --dry-run --playlist-key \"triangle\" \"$REPLAY_TEST_DIR_PATH/cycle.plist\""
+"$REPLAY_TOOL" --dry-run --playlist-key "triangle" "$REPLAY_TEST_DIR_PATH/cycle.plist"
+verify_failed "$?" "'triangle' playlist was expected to fail!"
+
+echo "replay --dry-run --playlist-key \"balloon\" \"$REPLAY_TEST_DIR_PATH/cycle.plist\""
+"$REPLAY_TOOL" --dry-run --playlist-key "balloon" "$REPLAY_TEST_DIR_PATH/cycle.plist"
+verify_failed "$?" "'balloon' playlist was expected to fail!"
 
 echo ""
 echo "------------------------------"
@@ -235,7 +269,7 @@ echo "Concurrent outputs printed to stdout should be sequential"
 echo "Path: \"$REPLAY_TEST_DIR_PATH/concurrent_output_order.json\""
 echo ""
 
-echo "replay --verbose --dry-run --no-dependency --ordered-output --playlist-key \"ordered output\""
+echo "replay --verbose --dry-run --no-dependency --ordered-output --playlist-key \"ordered output\" \"$REPLAY_TEST_DIR_PATH/concurrent_output_order.json\""
 "$REPLAY_TOOL" --verbose --dry-run --no-dependency --ordered-output --playlist-key "ordered output" "$REPLAY_TEST_DIR_PATH/concurrent_output_order.json"
 verify_succeeded "$?" "'ordered output' test failed"
 echo ""
@@ -286,11 +320,23 @@ verify_succeeded "$?" "ordered output action stream test failed"
 echo ""
 echo "------------------------------"
 echo ""
-echo "Stream all files starting with dot from $HOME directory to execute echo action"
+echo "Stream all files starting with dot from $HOME directory to execute /bin/echo action"
 echo ""
 
 echo "/bin/ls -a \"$HOME\" | /usr/bin/grep -E '^\..*' | /usr/bin/sed -E 's|(.+)|[execute]\t/bin/echo\t\1|' | replay --ordered-output"
 /bin/ls -a "$HOME" | /usr/bin/grep -E '^\..*' | /usr/bin/sed -E 's|(.+)|[execute]\t/bin/echo\t\1|' | "$REPLAY_TOOL" --ordered-output
 verify_succeeded "$?" "streaming files to execute action failed"
 
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Stream all files starting with dot from $HOME directory to print with built-in echo action"
+echo ""
+
+echo "/bin/ls -a \"$HOME\" | /usr/bin/grep -E '^\..*' | /usr/bin/sed -E 's|(.+)|[echo]\t\1|' | replay --ordered-output"
+/bin/ls -a "$HOME" | /usr/bin/grep -E '^\..*' | /usr/bin/sed -E 's|(.+)|[echo]\t\1|' | "$REPLAY_TOOL" --ordered-output
+verify_succeeded "$?" "streaming files to execute action failed"
+
 report_test_stats
+

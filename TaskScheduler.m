@@ -16,30 +16,20 @@ dispatch_group_t sGroup = nil;
 
 @interface TaskProxy()
 	- (void)incrementDependencyCount;
-	-(void)decrementDependencyCount;
+	- (void)decrementDependencyCount;
 @end
 
 
-static TaskScheduler *sSharedScheduler = nil;
-
 @implementation TaskScheduler
-
-+ (TaskScheduler *)sharedScheduler
-{
-	if(sSharedScheduler == nil)
-	{
-		sQueue = dispatch_queue_create("scheduler.concurrent.queue", DISPATCH_QUEUE_CONCURRENT);
-		sGroup = dispatch_group_create();
-		sSharedScheduler = [[TaskScheduler alloc] init];
-	}
-	return sSharedScheduler;
-}
 
 -(instancetype) init
 {
 	self = [super init];
 	if(self != nil)
 	{
+		sQueue = dispatch_queue_create("scheduler.concurrent.queue", DISPATCH_QUEUE_CONCURRENT);
+		sGroup = dispatch_group_create();
+
 		// the empty root task, its purpose it is to trigger the dispatch
 		// of the first level of tasks without dependencies
 		_rootTask = [[TaskProxy alloc] initWithTask:^{
