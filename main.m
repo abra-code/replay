@@ -337,7 +337,7 @@ DisplayHelp(void)
 		"              Default value is \"true\", indicating the output from child process is printed to stdout.\n"
 		"  echo        Print a string to stdout.\n"
 		"    text      The text to print.\n"
-      	"    raw       Bool value to indicate whether environment variables should be expanded in the text. Default is \"true\".\n"
+      	"    raw       Bool value to indicate whether environment variable expansion should be suppressed. Default is \"false\".\n"
       	"    newline   Bool value to indicate whether the output string should be followed by newline. Default is \"true\".\n"
 		"\n"
 	);

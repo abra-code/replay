@@ -129,7 +129,7 @@ Actions and parameters:
               Default value is "true", indicating the output from child process is printed to stdout.
   echo        Print a string to stdout.
     text      The text to print.
-    raw       Bool value to indicate whether environment variables should be expanded in the text. Default is "true".
+    raw       Bool value to indicate whether environment variable expansion should be suppressed. Default is "false".
     newline   Bool value to indicate whether the output string should be followed by newline. Default is "true".
 
 Streaming actions through stdin pipe:
