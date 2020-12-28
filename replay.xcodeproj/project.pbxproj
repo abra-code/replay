@@ -16,6 +16,9 @@
 		1D12130C2557C54B00E46A72 /* SerialDispatch.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D12130B2557C54B00E46A72 /* SerialDispatch.m */; };
 		1D1213102557CC7300E46A72 /* StringAndPath.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D12130F2557CC7300E46A72 /* StringAndPath.m */; };
 		1D19043824DE9EE900276D83 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D19043724DE9EE900276D83 /* main.m */; };
+		1D34D6A82594CA3400167241 /* ActionFromName.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D34D6A72594CA3400167241 /* ActionFromName.m */; };
+		1D34D6AF2597607D00167241 /* ReplayServer.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D34D6AE2597607D00167241 /* ReplayServer.m */; };
+		1D34D6B5259762F100167241 /* ActionStream.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D34D6B4259762F100167241 /* ActionStream.m */; };
 		1D4B5FC7256E51500063F5E7 /* OutputSerializer.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D4B5FC6256E51500063F5E7 /* OutputSerializer.m */; };
 		1D74C1B1256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D74C1AF256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m */; };
 /* End PBXBuildFile section */
@@ -51,6 +54,11 @@
 		1D12130F2557CC7300E46A72 /* StringAndPath.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = StringAndPath.m; sourceTree = "<group>"; };
 		1D19043424DE9EE900276D83 /* replay */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = replay; sourceTree = BUILT_PRODUCTS_DIR; };
 		1D19043724DE9EE900276D83 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		1D34D6A72594CA3400167241 /* ActionFromName.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ActionFromName.m; sourceTree = "<group>"; };
+		1D34D6AE2597607D00167241 /* ReplayServer.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ReplayServer.m; sourceTree = "<group>"; };
+		1D34D6B12597608500167241 /* ReplayServer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ReplayServer.h; sourceTree = "<group>"; };
+		1D34D6B3259762F100167241 /* ActionStream.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ActionStream.h; sourceTree = "<group>"; };
+		1D34D6B4259762F100167241 /* ActionStream.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ActionStream.m; sourceTree = "<group>"; };
 		1D4B5FC5256E51500063F5E7 /* OutputSerializer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = OutputSerializer.h; sourceTree = "<group>"; };
 		1D4B5FC6256E51500063F5E7 /* OutputSerializer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = OutputSerializer.m; sourceTree = "<group>"; };
 		1D74C1AF256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ConcurrentDispatchWithNoDependency.m; sourceTree = "<group>"; };
@@ -86,6 +94,7 @@
 				1D4B5FC5256E51500063F5E7 /* OutputSerializer.h */,
 				1D4B5FC6256E51500063F5E7 /* OutputSerializer.m */,
 				1D1213002557B5BA00E46A72 /* ReplayAction.m */,
+				1D34D6A72594CA3400167241 /* ActionFromName.m */,
 				1D1213032557B5F200E46A72 /* ReplayAction.h */,
 				1D1213052557C08000E46A72 /* ReplayTask.h */,
 				1D1213062557C08000E46A72 /* ReplayTask.m */,
@@ -98,6 +107,10 @@
 				1D1212FA2557726900E46A72 /* TaskProxy.m */,
 				1D1212F225576E0400E46A72 /* FileTree.h */,
 				1D1212F125576E0400E46A72 /* FileTree.c */,
+				1D34D6B3259762F100167241 /* ActionStream.h */,
+				1D34D6B4259762F100167241 /* ActionStream.m */,
+				1D34D6B12597608500167241 /* ReplayServer.h */,
+				1D34D6AE2597607D00167241 /* ReplayServer.m */,
 				1D19043524DE9EE900276D83 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -167,12 +180,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1D34D6AF2597607D00167241 /* ReplayServer.m in Sources */,
 				1D4B5FC7256E51500063F5E7 /* OutputSerializer.m in Sources */,
 				1D1212EA25576DA800E46A72 /* SchedulerMedusa.m in Sources */,
 				1D1213102557CC7300E46A72 /* StringAndPath.m in Sources */,
 				1D1212F82557725B00E46A72 /* TaskScheduler.m in Sources */,
+				1D34D6B5259762F100167241 /* ActionStream.m in Sources */,
 				1D1213012557B5BA00E46A72 /* ReplayAction.m in Sources */,
 				1D74C1B1256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m in Sources */,
+				1D34D6A82594CA3400167241 /* ActionFromName.m in Sources */,
 				1D19043824DE9EE900276D83 /* main.m in Sources */,
 				1D1212F325576E0400E46A72 /* FileTree.c in Sources */,
 				1D12130C2557C54B00E46A72 /* SerialDispatch.m in Sources */,
@@ -303,8 +319,9 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1.0;
 				ENABLE_HARDENED_RUNTIME = YES;
-				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_FILE = "$(SRCROOT)/Info.plist";
 				INFOPLIST_PREPROCESS = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.abracode.replay;
@@ -318,8 +335,9 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1.0;
 				ENABLE_HARDENED_RUNTIME = YES;
-				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_FILE = "$(SRCROOT)/Info.plist";
 				INFOPLIST_PREPROCESS = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.abracode.replay;

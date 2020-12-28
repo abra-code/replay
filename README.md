@@ -5,21 +5,26 @@ A macOS tool to execute a list of declared actions. Currently supported actions 
 - text operations like echo
 
 Key features:
-- concurrent operations for fastest execution with automatic dependency resolution
+- concurrent operations for fastest execution with optional automatic dependency resolution
 - serial operations supported if a sequence is required
-- designed to replace custom shell scripts serially moving/copying files around
+- designed to improve performance of shell scripts running a series of slow tasks, which
+  underutilize the CPU, storage or network resources
 - self contained code - not calling external tools to perform file operations
 - supports cloning on APFS so duplicates don't take unnecessary space on disk
-- small binary
+- companion "dispatch" tool helps with ad hoc task distribution without the need to create a playlist
 
+The documentation is in both tools' help as below. Example usage in test scripts accompanying this code.
 
-Type `replay --help` in Terminal to read the following:
+The content of `replay --help`:
 
 ```
 
+
 replay -- execute a declarative script of actions, aka a playlist
 
-Usage: replay [options] [playlist_file.json|plist]
+Usage:
+
+  replay [options] [playlist_file.json|plist]
 
 Options:
 
@@ -36,6 +41,12 @@ Options:
                      but printing is ordered. Ignored in serial execution and concurrent execution with dependencies.
   -n, --dry-run      Show a log of actions which would be performed without running them.
   -v, --verbose      Show a log of actions while they are executed.
+  -r, --start-server BATCH_NAME   Start server and listen for dispatch requests. "BATCH_NAME" must be a unique name
+                     identifying a group of actions to be executed concurrently. Subsequent requests to add actions
+                     with "dispatch" tool must refer to the same name. "replay" server listens to request messages
+                     sent by "dispatch". If the server is not running for given batch name, the first request to add
+                     an action starts "replay" in server mode. Therefore staring the server manually is not required
+                     but it is possible if needed.
   -h, --help         Display this help
 
 Playlist format:
@@ -250,10 +261,97 @@ Example plist playlist:
 </plist>
 
 Example execution:
-./replay --dry-run --playlist-key "Shepherd Playlist" shepherd.plist
+
+  replay --dry-run --playlist-key "Shepherd Playlist" shepherd.plist
 
 In the above example playlist some output files are inputs to later actions.
 The dependency analysis will create an execution graph to run dependent actions after the required outputs are produced.
 
+See also:
+
+  dispatch --help
+
 
 ```
+
+The content of  `dispatch --help`:
+ 
+```
+
+
+dispatch -- companion tool for "replay" to simplify adding tasks for concurrent execution
+
+Usage:
+
+  dispatch batch-name [action-name] [action params]
+
+Description:
+
+  "dispatch" starts "replay" in server mode as a background process and sends tasks to it.
+Batch name is a required user-provided parameter to all invocations identifying a task batch.
+A batch can be understood as a single job with mutiple tasks. Each instance of "replay"
+running in a server mode is associated with one uniqueley named batch/job.
+"dispatch" is just a client-facing helper tool to send tasks to "replay" server.
+It is intended for ad hoc execution of unstructured tasks when the rate of scheduling tasks
+is higher than their execution time and they can be run concurrently.
+Invoking "dispatch batch-name wait" at the end allows the client script to wait for all
+scheduled tasks to finish.
+A typical sequence of calls could be demonstrated by the following example:
+
+   dispatch example-batch echo "Starting the batch job"
+   dispatch example-batch create file ${HOME}/she-sells.txt 'she sells'
+   dispatch example-batch execute /bin/sh -c "/bin/echo 'sea shells' > ${HOME}/shells.txt"
+   dispatch example-batch execute /bin/sleep 10
+   dispatch example-batch wait
+
+The first invocation of "dispatch" for unique batch name starts a new instance of "replay"
+server with default parameters. If you wish to control "replay" behavior you can start it
+explicitly with "start" action and provide parameters to forward to "replay", for example:
+
+   dispatch example-batch start --verbose --ordered-output --stop-on-error
+
+Subsequent use of "start" action for the same batch name will not restart the server
+but a warning will be printed about already running server instance.
+
+Supported actions are the same as "replay" actions plus a couple of special control words:
+
+   start [replay options]
+   clone /from/item/path /to/item/path
+   copy /from/item/path /to/item/path
+   move /from/item/path /to/item/path
+   hardlink /from/item/path /to/item/path
+   symlink /from/item/path /to/item/path
+   create file /path/to/new/file "New File Content"
+   create directory /path/to/new/dir
+   delete /path/to/item1 /path/to/item2 /path/to/itemN
+   execute /path/to/tool param1 param2 paramN
+   echo "String to print"
+   wait
+
+If invoked without any action name, "dispatch" opens a standard input for streaming actions
+in the same format as accepted by "replay" tool, for example:
+
+   echo "[echo]|Streaming actions" | dispatch stream-job
+   echo "[execute]|/bin/ls|-la" | dispatch stream-job
+   dispatch stream-job wait
+
+With a couple of notes:
+ - you cannot pass "start" and "wait" options that way - these are instructios for
+   "dispatch" tool, not real actions to forward to "replay".
+ - each line is sent to "replay" server separately so it is not as performant as streaming
+   actions directly to "replay" in regular, non-server mode.
+ - "replay" stdout cannot be re-piped when executed this way.
+ - a reminder that streaming actions as text requires parameters to be separated by some
+   non-interfering field separator (vertical bar in the above example).
+
+
+Options:
+
+  -h, --help         Display this help
+
+See also:
+
+  replay --help
+
+```
+

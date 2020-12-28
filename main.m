@@ -14,6 +14,8 @@
 #import "ReplayTask.h"
 #import "SerialDispatch.h"
 #import "ConcurrentDispatchWithNoDependency.h"
+#import "ActionStream.h"
+#import "ReplayServer.h"
 
 #if DEBUG
 	#define TRACE 0
@@ -204,6 +206,7 @@ static struct option sLongOptions[] =
 	{"stop-on-error",   no_argument,		NULL, 'e'},
 	{"force",           no_argument,		NULL, 'f'},
 	{"ordered-output",  no_argument,		NULL, 'o'},
+	{"start-server",    required_argument,  NULL, 'r'},
 	{"help",			no_argument,		NULL, 'h'},
 	{NULL, 				0, 					NULL,  0 }
 };
@@ -213,9 +216,12 @@ DisplayHelp(void)
 {
 	printf(
 		"\n"
+		"\n"
 		"replay -- execute a declarative script of actions, aka a playlist\n"
 		"\n"
-		"Usage: replay [options] [playlist_file.json|plist]\n"
+		"Usage:\n"
+		"\n"
+		"  replay [options] [playlist_file.json|plist]\n"
 		"\n"
 		"Options:\n"
 		"\n"
@@ -232,6 +238,12 @@ DisplayHelp(void)
 		"                     but printing is ordered. Ignored in serial execution and concurrent execution with dependencies.\n"
 		"  -n, --dry-run      Show a log of actions which would be performed without running them.\n"
 		"  -v, --verbose      Show a log of actions while they are executed.\n"
+		"  -r, --start-server BATCH_NAME   Start server and listen for dispatch requests. \"BATCH_NAME\" must be a unique name\n"
+		"                     identifying a group of actions to be executed concurrently. Subsequent requests to add actions\n"
+		"                     with \"dispatch\" tool must refer to the same name. \"replay\" server listens to request messages\n"
+		"                     sent by \"dispatch\". If the server is not running for given batch name, the first request to add\n"
+		"                     an action starts \"replay\" in server mode. Therefore staring the server manually is not required\n"
+		"                     but it is possible if needed.\n"
 		"  -h, --help         Display this help\n"
 		"\n"
 	);
@@ -472,16 +484,22 @@ DisplayHelp(void)
 
 	printf(
 		"Example execution:\n"
-		"./replay --dry-run --playlist-key \"Shepherd Playlist\" shepherd.plist\n"
+		"\n"
+		"  replay --dry-run --playlist-key \"Shepherd Playlist\" shepherd.plist\n"
 		"\n"
 		"In the above example playlist some output files are inputs to later actions.\n"
 		"The dependency analysis will create an execution graph to run dependent actions after the required outputs are produced.\n"
+		"\n"
+		"See also:\n"
+		"\n"
+		"  dispatch --help\n"
 		"\n"
 		"\n"
 	);
 }
 
-static void ProcessPlaylist(NSArray<NSDictionary*> *playlist, ReplayContext *context)
+static void
+ProcessPlaylist(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 {
 	if(context->concurrent)
 	{
@@ -512,68 +530,6 @@ static void ProcessPlaylist(NSArray<NSDictionary*> *playlist, ReplayContext *con
 	}
 }
 
-void
-StreamTasksFromStdIn(ReplayContext *context)
-{
-	if(context->concurrent)
-	{
-		context->outputSerializer = [OutputSerializer sharedOutputSerializer];
-		context->actionCounter = -1;
-		context->analyzeDependencies = false; // building dependency graph is not supported when tasks are streamed
-		StartConcurrentDispatchWithNoDependency(context);
-	}
-	else
-	{
- 		// output is ordered by the virtue of serial execution
- 		// but we don't want to trigger the complex infra for ordering of concurrent task outputs
- 		context->outputSerializer = nil;
-		context->actionCounter = -1;
-		context->orderedOutput = false;
-		StartSerialDispatch(context);
-	}
-
-	char *line = NULL;
-	size_t linecap = 0;
-	ssize_t linelen;
-	while ((linelen = getline(&line, &linecap, stdin)) > 0)
-	{
-		NSDictionary *actionDescription = ActionDescriptionFromLine(line, linelen);
-		if(actionDescription != nil)
-		{
-			if(context->concurrent)
-				DispatchTaskConcurrentlyWithNoDependency(actionDescription, context);
-			else
-				DispatchTaskSerially(actionDescription, context);
-		}
-		else
-		{
-			if(context->stopOnError)
-			{
-				fprintf(stderr, "error: malformed action description on stdin: %s\n", line);
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Malformed action description on stdin" };
-				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-				break;
-			}
-			else
-			{
-				fprintf(stderr, "warning: ignoring malformed action description on stdin: %s\n", line);
-			}
-		}
-	}
-
-	if(context->concurrent)
-	{
-		FinishConcurrentDispatchWithNoDependencyAndWait(context);
-		FlushSerializedOutputs(context->outputSerializer);
-	}
-	else
-	{
-		FinishSerialDispatchAndWait(context);
-	}
-
-	//do not bother free-ing the line buffer - the process is ending
-}
-
 
 int main(int argc, const char * argv[])
 {
@@ -585,6 +541,8 @@ int main(int argc, const char * argv[])
 	context.queue = nil;
 	context.group = nil;
 	context.actionCounter = -1;
+	context.batchName = NULL;
+	context.callbackPort = NULL;
 	context.concurrent = true;
 	context.analyzeDependencies = true;
 	context.verbose = false;
@@ -598,7 +556,7 @@ int main(int argc, const char * argv[])
 	while(true)
 	{
 		int index = 0;
-		int oneOption = getopt_long (argc, (char * const *)argv, "vnsk:efh", sLongOptions, &index);
+		int oneOption = getopt_long (argc, (char * const *)argv, "vnsk:efor:h", sLongOptions, &index);
 		if (oneOption == -1) //end of options is signalled by -1
 			break;
 			
@@ -636,6 +594,11 @@ int main(int argc, const char * argv[])
 			case 'o':
 				context.orderedOutput = true;
 			break;
+
+			case 'r':
+				//start server
+				context.batchName = @(optarg);
+			break;
 			
 			case 'h':
 				DisplayHelp();
@@ -643,7 +606,14 @@ int main(int argc, const char * argv[])
 			break;
 		}
 	}
-	
+
+	// when executed with --start-server BATCH_NAME option start server and wait for messages in runloop
+	if(context.batchName != nil)
+	{
+		StartServerAndRunLoop(&context);
+		exit((context.lastError.error != nil) ? EXIT_FAILURE : EXIT_SUCCESS);
+	}
+
 	const char *playlistPath = NULL;
 	if (optind < argc)
 	{
@@ -653,7 +623,7 @@ int main(int argc, const char * argv[])
 	
 	if(playlistPath == NULL)
 	{
-		StreamTasksFromStdIn(&context);
+		StreamActionsFromStdIn(&context);
 	}
 	else if ([playlistKeys count] > 0)
 	{

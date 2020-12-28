@@ -11,7 +11,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 typedef enum
 {
-	kActionInvalid,
+	kActionInvalid = 0,
 	kFileActionClone,
 	kFileActionMove,
 	kFileActionHardlink,
@@ -19,7 +19,9 @@ typedef enum
 	kFileActionCreate,
 	kFileActionDelete,
 	kActionExecuteTool,
-	kActionEcho
+	kActionEcho,
+	kActionStartServer, // the following are only valid for "dispatch" tool
+	kActionWait         // not a real action
 } Action;
 
 
@@ -32,6 +34,8 @@ typedef struct
 	dispatch_queue_t queue; //not used for execution with dependency analysis
 	dispatch_group_t group; //not used for execution with dependency analysis
 	NSInteger actionCounter; //counter incremented with each serially created action
+	NSString *batchName; //when running in server mode the batch name is provided for unique message port name
+	CFMessagePortRef callbackPort; //the port to report back progress status and finish event
 	bool concurrent;
 	bool analyzeDependencies;
 	bool verbose;
@@ -52,6 +56,7 @@ typedef void (^action_handler_t)(__nullable dispatch_block_t action,
 								NSArray<NSString*> * __nullable exclusiveInputs,
 								NSArray<NSString*> * __nullable outputs);
 
+Action ActionFromName(NSString *actionName, bool *isSrcDestActionPtr);
 NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen);
 void HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler);
 
