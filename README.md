@@ -155,7 +155,7 @@ For example, while streaming actions A, B, C in that order, the execution may ha
 but the printed output will still be preserved as A, B, C. This implies that that output of C
 will be delayed if B is taking long to finish.
 
-The format of streamed/piped actions is one action per line (not plist of json!), as follows:
+The format of streamed/piped actions is one action per line (not plist or json!), as follows:
 - ignore whitespace characters at the beginning of the line, if any
 - action and options come first in square brackets, e.g.: [clone], [move], [delete], [create file] [create directory]
   some options can be added as key=value as described in "Actions and parmeters" section above with examples below
