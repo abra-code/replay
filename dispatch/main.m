@@ -114,7 +114,7 @@ StartProcessExitMonitoring(int pid)
     if(dispatch_source != nil)
     { // dispatch_source is not null even if the process does not exist
       // but we immediately receive the event about its exit
-      // so this code is works well in case of race condition when the other process expired before we registered the monitoring
+      // so this code works well in case of race condition when the other process expired before we registered the monitoring
 	    dispatch_source_set_event_handler(dispatch_source, ^{
 			dispatch_source_cancel(dispatch_source);
 			CFRunLoopStop(CFRunLoopGetCurrent());
