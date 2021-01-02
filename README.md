@@ -14,9 +14,11 @@ Key features:
 - companion "dispatch" tool helps with ad hoc task distribution without the need to create a playlist
 
 The documentation is in both tools' help as below. Example usage in test scripts accompanying this code.
+\
 Example application can be found in Delta.app, where it is combined with find tool and delivers about 5-fold speed increase:
 \
 https://github.com/abra-code/DeltaApp
+\
 \
 The content of `replay --help`:
 
