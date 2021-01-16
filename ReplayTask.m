@@ -16,11 +16,11 @@ static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path
 		if(outNode->producer != NULL)
 		{
 			posixPath = [path fileSystemRepresentation];
-			fprintf(stderr, "error: invalid playlist for concurrent execution.\n"
+			fprintf(gLogErr, "error: invalid playlist for concurrent execution.\n"
 				"The output path: \"%s\"\n"
 				"is specified as a product of two or more actions.\n"
 				"See \"replay --help\" for more information about concurrent execution constraints.\n", posixPath);
-			exit(EXIT_FAILURE);
+			safe_exit(EXIT_FAILURE);
 		}
 		outNode->producer = (__bridge void *)producer;
 	}
@@ -32,12 +32,12 @@ static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path
 		if((outNode->isExclusiveInput != 0) && (outNode->hasConsumer != 0))
 		{//this input is marked as exclusive and now we are adding a second consumer. This is not allowed
 			posixPath = [path fileSystemRepresentation];
-			fprintf(stderr, "error: invalid playlist for concurrent execution.\n"
+			fprintf(gLogErr, "error: invalid playlist for concurrent execution.\n"
 				"The path: \"%s\"\n"
 				"is specified as an exclusive input for one action (like move or delete) but\n"
 				"there is more than one action consuming it.\n"
 				"See \"replay --help\" for more information about exclusive inputs.\n", posixPath);
-			exit(EXIT_FAILURE);
+			safe_exit(EXIT_FAILURE);
 		}
 
 		outNode->hasConsumer = 1;
@@ -152,7 +152,7 @@ VerifyAllTasksExecuted(NSArray<TaskProxy*> *allTasks)
 		{
 			if(atLeastOneNotExecuted == NO)
 			{ //the first one we encountered
-				fprintf(stderr, "error: not all tasks have been executed.\n"
+				fprintf(gLogErr, "error: not all tasks have been executed.\n"
 				"Most likely there are circular dependencies in the action tree.\n"
 				"See \"replay --help\" for more information about action graph restictions.\n"
 				"Not executed tasks:\n"
@@ -165,7 +165,7 @@ VerifyAllTasksExecuted(NSArray<TaskProxy*> *allTasks)
 	
 	if(atLeastOneNotExecuted)
 	{
-		exit(EXIT_FAILURE);
+		safe_exit(EXIT_FAILURE);
 	}
 }
 
@@ -196,7 +196,7 @@ DispatchTasksConcurrentlyWithDependencyAnalysis(NSArray<NSDictionary*> *playlist
 		}
 		else
 		{
-			fprintf(stderr, "error: invalid non-dictionary step in the playlist\n");
+			fprintf(gLogErr, "error: invalid non-dictionary step in the playlist\n");
 		}
 	}
 	

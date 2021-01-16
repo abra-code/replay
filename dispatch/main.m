@@ -278,7 +278,7 @@ DisplayHelp(void)
 		"   dispatch stream-job wait\n"
 		"\n"
 		"With a couple of notes:\n"
-		" - you cannot pass \"start\" and \"wait\" options that way - these are instructios for\n"
+		" - you cannot pass \"start\" and \"wait\" options that way - these are instructions for\n"
 		"   \"dispatch\" tool, not real actions to forward to \"replay\".\n"
 		" - each line is sent to \"replay\" server separately so it is not as performant as streaming\n"
 		"   actions directly to \"replay\" in regular, non-server mode.\n"

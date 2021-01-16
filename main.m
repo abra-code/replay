@@ -34,7 +34,7 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 {
 	if(playlistPath == NULL)
 	{
-		fprintf(stderr, "error: playlist file path not provided\n");
+		fprintf(gLogErr, "error: playlist file path not provided\n");
 		return nil;
 	}
 
@@ -98,13 +98,13 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 
-			fprintf(stderr, "error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
+			fprintf(gLogErr, "error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
 		}
 		else
 		{
 			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unkown or invalid playlist type" };
 			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-			fprintf(stderr, "error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key specified, the root container is expected to be a dictionary\n");
+			fprintf(gLogErr, "error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key specified, the root container is expected to be a dictionary\n");
 		}
 	}
 
@@ -119,7 +119,7 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 {
 	if(playlistPath == NULL)
 	{
-		fprintf(stderr, "error: playlist file path not provided\n");
+		fprintf(gLogErr, "error: playlist file path not provided\n");
 		return nil;
 	}
 
@@ -182,13 +182,13 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 
-			fprintf(stderr, "error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
+			fprintf(gLogErr, "error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
 		}
 		else
 		{
 			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unkown or invalid playlist type" };
 			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-			fprintf(stderr, "error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key not specified, the root container is expected to be an array.\n");
+			fprintf(gLogErr, "error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key not specified, the root container is expected to be an array.\n");
 		}
 	}
 
@@ -207,6 +207,8 @@ static struct option sLongOptions[] =
 	{"force",           no_argument,		NULL, 'f'},
 	{"ordered-output",  no_argument,		NULL, 'o'},
 	{"start-server",    required_argument,  NULL, 'r'},
+	{"stdout",          required_argument,  NULL, 'l'},
+	{"stderr",          required_argument,  NULL, 'm'},
 	{"help",			no_argument,		NULL, 'h'},
 	{NULL, 				0, 					NULL,  0 }
 };
@@ -244,7 +246,9 @@ DisplayHelp(void)
 		"                     sent by \"dispatch\". If the server is not running for given batch name, the first request to add\n"
 		"                     an action starts \"replay\" in server mode. Therefore staring the server manually is not required\n"
 		"                     but it is possible if needed.\n"
-		"  -h, --help         Display this help\n"
+		"  -l, --stdout PATH  log standard output to provided file path.\n"
+		"  -m, --stderr PATH  log standard error to provided file path.\n"
+		"  -h, --help         Display this help.\n"
 		"\n"
 	);
 
@@ -362,7 +366,7 @@ DisplayHelp(void)
 		"Actions may be executed serially or concurrently but without dependency analysis.\n"
 		"Dependency analysis requires a complete set of actions to create a graph, while streaming\n"
 		"starts execution immediately as the action requests arrive.\n"
-		"Concurrent execution is default, which does not guarantee the order of actions but a new option:\n"
+		"Concurrent execution is default, which does not guarantee the order of actions but an option:\n"
 		"--ordered-output has been added to ensure the output order is the same as action scheduling order.\n"
 		"For example, while streaming actions A, B, C in that order, the execution may happen like this: A, C, B\n"
 		"but the printed output will still be preserved as A, B, C. This implies that that output of C\n"
@@ -556,8 +560,8 @@ int main(int argc, const char * argv[])
 	while(true)
 	{
 		int index = 0;
-		int oneOption = getopt_long (argc, (char * const *)argv, "vnsk:efor:h", sLongOptions, &index);
-		if (oneOption == -1) //end of options is signalled by -1
+		int oneOption = getopt_long (argc, (char * const *)argv, "vnsk:efor:l:m:h", sLongOptions, &index);
+		if (oneOption == -1) // end of options is signalled by -1
 			break;
 			
 		switch(oneOption)
@@ -579,7 +583,7 @@ int main(int argc, const char * argv[])
 			break;
 
 			case 'k':
-				//multiple playlists are allowed and stored in array to dispatch one after another
+				// multiple playlists are allowed and stored in array to dispatch one after another
 				[playlistKeys addObject:@(optarg)];
 			break;
 
@@ -596,13 +600,33 @@ int main(int argc, const char * argv[])
 			break;
 
 			case 'r':
-				//start server
+				// start server
 				context.batchName = @(optarg);
 			break;
 			
+			case 'l':
+			{
+				// log output to file
+				int status = open_stdout_stream(optarg);
+				if(status != EXIT_SUCCESS)
+					return status;
+			}
+			break;
+			
+			case 'm':
+			{
+				// log errors/mistakes to file
+				int status = open_stderr_stream(optarg);
+				if(status != EXIT_SUCCESS)
+					return status;
+			}
+			break;
+			
 			case 'h':
+			{
 				DisplayHelp();
 				return EXIT_SUCCESS;
+			}
 			break;
 		}
 	}
@@ -611,7 +635,7 @@ int main(int argc, const char * argv[])
 	if(context.batchName != nil)
 	{
 		StartServerAndRunLoop(&context);
-		exit((context.lastError.error != nil) ? EXIT_FAILURE : EXIT_SUCCESS);
+		safe_exit((context.lastError.error != nil) ? EXIT_FAILURE : EXIT_SUCCESS);
 	}
 
 	const char *playlistPath = NULL;
@@ -630,8 +654,8 @@ int main(int argc, const char * argv[])
 		NSDictionary<NSString *, NSArray *> *playlistRootDict = LoadPlaylistRootDictionary(playlistPath, &context);
 		if(playlistRootDict == nil)
 		{
-			printf("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
-			return EXIT_SUCCESS;
+			fprintf(gLogErr, "Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
+			safe_exit(EXIT_SUCCESS);
 		}
 		
 		Class arrayClass = [NSArray class];
@@ -641,7 +665,7 @@ int main(int argc, const char * argv[])
 			NSArray<NSDictionary*> *playlist = playlistRootDict[oneKey];
 			if((playlist == nil) || !([playlist isKindOfClass:arrayClass]))
 			{
-				printf("Invalid or empty playlist for key \"%s\". No steps to replay\n", [oneKey UTF8String]);
+				fprintf(gLogErr, "Invalid or empty playlist for key \"%s\". No steps to replay\n", [oneKey UTF8String]);
 				if(context.stopOnError)
 					break;
 			}
@@ -653,8 +677,8 @@ int main(int argc, const char * argv[])
 		NSArray<NSDictionary*> *playlist = GetPlaylistFromRootArray(playlistPath, &context);
 		if(playlist == nil)
 		{
-			printf("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
-			return EXIT_SUCCESS;
+			fprintf(gLogErr, "Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
+			safe_exit(EXIT_SUCCESS);
 		}
 		ProcessPlaylist(playlist, &context);
 	}
@@ -663,9 +687,9 @@ int main(int argc, const char * argv[])
 	// and takes long time so skip it and just terminate the app now
 
 	if(context.lastError.error != nil)
-		exit(EXIT_FAILURE);
+		safe_exit(EXIT_FAILURE);
 
-	exit(EXIT_SUCCESS);
+	safe_exit(EXIT_SUCCESS);
 
 	return EXIT_SUCCESS; //unreachable
 }

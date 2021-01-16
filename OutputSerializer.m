@@ -98,17 +98,17 @@ static void EmptyCallback(__unused void *info)
 }
 
 static inline
-void printStringOrArray(NSString *actionOutputString, NSArray<NSString *> *outputArray)
+void printStringOrArray(FILE *logStream, NSString *actionOutputString, NSArray<NSString *> *outputArray)
 {
 	if(actionOutputString != nil)
 	{
-		fprintf(stdout, "%s", [actionOutputString UTF8String]);
+		fprintf(logStream, "%s", [actionOutputString UTF8String]);
 	}
 	else if(outputArray != nil)
 	{
 		for(NSString *oneString in outputArray)
 		{
-			fprintf(stdout, "%s", [oneString UTF8String]);
+			fprintf(logStream, "%s", [oneString UTF8String]);
 		}
 	}
 }
@@ -120,14 +120,14 @@ void printPendingOutput(id pendingOutput)
 	{
 		if([pendingOutput isKindOfClass:[NSString class]])
 		{
-			fprintf(stdout, "%s", [(NSString*)pendingOutput UTF8String]);
+			fprintf(gLogOut, "%s", [(NSString*)pendingOutput UTF8String]);
 		}
 		else if([pendingOutput isKindOfClass:[NSArray class]])
 		{
 			NSArray<NSString *> *array = (NSArray<NSString *> *)pendingOutput;
 			for(NSString *oneString in array)
 			{
-				fprintf(stdout, "%s", [oneString UTF8String]);
+				fprintf(gLogOut, "%s", [oneString UTF8String]);
 			}
 		}
 	}
@@ -143,11 +143,11 @@ void printPendingOutput(id pendingOutput)
 	if(actionIndex < 0)
 	{ // client does not request ordering. Process in FIFO order
 		assert((actionOutputString != nil) || (outputArray != nil));
-		printStringOrArray(actionOutputString, outputArray);
+		printStringOrArray(gLogOut, actionOutputString, outputArray);
 	}
 	else if((_lastPrintedActionIndex + 1) == actionIndex)
 	{ // in order, print it
-		printStringOrArray(actionOutputString, outputArray);
+		printStringOrArray(gLogOut, actionOutputString, outputArray);
 		_lastPrintedActionIndex = actionIndex;
 		
 		// check if there are any pending strings we can print if the order is now satisifed
@@ -167,7 +167,7 @@ void printPendingOutput(id pendingOutput)
 	}
 	else if(actionIndex <= _lastPrintedActionIndex)
 	{//this is a contract violation - the action indexes cannot be lower than the already processed ones
-		printStringOrArray(actionOutputString, outputArray);
+		printStringOrArray(gLogOut, actionOutputString, outputArray);
 		// logic error, so abort in debug
 		assert(actionIndex > _lastPrintedActionIndex);
 	}
@@ -185,6 +185,15 @@ void printPendingOutput(id pendingOutput)
 	}
 }
 
+// executing on the serial thread
+- (void)printErrorString:(nonnull ActionOutputSpec *)actionOutputSpec
+{
+	NSString *actionOutputString = actionOutputSpec.string;
+	NSArray<NSString *> *outputArray = actionOutputSpec.array;
+	assert((actionOutputString != nil) || (outputArray != nil));
+	printStringOrArray(gLogErr, actionOutputString, outputArray);
+}
+
 // just an empty method to call synchronously after thread creation to ensure the runloop is started
 - (void)ensureReady:(nullable id) __unused obj
 {
@@ -196,7 +205,7 @@ void printPendingOutput(id pendingOutput)
 	CFIndex pendingCount = CFDictionaryGetCount(_pendingOutputs);
 	if(pendingCount != 0)
 	{ // unexpected situation, try to deal as best as we can
-		fprintf(stderr, "Not all task outputs have been printed before \"replay\" finished playlist execution\n");
+		fprintf(gLogErr, "Not all task outputs have been printed before \"replay\" finished playlist execution\n");
 		
 		// OK, flush all that we have pending anyway
 		CFIndex remainingPendingCount = pendingCount;
@@ -248,6 +257,20 @@ void printPendingOutput(id pendingOutput)
 	[self performSelector:@selector(printString:) onThread:_thread withObject:actionOutputSpec waitUntilDone:NO];
 }
 
+// executing on calling thread
+- (void)scheduleErrorString:(nullable NSString *)string
+{
+	ActionOutputSpec *logErrorSpec = [ActionOutputSpec new];
+	logErrorSpec.string = string;
+	logErrorSpec.actionIndex = -1;
+
+	//this is not atomic but should be good enough to test if the thread entered the runloop already
+	assert(self.thread.executing);
+
+	[self performSelector:@selector(printErrorString:) onThread:_thread withObject:logErrorSpec waitUntilDone:NO];
+}
+
+
 @end // OutputSerializer
 
 
@@ -263,7 +286,7 @@ PrintSerializedString(OutputSerializer * _Nullable serializer,  NSString * _Null
 	}
 	else
 	{
-		fprintf(stdout, "%s", [string UTF8String]);
+		fprintf(gLogOut, "%s", [string UTF8String]);
 	}
 }
 
@@ -277,8 +300,20 @@ void PrintSerializedStrings(OutputSerializer * _Nullable serializer, NSArray<NSS
 	{
 		for(NSString *oneString in array)
 		{
-			fprintf(stdout, "%s", [oneString UTF8String]);
+			fprintf(gLogOut, "%s", [oneString UTF8String]);
 		}
+	}
+}
+
+void PrintSerializedErrorString(OutputSerializer * _Nullable serializer, NSString * _Nullable string)
+{
+	if(serializer != nil)
+	{
+		[serializer scheduleErrorString:string];
+	}
+	else
+	{
+		fprintf(gLogErr, "%s", [string UTF8String]);
 	}
 }
 

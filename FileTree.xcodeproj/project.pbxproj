@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		1D3FFA5D254D7A140076E19C /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D3FFA5C254D7A140076E19C /* main.m */; };
 		1D4070E6252B342900C9B7F0 /* FileTree.c in Sources */ = {isa = PBXBuildFile; fileRef = 1D4070E5252B342900C9B7F0 /* FileTree.c */; };
+		1DA1150625B31B6B00C0C6A5 /* LogStream.c in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1150525B31B6B00C0C6A5 /* LogStream.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -28,6 +29,8 @@
 		1D3FFA5C254D7A140076E19C /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		1D4070D9252B340200C9B7F0 /* FileTree */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = FileTree; sourceTree = BUILT_PRODUCTS_DIR; };
 		1D4070E5252B342900C9B7F0 /* FileTree.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = FileTree.c; sourceTree = "<group>"; };
+		1DA1150425B31B6B00C0C6A5 /* LogStream.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LogStream.h; sourceTree = SOURCE_ROOT; };
+		1DA1150525B31B6B00C0C6A5 /* LogStream.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LogStream.c; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -63,6 +66,8 @@
 				1D4070E5252B342900C9B7F0 /* FileTree.c */,
 				1D3FFA5A254D74430076E19C /* FileTree.h */,
 				1D3FFA5C254D7A140076E19C /* main.m */,
+				1DA1150525B31B6B00C0C6A5 /* LogStream.c */,
+				1DA1150425B31B6B00C0C6A5 /* LogStream.h */,
 			);
 			path = FileTree;
 			sourceTree = "<group>";
@@ -123,6 +128,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1DA1150625B31B6B00C0C6A5 /* LogStream.c in Sources */,
 				1D3FFA5D254D7A140076E19C /* main.m in Sources */,
 				1D4070E6252B342900C9B7F0 /* FileTree.c in Sources */,
 			);

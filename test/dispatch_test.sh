@@ -213,13 +213,70 @@ echo "dispatch \"echo-dot-files\" wait"
 /bin/ls -a "$HOME" | /usr/bin/grep -E '^\..*' | /usr/bin/sed -E 's|(.+)|[echo]\t\1|' | "$DISPATCH" "echo-dot-files"
 "$DISPATCH" "echo-dot-files" wait
 
-verify_succeeded "$?" "streaming files to execute action failed"
+verify_succeeded "$?" "streaming files to echo action failed"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Stream all files starting with dot from $HOME directory to echo to redirected stdout into /tmp/echo-dot-files.out"
+echo ""
+
+echo "dispatch \"echo-dot-files\" start --ordered-output --stdout /tmp/echo-dot-files.out"
+echo "dispatch \"echo-dot-files\" echo \"~~~~~~~~ begin ~~~~~~~~\""
+echo "/bin/ls -a \"$HOME\" | /usr/bin/grep -E '^\..*' | /usr/bin/sed -E 's|(.+)|[echo]\t\1|' | dispatch \"echo-dot-files\""
+echo "dispatch \"echo-dot-files\" echo \"~~~~~~~~ end ~~~~~~~~~\""
+echo "dispatch \"echo-dot-files\" wait"
+
+"$DISPATCH" "echo-dot-files" start --ordered-output --stdout "/tmp/echo-dot-files.out"
+"$DISPATCH" "echo-dot-files" echo "~~~~~~~~ begin ~~~~~~~~"
+/bin/ls -a "$HOME" | /usr/bin/grep -E '^\..*' | /usr/bin/sed -E 's|(.+)|[echo]\t\1|' | "$DISPATCH" "echo-dot-files"
+"$DISPATCH" "echo-dot-files" echo "~~~~~~~~ end ~~~~~~~~~"
+"$DISPATCH" "echo-dot-files" wait
+
+verify_succeeded "$?" "streaming files with echo to stdout file failed"
+
+if test ! -f "/tmp/echo-dot-files.out"; then
+	verify_succeeded "1" "stdout was not written by \"replay\" in /tmp/echo-dot-files.out"
+else
+	echo ""
+	echo "The content of \"/tmp/echo-dot-files.out\" file:"
+	/bin/cat "/tmp/echo-dot-files.out"
+	/bin/rm "/tmp/echo-dot-files.out"
+fi
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Test redirecting stderr output to /tmp/execution-failure.err"
+echo ""
+
+echo "dispatch \"stderr-test\" start --stderr /tmp/execution-failure.err"
+echo "dispatch \"stderr-test\" execute \"/path/to/imaginary/tool\""
+echo "dispatch \"stderr-test\" execute /bin/cat \"/sumpthin/stoopid\""
+echo "dispatch \"stderr-test\" wait"
+
+"$DISPATCH" "stderr-test" start --stderr "/tmp/execution-failure.err"
+"$DISPATCH" "stderr-test" execute "/path/to/imaginary/tool"
+"$DISPATCH" "stderr-test" execute /bin/cat "/sumpthin/stoopid"
+"$DISPATCH" "stderr-test" wait
+
+verify_succeeded "$?" "test redirecting stderr file failed"
+
+if test ! -f "/tmp/execution-failure.err"; then
+	verify_succeeded "1" "stderr was not written by \"replay\" in /tmp/execution-failure.err"
+else
+	echo ""
+	echo "The content of \"/tmp/execution-failure.err\" file (expected errors):"
+	/bin/cat "/tmp/execution-failure.err"
+	/bin/rm "/tmp/execution-failure.err"
+fi
 
 # verify there is no orphaned "replay" server running
 # count the lines returned by ps for processes with "replay" in name
 # there is one system "replayd" we exclude by adding space after "replay"
 # another "replay" is from the grep itself below
-# so we expect exactly one line with "replay"
+# so we expect exactly one line with "replay " match
 dispatch_process_count=$(/bin/ps -U $USER | /usr/bin/grep "replay " | /usr/bin/wc -l)
 if test "$dispatch_process_count" -ne "1"; then
 	echo "orphaned \"replay\" server detected:"

@@ -7,6 +7,7 @@
 
 #import <Foundation/Foundation.h>
 #import "TaskProxy.h"
+#include "LogStream.h"
 
 extern dispatch_queue_t sQueue;
 extern dispatch_group_t sGroup;
@@ -78,8 +79,8 @@ extern dispatch_group_t sGroup;
 	BOOL isCircularDependency = [nextTask taskExistsInNextTaskTree:self];
 	if(isCircularDependency)
 	{
-		fprintf(stderr, "error: circular dependency has been detected in the action graph.\n");
-		exit(EXIT_FAILURE);
+		fprintf(gLogErr, "error: circular dependency has been detected in the action graph.\n");
+		safe_exit(EXIT_FAILURE);
 	}
 #endif
 
@@ -189,21 +190,21 @@ extern dispatch_group_t sGroup;
 	char path[2048];
 
 	NSString *actionName = self.stepDescription[@"action"];
-	fprintf(stderr, "[%s]\n", actionName.UTF8String);
-	fprintf(stderr, "  unsatisfied dependency count: %ld\n", _pendingDependenciesCount);
+	fprintf(gLogErr, "[%s]\n", actionName.UTF8String);
+	fprintf(gLogErr, "  unsatisfied dependency count: %ld\n", _pendingDependenciesCount);
 
-	fprintf(stderr, "  inputs:\n");
+	fprintf(gLogErr, "  inputs:\n");
 	for(NSUInteger i = 0; i < _inputCount; i++)
 	{
 		GetPathForNode(_inputs[i], path, sizeof(path));
-		fprintf(stderr, "    %s\n", path);
+		fprintf(gLogErr, "    %s\n", path);
 	}
 
-	fprintf(stderr, "  outputs:\n");
+	fprintf(gLogErr, "  outputs:\n");
 	for(NSUInteger i = 0; i < _outputCount; i++)
 	{
 		GetPathForNode(_outputs[i], path, sizeof(path));
-		fprintf(stderr, "    %s\n", path);
+		fprintf(gLogErr, "    %s\n", path);
 	}
 }
 

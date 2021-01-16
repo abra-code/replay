@@ -19,6 +19,11 @@ static inline void PrintToStdOut(ReplayContext *context, NSString *string, NSInt
 	PrintSerializedString(context->outputSerializer, string, context->orderedOutput ? actionIndex : -1);
 }
 
+static inline void PrintToStdErr(ReplayContext *context, NSString *string)
+{
+	PrintSerializedErrorString(context->outputSerializer, string);
+}
+
 static inline void PrintStringsToStdOut(ReplayContext *context, NSArray<NSString *> *array, NSInteger actionIndex)
 {
 	if(context->orderedOutput)
@@ -252,7 +257,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 			else
 			{
-				fprintf(stderr, "error: \"items\" is expected to be an array of paths\n");
+				NSString *errStr = @"error: \"delete\" action: \"items\" is expected to be an array of paths\n";
+				PrintToStdErr(context, errStr);
 				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unexpected items type" };
 				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
 				context->lastError.error = operationError;
@@ -268,7 +274,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					content = @""; //content is optional
 				if(![content isKindOfClass:stringClass])
 				{
-					fprintf(stderr, "error: \"content\" is expected to be a string\n");
+					NSString *errStr = @"error: \"create file\" action: \"content\" is expected to be a string\n";
+					PrintToStdErr(context, errStr);
 					content = @"";
 				}
 				
@@ -326,7 +333,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				}
 				else
 				{
-					fprintf(stderr, "error: \"create\" action must specify \"file\" or \"directory\" \n");
+					NSString *errStr = @"error: \"create\" action must specify \"file\" or \"directory\" \n";
+					PrintToStdErr(context, errStr);
 					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid create action specification" };
 					NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
 					context->lastError.error = operationError;
@@ -341,7 +349,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				NSArray<NSString*> *arguments = stepDescription[@"arguments"];
 				if((arguments != nil) && ![arguments isKindOfClass:arrayClass])
 				{
-					fprintf(stderr, "error: \"execute\" action must specify \"arguments\" as a string array\n");
+					NSString *errStr = @"error: \"execute\" action must specify \"arguments\" as a string array\n";
+					PrintToStdErr(context, errStr);
 					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid execute action specification" };
 					NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
 					context->lastError.error = operationError;
@@ -395,7 +404,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 			else
 			{
-				fprintf(stderr, "error: \"execute\" action must specify \"tool\" value with path to executable\n");
+				NSString *errStr = @"error: \"execute\" action must specify \"tool\" value with path to executable\n";
+				PrintToStdErr(context, errStr);
 				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid execute action specification" };
 				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
 				context->lastError.error = operationError;
@@ -410,7 +420,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
 			if(![text isKindOfClass:stringClass])
 			{
-				fprintf(stderr, "error: \"text\" is expected to be a string\n");
+				NSString *errStr = @"error: \"echo\" action: \"text\" is expected to be a string\n";
+				PrintToStdErr(context, errStr);
 				text = @"";
 			}
 			
@@ -498,7 +509,11 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 			{
 				errorDesc = [operationError localizedFailureReason];
 			}
-			fprintf(stderr, "error: failed to clone from \"%s\" to \"%s\". Error: %s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String], [errorDesc UTF8String] );
+			NSString *errStr = [NSString stringWithFormat:@"error: failed to clone from \"%@\" to \"%@\". Error: %@\n",
+														[fromURL path],
+														[toURL path],
+														errorDesc];
+			PrintToStdErr(context, errStr);
 		}
 	}
 	return isSuccessful;
@@ -549,7 +564,11 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *ac
 			{
 				errorDesc = [operationError localizedFailureReason];
 			}
-			fprintf(stderr, "error: failed to move from \"%s\" to \"%s\". Error: %s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String], [errorDesc UTF8String] );
+			NSString *errStr = [NSString stringWithFormat:@"error: failed to move from \"%@\" to \"%@\". Error: %@\n",
+														[fromURL path],
+														[toURL path],
+														errorDesc];
+			PrintToStdErr(context, errStr);
 		}
 	}
 	return isSuccessful;
@@ -600,7 +619,11 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext
 			{
 				errorDesc = [operationError localizedFailureReason];
 			}
-			fprintf(stderr, "error: failed to create a hardlink from \"%s\" to \"%s\". Error: %s\n", [[fromURL path] UTF8String], [[toURL path] UTF8String], [errorDesc UTF8String] );
+			NSString *errStr = [NSString stringWithFormat:@"error: failed to create a hardlink from \"%@\" to \"%@\". Error: %@\n",
+														[fromURL path],
+														[toURL path],
+														errorDesc];
+			PrintToStdErr(context, errStr);
 		}
 	}
 	return isSuccessful;
@@ -676,7 +699,11 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 			{
 				errorDesc = [operationError localizedFailureReason];
 			}
-			fprintf(stderr, "error: failed to create a symlink at \"%s\" referring to \"%s\". Error: %s\n", [[linkURL path] UTF8String], [[fromURL path] UTF8String], [errorDesc UTF8String] );
+			NSString *errStr = [NSString stringWithFormat:@"error: failed to create a symlink at \"%@\" referring to \"%@\". Error: %@\n",
+														[linkURL path],
+														[fromURL path],
+														errorDesc];
+			PrintToStdErr(context, errStr);
 		}
 	}
 	return isSuccessful;
@@ -736,7 +763,10 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 			{
 				errorDesc = [operationError localizedFailureReason];
 			}
-			fprintf(stderr, "error: failed to create file \"%s\". Error: %s\n", [[itemURL path] UTF8String], [errorDesc UTF8String] );
+			NSString *errStr = [NSString stringWithFormat:@"error: failed to create file \"%@\". Error: %@\n",
+														[itemURL path],
+														errorDesc];
+			PrintToStdErr(context, errStr);
 		}
 	}
 	return isSuccessful;
@@ -776,7 +806,10 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 			{
 				errorDesc = [operationError localizedFailureReason];
 			}
-			fprintf(stderr, "error: failed to create directory \"%s\". Error: %s\n", [[itemURL path] UTF8String], [errorDesc UTF8String] );
+			NSString *errStr = [NSString stringWithFormat:@"error: failed to create directory \"%@\". Error: %@\n",
+														[itemURL path],
+														errorDesc];
+			PrintToStdErr(context, errStr);
 		}
 	}
 	return isSuccessful;
@@ -815,7 +848,10 @@ DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 			{
 				errorDesc = [operationError localizedFailureReason];
 			}
-			fprintf(stderr, "error: failed to delete \"%s\". Error: %s\n", [[itemURL path] UTF8String], [errorDesc UTF8String] );
+			NSString *errStr = [NSString stringWithFormat:@"error: failed to delete \"%@\". Error: %@\n",
+														[itemURL path],
+														errorDesc];
+			PrintToStdErr(context, errStr);
 		}
 	}
 	return isSuccessful;
@@ -860,29 +896,42 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 		[task setLaunchPath:toolPath];
 		[task setArguments:arguments];
 
+		NSPipe *stdErrPipe = [NSPipe pipe];
+		[task setStandardError:stdErrPipe];
+
 		[task setTerminationHandler: ^(NSTask *task) {
 			int toolStatus = [task terminationStatus];
 			if(toolStatus != EXIT_SUCCESS)
 			{
+				NSError *dataError = nil;
+				NSFileHandle *stdOutFileHandle = [stdErrPipe fileHandleForReading];
+				NSData *stdErrData = [stdOutFileHandle readDataToEndOfFileAndReturnError:&dataError];
+				if((stdErrData != nil) && (stdErrData.length > 0))
+				{
+					NSString *stdErrStr = [[NSString alloc] initWithData:stdErrData encoding:NSUTF8StringEncoding];
+					PrintToStdErr(context, stdErrStr);
+				}
+				
 				NSString *toolErrorDescription = [NSString stringWithFormat:@"%@ returned error %d", toolPath, toolStatus];
 				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: toolErrorDescription };
 				NSError *taskError = [NSError errorWithDomain:NSPOSIXErrorDomain code:toolStatus userInfo:userInfo];
 				context->lastError.error = taskError;
-				fprintf(stderr, "error: failed to execute \"%s\". Error: %d\n", [toolPath UTF8String], toolStatus);
+				NSString *errStr = [NSString stringWithFormat:@"error: failed to execute \"%@\". Error: %d\n", toolPath, toolStatus];
+				PrintToStdErr(context, errStr);
 			}
 		}];
 
 		NSPipe *stdOutPipe = [NSPipe pipe];
 		[task setStandardOutput:stdOutPipe];
+
 		NSPipe *stdInPipe = [NSPipe pipe];
 		[task setStandardInput:stdInPipe];
-
-		NSFileHandle *stdOutFileHandle = [stdOutPipe fileHandleForReading];
 
 		NSError *operationError = nil;
 		isSuccessful = (bool)[task launchAndReturnError:&operationError];
 		if(isSuccessful)
 		{
+			NSFileHandle *stdOutFileHandle = [stdOutPipe fileHandleForReading];
 			NSData *stdOutData = [stdOutFileHandle readDataToEndOfFileAndReturnError:&operationError];
 			if(stdOutData != nil)
 			{
@@ -890,8 +939,8 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 				{
 					//since we captured stdout and waited on it, now replay it to stdout
 					//because it was synchronous, all output will be printed at once after the tool finished
-					NSString *stdoutStr = [[NSString alloc] initWithData:stdOutData encoding:NSUTF8StringEncoding];
-					PrintToStdOut(context, stdoutStr, actionContext->index);
+					NSString *stdOutStr = [[NSString alloc] initWithData:stdOutData encoding:NSUTF8StringEncoding];
+					PrintToStdOut(context, stdOutStr, actionContext->index);
 					secondStringPrinted = true;
 				}
 			}
@@ -909,7 +958,8 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 			{
 				errorDesc = [operationError localizedFailureReason];
 			}
-			fprintf(stderr, "error: failed to execute \"%s\". Error: %s\n", [toolPath UTF8String], [errorDesc UTF8String] );
+			NSString *errStr = [NSString stringWithFormat:@"error: failed to execute \"%@\". Error: %@\n", toolPath, errorDesc];
+			PrintToStdErr(context, errStr);
 		}
 	}
 	

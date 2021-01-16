@@ -52,7 +52,9 @@ Options:
                      sent by "dispatch". If the server is not running for given batch name, the first request to add
                      an action starts "replay" in server mode. Therefore staring the server manually is not required
                      but it is possible if needed.
-  -h, --help         Display this help
+  -l, --stdout PATH  log standard output to provided file path.
+  -m, --stderr PATH  log standard error to provided file path.
+  -h, --help         Display this help.
 
 Playlist format:
 
@@ -154,7 +156,7 @@ Streaming actions through stdin pipe:
 Actions may be executed serially or concurrently but without dependency analysis.
 Dependency analysis requires a complete set of actions to create a graph, while streaming
 starts execution immediately as the action requests arrive.
-Concurrent execution is default, which does not guarantee the order of actions but a new option:
+Concurrent execution is default, which does not guarantee the order of actions but an option:
 --ordered-output has been added to ensure the output order is the same as action scheduling order.
 For example, while streaming actions A, B, C in that order, the execution may happen like this: A, C, B
 but the printed output will still be preserved as A, B, C. This implies that that output of C
@@ -279,6 +281,7 @@ See also:
 
 ```
 
+#  
 The content of  `dispatch --help`:
  
 ```
@@ -341,7 +344,7 @@ in the same format as accepted by "replay" tool, for example:
    dispatch stream-job wait
 
 With a couple of notes:
- - you cannot pass "start" and "wait" options that way - these are instructios for
+ - you cannot pass "start" and "wait" options that way - these are instructions for
    "dispatch" tool, not real actions to forward to "replay".
  - each line is sent to "replay" server separately so it is not as performant as streaming
    actions directly to "replay" in regular, non-server mode.

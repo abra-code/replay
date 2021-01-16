@@ -21,6 +21,7 @@
 		1D34D6B5259762F100167241 /* ActionStream.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D34D6B4259762F100167241 /* ActionStream.m */; };
 		1D4B5FC7256E51500063F5E7 /* OutputSerializer.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D4B5FC6256E51500063F5E7 /* OutputSerializer.m */; };
 		1D74C1B1256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D74C1AF256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m */; };
+		1DA114FA25B2FBDD00C0C6A5 /* LogStream.c in Sources */ = {isa = PBXBuildFile; fileRef = 1DA114F925B2FBDD00C0C6A5 /* LogStream.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -63,6 +64,8 @@
 		1D4B5FC6256E51500063F5E7 /* OutputSerializer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = OutputSerializer.m; sourceTree = "<group>"; };
 		1D74C1AF256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ConcurrentDispatchWithNoDependency.m; sourceTree = "<group>"; };
 		1D74C1B0256B890D003EB527 /* ConcurrentDispatchWithNoDependency.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ConcurrentDispatchWithNoDependency.h; sourceTree = "<group>"; };
+		1DA114F925B2FBDD00C0C6A5 /* LogStream.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LogStream.c; sourceTree = "<group>"; };
+		1DA114FC25B2FBE300C0C6A5 /* LogStream.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LogStream.h; sourceTree = "<group>"; };
 		1DCA6EB4255BFCC60063BBBD /* MedusaTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MedusaTask.h; sourceTree = "<group>"; };
 		1DFE39EF257D98E500BFE48E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		1DFE39F2257E26C000BFE48E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -93,9 +96,9 @@
 				1D74C1AF256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m */,
 				1D4B5FC5256E51500063F5E7 /* OutputSerializer.h */,
 				1D4B5FC6256E51500063F5E7 /* OutputSerializer.m */,
+				1D1213032557B5F200E46A72 /* ReplayAction.h */,
 				1D1213002557B5BA00E46A72 /* ReplayAction.m */,
 				1D34D6A72594CA3400167241 /* ActionFromName.m */,
-				1D1213032557B5F200E46A72 /* ReplayAction.h */,
 				1D1213052557C08000E46A72 /* ReplayTask.h */,
 				1D1213062557C08000E46A72 /* ReplayTask.m */,
 				1D1212EC25576DB000E46A72 /* SchedulerMedusa.h */,
@@ -111,6 +114,8 @@
 				1D34D6B4259762F100167241 /* ActionStream.m */,
 				1D34D6B12597608500167241 /* ReplayServer.h */,
 				1D34D6AE2597607D00167241 /* ReplayServer.m */,
+				1DA114F925B2FBDD00C0C6A5 /* LogStream.c */,
+				1DA114FC25B2FBE300C0C6A5 /* LogStream.h */,
 				1D19043524DE9EE900276D83 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -192,6 +197,7 @@
 				1D19043824DE9EE900276D83 /* main.m in Sources */,
 				1D1212F325576E0400E46A72 /* FileTree.c in Sources */,
 				1D12130C2557C54B00E46A72 /* SerialDispatch.m in Sources */,
+				1DA114FA25B2FBDD00C0C6A5 /* LogStream.c in Sources */,
 				1D1212FC2557726900E46A72 /* TaskProxy.m in Sources */,
 				1D1213072557C08000E46A72 /* ReplayTask.m in Sources */,
 			);
