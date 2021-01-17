@@ -1,19 +1,17 @@
 #import "ConcurrentDispatchWithNoDependency.h"
+#import "AsyncDispatch.h"
 
 void
 StartConcurrentDispatchWithNoDependency(ReplayContext *context)
 {
 	assert(context->concurrent);
-	assert(context->queue == NULL);
-	context->queue = dispatch_queue_create("concurrent.playback", DISPATCH_QUEUE_CONCURRENT);
-	assert(context->group == NULL);
-	context->group = dispatch_group_create();
+	StartAsyncDispatch();
 }
 
 void
 FinishConcurrentDispatchWithNoDependencyAndWait(ReplayContext *context)
 {
-	dispatch_group_wait(context->group, DISPATCH_TIME_FOREVER);
+	FinishAsyncDispatchAndWait();
 }
 
 void
@@ -39,7 +37,7 @@ DispatchTasksConcurrentlyWithNoDependency(NSArray<NSDictionary*> *playlist, Repl
 				{
 					if(action != NULL)
 					{
-						dispatch_group_async(context->group, context->queue, action);
+						AsyncDispatch(action);
 					}
 				});
 		}
@@ -67,7 +65,7 @@ DispatchTaskConcurrentlyWithNoDependency(NSDictionary *stepDescription, ReplayCo
 		{
 			if(action != NULL)
 			{
-				dispatch_group_async(context->group, context->queue, action);
+				AsyncDispatch(action);
 			}
 		});
 }

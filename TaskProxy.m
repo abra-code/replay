@@ -7,10 +7,8 @@
 
 #import <Foundation/Foundation.h>
 #import "TaskProxy.h"
+#import "AsyncDispatch.h"
 #include "LogStream.h"
-
-extern dispatch_queue_t sQueue;
-extern dispatch_group_t sGroup;
 
 //#define TRACE_PROXY 1
 
@@ -117,7 +115,7 @@ extern dispatch_group_t sGroup;
 		if(_pendingDependenciesCount == 0)
 		{//all dependencies satisfied, now we can execute our task
 			//dispatch queue operations themselves are thread safe per Apple's documentation
-			dispatch_group_async(sGroup, sQueue, ^{
+			AsyncDispatch(^{
 				//self is captured strongly here by the block
 				//at enqueueing time so callers with the last reference
 				//are safe to release this object right after

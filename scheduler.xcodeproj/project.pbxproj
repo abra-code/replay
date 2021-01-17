@@ -11,6 +11,7 @@
 		1D44722625045B7F00AD4746 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D44722525045B7F00AD4746 /* main.m */; };
 		1D79DF212506338200089548 /* TaskScheduler.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D79DF202506338200089548 /* TaskScheduler.m */; };
 		1DA1151025B31BAD00C0C6A5 /* LogStream.c in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1150F25B31BAD00C0C6A5 /* LogStream.c */; };
+		1DA1151D25B4350500C0C6A5 /* AsyncDispatch.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1151B25B4350500C0C6A5 /* AsyncDispatch.m */; };
 		1DB8C3AF2517600C008B9BF9 /* TaskProxy.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3AD2517600C008B9BF9 /* TaskProxy.m */; };
 /* End PBXBuildFile section */
 
@@ -35,6 +36,8 @@
 		1D79DF202506338200089548 /* TaskScheduler.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskScheduler.m; sourceTree = "<group>"; };
 		1DA1150E25B31BAD00C0C6A5 /* LogStream.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LogStream.h; sourceTree = "<group>"; };
 		1DA1150F25B31BAD00C0C6A5 /* LogStream.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LogStream.c; sourceTree = "<group>"; };
+		1DA1151B25B4350500C0C6A5 /* AsyncDispatch.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = AsyncDispatch.m; sourceTree = "<group>"; };
+		1DA1151C25B4350500C0C6A5 /* AsyncDispatch.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AsyncDispatch.h; sourceTree = "<group>"; };
 		1DB8C3AD2517600C008B9BF9 /* TaskProxy.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskProxy.m; sourceTree = "<group>"; };
 		1DB8C3AE2517600C008B9BF9 /* TaskProxy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskProxy.h; sourceTree = "<group>"; };
 		1DB8C3C925181858008B9BF9 /* MedusaTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MedusaTask.h; sourceTree = "<group>"; };
@@ -64,6 +67,8 @@
 				1D79DF202506338200089548 /* TaskScheduler.m */,
 				1DA1150F25B31BAD00C0C6A5 /* LogStream.c */,
 				1DA1150E25B31BAD00C0C6A5 /* LogStream.h */,
+				1DA1151C25B4350500C0C6A5 /* AsyncDispatch.h */,
+				1DA1151B25B4350500C0C6A5 /* AsyncDispatch.m */,
 				1D44722325045B7F00AD4746 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -133,6 +138,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1DA1151D25B4350500C0C6A5 /* AsyncDispatch.m in Sources */,
 				1D79DF212506338200089548 /* TaskScheduler.m in Sources */,
 				1D44722625045B7F00AD4746 /* main.m in Sources */,
 				1DA1151025B31BAD00C0C6A5 /* LogStream.c in Sources */,

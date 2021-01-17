@@ -22,6 +22,7 @@
 		1D4B5FC7256E51500063F5E7 /* OutputSerializer.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D4B5FC6256E51500063F5E7 /* OutputSerializer.m */; };
 		1D74C1B1256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D74C1AF256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m */; };
 		1DA114FA25B2FBDD00C0C6A5 /* LogStream.c in Sources */ = {isa = PBXBuildFile; fileRef = 1DA114F925B2FBDD00C0C6A5 /* LogStream.c */; };
+		1DA1151425B42F7B00C0C6A5 /* AsyncDispatch.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1151325B42F7B00C0C6A5 /* AsyncDispatch.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -66,6 +67,8 @@
 		1D74C1B0256B890D003EB527 /* ConcurrentDispatchWithNoDependency.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ConcurrentDispatchWithNoDependency.h; sourceTree = "<group>"; };
 		1DA114F925B2FBDD00C0C6A5 /* LogStream.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LogStream.c; sourceTree = "<group>"; };
 		1DA114FC25B2FBE300C0C6A5 /* LogStream.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LogStream.h; sourceTree = "<group>"; };
+		1DA1151225B42F7200C0C6A5 /* AsyncDispatch.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AsyncDispatch.h; sourceTree = "<group>"; };
+		1DA1151325B42F7B00C0C6A5 /* AsyncDispatch.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = AsyncDispatch.m; sourceTree = "<group>"; };
 		1DCA6EB4255BFCC60063BBBD /* MedusaTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MedusaTask.h; sourceTree = "<group>"; };
 		1DFE39EF257D98E500BFE48E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		1DFE39F2257E26C000BFE48E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -90,6 +93,8 @@
 				1D19043724DE9EE900276D83 /* main.m */,
 				1D12130E2557CC7300E46A72 /* StringAndPath.h */,
 				1D12130F2557CC7300E46A72 /* StringAndPath.m */,
+				1DA1151225B42F7200C0C6A5 /* AsyncDispatch.h */,
+				1DA1151325B42F7B00C0C6A5 /* AsyncDispatch.m */,
 				1D12130A2557C54B00E46A72 /* SerialDispatch.h */,
 				1D12130B2557C54B00E46A72 /* SerialDispatch.m */,
 				1D74C1B0256B890D003EB527 /* ConcurrentDispatchWithNoDependency.h */,
@@ -193,6 +198,7 @@
 				1D34D6B5259762F100167241 /* ActionStream.m in Sources */,
 				1D1213012557B5BA00E46A72 /* ReplayAction.m in Sources */,
 				1D74C1B1256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m in Sources */,
+				1DA1151425B42F7B00C0C6A5 /* AsyncDispatch.m in Sources */,
 				1D34D6A82594CA3400167241 /* ActionFromName.m in Sources */,
 				1D19043824DE9EE900276D83 /* main.m in Sources */,
 				1D1212F325576E0400E46A72 /* FileTree.c in Sources */,

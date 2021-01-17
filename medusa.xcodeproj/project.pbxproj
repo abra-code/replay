@@ -12,6 +12,7 @@
 		1D47A83C25071EE20047AA39 /* medusa1.cp in Sources */ = {isa = PBXBuildFile; fileRef = 1D47A83B25071EE20047AA39 /* medusa1.cp */; };
 		1DA1150A25B31B9100C0C6A5 /* LogStream.c in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1150925B31B9100C0C6A5 /* LogStream.c */; };
 		1DA1150B25B31B9100C0C6A5 /* LogStream.c in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1150925B31B9100C0C6A5 /* LogStream.c */; };
+		1DA1151825B434C000C0C6A5 /* AsyncDispatch.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1151625B434C000C0C6A5 /* AsyncDispatch.m */; };
 		1DB8C3B52517FCD0008B9BF9 /* MedusaTaskProxy.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3B42517FCD0008B9BF9 /* MedusaTaskProxy.m */; };
 		1DB8C3BA2518161F008B9BF9 /* TaskProxy.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3B92518161F008B9BF9 /* TaskProxy.m */; };
 		1DB8C3CD25186CA6008B9BF9 /* TaskScheduler.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3CB25186CA6008B9BF9 /* TaskScheduler.m */; };
@@ -51,6 +52,8 @@
 		1D47A83B25071EE20047AA39 /* medusa1.cp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = medusa1.cp; sourceTree = "<group>"; };
 		1DA1150825B31B9100C0C6A5 /* LogStream.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LogStream.h; sourceTree = SOURCE_ROOT; };
 		1DA1150925B31B9100C0C6A5 /* LogStream.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LogStream.c; sourceTree = SOURCE_ROOT; };
+		1DA1151625B434C000C0C6A5 /* AsyncDispatch.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = AsyncDispatch.m; sourceTree = SOURCE_ROOT; };
+		1DA1151725B434C000C0C6A5 /* AsyncDispatch.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AsyncDispatch.h; sourceTree = SOURCE_ROOT; };
 		1DB8C3B32517FCD0008B9BF9 /* MedusaTaskProxy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = MedusaTaskProxy.h; sourceTree = SOURCE_ROOT; };
 		1DB8C3B42517FCD0008B9BF9 /* MedusaTaskProxy.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = MedusaTaskProxy.m; sourceTree = SOURCE_ROOT; };
 		1DB8C3B82518161F008B9BF9 /* TaskProxy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskProxy.h; sourceTree = SOURCE_ROOT; };
@@ -107,6 +110,8 @@
 				1DB8C3D02518B804008B9BF9 /* SchedulerMedusa.m */,
 				1DA1150925B31B9100C0C6A5 /* LogStream.c */,
 				1DA1150825B31B9100C0C6A5 /* LogStream.h */,
+				1DA1151725B434C000C0C6A5 /* AsyncDispatch.h */,
+				1DA1151625B434C000C0C6A5 /* AsyncDispatch.m */,
 			);
 			path = "medusa-objc";
 			sourceTree = "<group>";
@@ -226,6 +231,7 @@
 				1DC15FB9250ED2070089C423 /* RecursiveMedusa.m in Sources */,
 				1D3FFA62254D7D9B0076E19C /* FileTree.c in Sources */,
 				1DC15FB0250ECF020089C423 /* main.mm in Sources */,
+				1DA1151825B434C000C0C6A5 /* AsyncDispatch.m in Sources */,
 				1DB8C3CD25186CA6008B9BF9 /* TaskScheduler.m in Sources */,
 				1DB8C3BA2518161F008B9BF9 /* TaskProxy.m in Sources */,
 			);

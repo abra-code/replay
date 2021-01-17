@@ -8,9 +8,7 @@
 #import <Foundation/Foundation.h>
 #import "TaskScheduler.h"
 #import "TaskProxy.h"
-
-dispatch_queue_t sQueue = nil;
-dispatch_group_t sGroup = nil;
+#import "AsyncDispatch.h"
 
 // private contract between TaskScheduler and TaskProxy:
 
@@ -27,8 +25,7 @@ dispatch_group_t sGroup = nil;
 	self = [super init];
 	if(self != nil)
 	{
-		sQueue = dispatch_queue_create("scheduler.concurrent.queue", DISPATCH_QUEUE_CONCURRENT);
-		sGroup = dispatch_group_create();
+		StartAsyncDispatch();
 
 		// the empty root task, its purpose it is to trigger the dispatch
 		// of the first level of tasks without dependencies
@@ -57,7 +54,7 @@ dispatch_group_t sGroup = nil;
 	_rootTask = nil;
 #endif
 
-	dispatch_group_wait(sGroup, DISPATCH_TIME_FOREVER);
+	FinishAsyncDispatchAndWait();
 }
 
 @end //@implementation TaskScheduler

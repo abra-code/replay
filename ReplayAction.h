@@ -31,8 +31,7 @@ typedef struct
 	AtomicError *lastError;
 	FileNode * __nullable fileTreeRoot;
 	OutputSerializer *__nullable outputSerializer; //not used in serial execution
-	dispatch_queue_t queue; //not used for execution with dependency analysis
-	dispatch_group_t group; //not used for execution with dependency analysis
+	dispatch_queue_t queue; // used only for serial execution
 	NSInteger actionCounter; //counter incremented with each serially created action
 	NSString *batchName; //when running in server mode the batch name is provided for unique message port name
 	CFMessagePortRef callbackPort; //the port to report back progress status and finish event

@@ -543,7 +543,6 @@ int main(int argc, const char * argv[])
 	context.fileTreeRoot = NULL;
 	context.outputSerializer = nil;
 	context.queue = nil;
-	context.group = nil;
 	context.actionCounter = -1;
 	context.batchName = NULL;
 	context.callbackPort = NULL;
