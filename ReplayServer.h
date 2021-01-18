@@ -8,7 +8,7 @@
 #import <Foundation/Foundation.h>
 #import "ReplayAction.h"
 
-#define GetAppGroupIdentifier() @"group"
+#define GetAppGroupIdentifier() @(REPLAY_GROUP_ID)
 
 static CFStringRef kReplayServerPortFormat = CFSTR("%@.replay-port.%@");
 static CFStringRef kDispatchListenerPortFormat = CFSTR("%@.dispatch-port.%@");
