@@ -32,6 +32,7 @@ typedef struct
 	FileNode * __nullable fileTreeRoot;
 	OutputSerializer *__nullable outputSerializer; //not used in serial execution
 	dispatch_queue_t queue; // used only for serial execution
+	intptr_t councurrencyLimit; //maximum number of tasks allowed to be executed concurrently. 0 = unlimited
 	NSInteger actionCounter; //counter incremented with each serially created action
 	NSString *batchName; //when running in server mode the batch name is provided for unique message port name
 	CFMessagePortRef callbackPort; //the port to report back progress status and finish event

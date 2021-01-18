@@ -44,7 +44,7 @@ int main(int argc, const char * argv[])
 	    os_signpost_event_emit(log, OS_SIGNPOST_ID_EXCLUSIVE, "Constructing graph");
 		clock_t begin = clock();
 
-		TaskScheduler *scheduler = [TaskScheduler new];
+		TaskScheduler *scheduler = [[TaskScheduler alloc] initWithConcurrencyLimit:0];
 		
 		//graph root task is created by the scheduler
 		//we build the graph by adding children tasks to the root

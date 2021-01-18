@@ -5,7 +5,7 @@ void
 StartConcurrentDispatchWithNoDependency(ReplayContext *context)
 {
 	assert(context->concurrent);
-	StartAsyncDispatch();
+	StartAsyncDispatch(context->councurrencyLimit);
 }
 
 void

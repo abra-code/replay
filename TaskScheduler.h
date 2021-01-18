@@ -13,6 +13,7 @@
 
 @property(nonatomic, readonly, strong) TaskProxy *rootTask;
 
+- (instancetype) initWithConcurrencyLimit:(intptr_t)concurrencyLimit;
 - (void)startExecutionAndWait;
 
 @end //TaskScheduler

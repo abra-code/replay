@@ -20,12 +20,12 @@
 
 @implementation TaskScheduler
 
--(instancetype) init
+-(instancetype) initWithConcurrencyLimit:(intptr_t)concurrencyLimit
 {
 	self = [super init];
 	if(self != nil)
 	{
-		StartAsyncDispatch();
+		StartAsyncDispatch(concurrencyLimit);
 
 		// the empty root task, its purpose it is to trigger the dispatch
 		// of the first level of tasks without dependencies

@@ -127,11 +127,11 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 
 
 static inline void
-ExecuteTasksWithScheduler(NSArray<TaskProxy*> *allTasks, FileNode *fileTreeRoot, NSUInteger inputCount, NSUInteger outputCount)
+ExecuteTasksWithScheduler(NSArray<TaskProxy*> *allTasks, ReplayContext *context, NSUInteger inputCount, NSUInteger outputCount)
 {
-	ConnectImplicitProducers(fileTreeRoot);
+	ConnectImplicitProducers(context->fileTreeRoot);
 
-	TaskScheduler *scheduler = [TaskScheduler new];
+	TaskScheduler *scheduler = [[TaskScheduler alloc] initWithConcurrencyLimit:context->councurrencyLimit];
 
 	//graph root task is created by the scheduler
 	//we build the graph by adding children tasks to the root
@@ -203,7 +203,7 @@ DispatchTasksConcurrentlyWithDependencyAnalysis(NSArray<NSDictionary*> *playlist
 	// at that point the whole input and output paths tree is already constructed
 	// with all explicit producers referred in their respective nodes
 	
-	ExecuteTasksWithScheduler(taskList, context->fileTreeRoot, totalInputCount, totalOutputCount);
+	ExecuteTasksWithScheduler(taskList, context, totalInputCount, totalOutputCount);
 
 	// Post-execution verification
 	// in case of circular dependencies some tasks were not scheduled for execution

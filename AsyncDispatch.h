@@ -7,6 +7,6 @@
 
 #import <Foundation/Foundation.h>
 
-void StartAsyncDispatch(void);
+void StartAsyncDispatch(intptr_t councurrencyLimit);
 void AsyncDispatch(dispatch_block_t block);
 void FinishAsyncDispatchAndWait(void);

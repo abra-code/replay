@@ -33,17 +33,22 @@ Usage:
 
 Options:
 
-  -s, --serial       Execute actions serially in the order specified in the playlist (slow).
-                     Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast).
-  -p, --no-dependency   An option for concurrent execution to skip dependency analysis. Actions must be independent.
   -k, --playlist-key KEY   Use a key in root dictionary of the playlist file for action steps array.
                      If absent, the playlist file root container is assumed to be an array of action steps.
                      The key may be specified multiple times to execute more than one playlist in the file.
-  -e, --stop-on-error   Stop executing the remaining playlist actions on first error.
-  -f, --force        If the file operation fails, delete destination and try again.
-  -o, --ordered-output  In simple concurrent execution mode preserve the order of printed task outputs as specified
+  -s, --serial       Execute actions serially in the order specified in the playlist (slow).
+                     Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast).
+  -p, --no-dependency   An option for concurrent execution to skip dependency analysis. Actions must be independent.
+  -o, --ordered-output   In simple concurrent execution mode preserve the order of printed task outputs as specified
                      in the playlist. The tasks are still executed concurrently without order guarantee
                      but printing is ordered. Ignored in serial execution and concurrent execution with dependencies.
+  -t, --max-tasks NUMBER   Maximum number of concurrently executed actions. Default is 0, which is treated as unbound.
+                     Limiting the number of concurrent operations may sometimes result in faster execution.
+                     With intensive file I/O tasks a low number like 4 may yield the best performance.
+                     For CPU intensive tasks you may use logical CPU core count (or a multiplier) as obtained by:
+                     sysctl -n hw.ncpu
+  -e, --stop-on-error   Stop executing the remaining playlist actions on first error.
+  -f, --force        If the file operation fails, delete destination and try again.
   -n, --dry-run      Show a log of actions which would be performed without running them.
   -v, --verbose      Show a log of actions while they are executed.
   -r, --start-server BATCH_NAME   Start server and listen for dispatch requests. "BATCH_NAME" must be a unique name

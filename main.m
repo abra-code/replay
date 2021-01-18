@@ -201,6 +201,7 @@ static struct option sLongOptions[] =
 	{"verbose",			no_argument,		NULL, 'v'},
 	{"dry-run",			no_argument,		NULL, 'n'},
 	{"serial",			no_argument,		NULL, 's'},
+	{"max-tasks",		required_argument,	NULL, 't'},
 	{"no-dependency",	no_argument,		NULL, 'p'},
 	{"playlist-key",	required_argument,	NULL, 'k'},
 	{"stop-on-error",   no_argument,		NULL, 'e'},
@@ -212,6 +213,7 @@ static struct option sLongOptions[] =
 	{"help",			no_argument,		NULL, 'h'},
 	{NULL, 				0, 					NULL,  0 }
 };
+
 
 static void
 DisplayHelp(void)
@@ -227,17 +229,22 @@ DisplayHelp(void)
 		"\n"
 		"Options:\n"
 		"\n"
-		"  -s, --serial       Execute actions serially in the order specified in the playlist (slow).\n"
-		"                     Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast).\n"
-		"  -p, --no-dependency   An option for concurrent execution to skip dependency analysis. Actions must be independent.\n"
 		"  -k, --playlist-key KEY   Use a key in root dictionary of the playlist file for action steps array.\n"
 		"                     If absent, the playlist file root container is assumed to be an array of action steps.\n"
 		"                     The key may be specified multiple times to execute more than one playlist in the file.\n"
-		"  -e, --stop-on-error   Stop executing the remaining playlist actions on first error.\n"
-		"  -f, --force        If the file operation fails, delete destination and try again.\n"
-		"  -o, --ordered-output  In simple concurrent execution mode preserve the order of printed task outputs as specified\n"
+		"  -s, --serial       Execute actions serially in the order specified in the playlist (slow).\n"
+		"                     Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast).\n"
+		"  -p, --no-dependency   An option for concurrent execution to skip dependency analysis. Actions must be independent.\n"
+		"  -o, --ordered-output   In simple concurrent execution mode preserve the order of printed task outputs as specified\n"
 		"                     in the playlist. The tasks are still executed concurrently without order guarantee\n"
 		"                     but printing is ordered. Ignored in serial execution and concurrent execution with dependencies.\n"
+		"  -t, --max-tasks NUMBER   Maximum number of concurrently executed actions. Default is 0, which is treated as unbound.\n"
+		"                     Limiting the number of concurrent operations may sometimes result in faster execution.\n"
+		"                     With intensive file I/O tasks a low number like 4 may yield the best performance.\n"
+		"                     For CPU intensive tasks you may use logical CPU core count (or a multiplier) as obtained by:\n"
+		"                     sysctl -n hw.ncpu\n"
+		"  -e, --stop-on-error   Stop executing the remaining playlist actions on first error.\n"
+		"  -f, --force        If the file operation fails, delete destination and try again.\n"
 		"  -n, --dry-run      Show a log of actions which would be performed without running them.\n"
 		"  -v, --verbose      Show a log of actions while they are executed.\n"
 		"  -r, --start-server BATCH_NAME   Start server and listen for dispatch requests. \"BATCH_NAME\" must be a unique name\n"
@@ -543,6 +550,7 @@ int main(int argc, const char * argv[])
 	context.fileTreeRoot = NULL;
 	context.outputSerializer = nil;
 	context.queue = nil;
+	context.councurrencyLimit = 0; //unlimited
 	context.actionCounter = -1;
 	context.batchName = NULL;
 	context.callbackPort = NULL;
@@ -559,7 +567,7 @@ int main(int argc, const char * argv[])
 	while(true)
 	{
 		int index = 0;
-		int oneOption = getopt_long (argc, (char * const *)argv, "vnsk:efor:l:m:h", sLongOptions, &index);
+		int oneOption = getopt_long (argc, (char * const *)argv, "vnst:pk:efor:l:m:h", sLongOptions, &index);
 		if (oneOption == -1) // end of options is signalled by -1
 			break;
 			
@@ -575,6 +583,14 @@ int main(int argc, const char * argv[])
 
 			case 's':
 				context.concurrent = false;
+			break;
+
+			case 't':
+			{
+				 context.councurrencyLimit = strtol(optarg, (char **)NULL, 10);
+				 if(context.councurrencyLimit < 0)
+				 	context.councurrencyLimit = 0;
+			}
 			break;
 
 			case 'p':
