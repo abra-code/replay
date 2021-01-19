@@ -353,7 +353,8 @@ With a couple of notes:
    "dispatch" tool, not real actions to forward to "replay".
  - each line is sent to "replay" server separately so it is not as performant as streaming
    actions directly to "replay" in regular, non-server mode.
- - "replay" stdout cannot be re-piped when executed this way.
+ - "replay" stdout cannot be piped when executed this way but "replay" can be started
+   with --stdout /path/to/log.out and --stderr /path/to/log.err options keep the logs.
  - a reminder that streaming actions as text requires parameters to be separated by some
    non-interfering field separator (vertical bar in the above example).
 

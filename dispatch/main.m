@@ -6,6 +6,7 @@
 //
 
 #import <Foundation/Foundation.h>
+#include <mach-o/dyld.h>
 #import "ReplayServer.h"
 
 
@@ -282,7 +283,8 @@ DisplayHelp(void)
 		"   \"dispatch\" tool, not real actions to forward to \"replay\".\n"
 		" - each line is sent to \"replay\" server separately so it is not as performant as streaming\n"
 		"   actions directly to \"replay\" in regular, non-server mode.\n"
-		" - \"replay\" stdout cannot be re-piped when executed this way.\n"
+		" - \"replay\" stdout cannot be piped when executed this way but \"replay\" can be started\n"
+		"   with --stdout /path/to/log.out and --stderr /path/to/log.err options keep the logs.\n"
 		" - a reminder that streaming actions as text requires parameters to be separated by some\n"
 		"   non-interfering field separator (vertical bar in the above example).\n"
 		"\n"
@@ -312,7 +314,7 @@ int main(int argc, const char * argv[])
 	@autoreleasepool
 	{
 		int result = 0;
-		NSString *pathToDispatch = @(argv[0]);
+		NSString *pathToDispatchFromArg = @(argv[0]);
 		NSString *batchName = @(argv[1]);
 		NSString *actionName = nil;
 		int lastArgIndex = argc-1;
@@ -340,29 +342,41 @@ int main(int argc, const char * argv[])
 		}
 
 		CFMessagePortRef remotePort = CFMessagePortCreateRemote(kCFAllocatorDefault, portName);//should return non-null if remote server port already created
-		if((remotePort == NULL) && (action != kActionWait))
+		if(remotePort == NULL)
 		{
-			NSMutableArray<NSString*> *arguments = [NSMutableArray new];
-			[arguments addObject:@"--start-server"]; //this is mandatory arg
-			[arguments addObject:batchName];
-			
-			if(action == kActionStartServer) //this is for explicit "start" action specified
-			{// additional args are params for replay tools
-				while(currArgIndex < lastArgIndex)
-				{
-					currArgIndex++;
-					NSString *oneParam = @(argv[currArgIndex]);
-					[arguments addObject:oneParam];
+			if(action != kActionWait)
+			{
+				NSMutableArray<NSString*> *arguments = [NSMutableArray new];
+				[arguments addObject:@"--start-server"]; //this is mandatory arg
+				[arguments addObject:batchName];
+				
+				if(action == kActionStartServer) //this is for explicit "start" action specified
+				{// additional args are params for replay tools
+					while(currArgIndex < lastArgIndex)
+					{
+						currArgIndex++;
+						NSString *oneParam = @(argv[currArgIndex]);
+						[arguments addObject:oneParam];
+					}
 				}
+				
+				// port not open, launch "replay" with batch name and specified params
+				bool ensureResponse = (action != kActionStartServer); //when starting the server one message will be sent by default
+				
+				NSString *pathToDispatch = pathToDispatchFromArg; //fallback path
+				char dispatchPath[PATH_MAX] = {0};
+				uint32_t buffSize = PATH_MAX;
+				int result = _NSGetExecutablePath(dispatchPath, &buffSize); //get real executable path
+				if(result == 0)
+				{
+					pathToDispatch = @(dispatchPath);
+				}
+				remotePort = StartReplayAndOpenRemotePort(pathToDispatch, portName, arguments, ensureResponse);
 			}
-			
-			// port not open, launch "replay" with batch name and specified params
-			bool ensureResponse = (action != kActionStartServer); //when starting the server one message will be sent by default
-			remotePort = StartReplayAndOpenRemotePort(pathToDispatch, portName, arguments, ensureResponse);
-		}
-		else if(action == kActionWait)
-		{
-			fprintf(stderr, "warning: \"replay\" server not running for batch name \"%s\"\n", (batchName).UTF8String);
+			else if(action == kActionWait)
+			{
+				fprintf(stderr, "warning: \"replay\" server not running for batch name \"%s\"\n", (batchName).UTF8String);
+			}
 		}
 		else if(action == kActionStartServer)
 		{
