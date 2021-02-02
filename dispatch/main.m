@@ -291,6 +291,7 @@ DisplayHelp(void)
 		"\n"
 		"Options:\n"
 		"\n"
+		"  -i, --version      Display version.\n"
 		"  -h, --help         Display this help\n"
 		"\n"
 		"See also:\n"
@@ -323,6 +324,12 @@ int main(int argc, const char * argv[])
 		if((argc == 2) && ([batchName isEqualToString:@"--help"] || [batchName isEqualToString:@"-h"]))
 		{
 			DisplayHelp();
+			return EXIT_SUCCESS;
+		}
+		
+		if((argc == 2) && ([batchName isEqualToString:@"--version"] || [batchName isEqualToString:@"-i"]))
+		{
+			printf( "dispatch 1.0.1\n" );
 			return EXIT_SUCCESS;
 		}
 

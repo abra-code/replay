@@ -210,6 +210,7 @@ static struct option sLongOptions[] =
 	{"start-server",    required_argument,  NULL, 'r'},
 	{"stdout",          required_argument,  NULL, 'l'},
 	{"stderr",          required_argument,  NULL, 'm'},
+	{"version",			no_argument,		NULL, 'i'},
 	{"help",			no_argument,		NULL, 'h'},
 	{NULL, 				0, 					NULL,  0 }
 };
@@ -255,6 +256,7 @@ DisplayHelp(void)
 		"                     but it is possible if needed.\n"
 		"  -l, --stdout PATH  log standard output to provided file path.\n"
 		"  -m, --stderr PATH  log standard error to provided file path.\n"
+		"  -i, --version      Display version.\n"
 		"  -h, --help         Display this help.\n"
 		"\n"
 	);
@@ -404,7 +406,7 @@ DisplayHelp(void)
 		"4. [execute] requires tool path and may have optional parameters separated with the same delimiter (not space delimited!), e.g.:\n"
 		"[execute]	/bin/echo	Hello from replay!\n"
 		"[execute stdout=false]	/bin/echo	This will not be printed\n"
-		"In the following example uses a different separator: \"+\" to explicitly show delimited parameters:\n"
+		"The following example uses a different separator: \"+\" to explicitly show delimited parameters:\n"
 		"[execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep \".txt\"\n"
 		"5. [echo] requires one string after separator. Supported modifiers are raw=true and newline=false\n"
 		"\n"
@@ -567,7 +569,7 @@ int main(int argc, const char * argv[])
 	while(true)
 	{
 		int index = 0;
-		int oneOption = getopt_long (argc, (char * const *)argv, "vnst:pk:efor:l:m:h", sLongOptions, &index);
+		int oneOption = getopt_long (argc, (char * const *)argv, "vnst:pk:efor:l:m:ih", sLongOptions, &index);
 		if (oneOption == -1) // end of options is signalled by -1
 			break;
 			
@@ -635,6 +637,11 @@ int main(int argc, const char * argv[])
 				if(status != EXIT_SUCCESS)
 					return status;
 			}
+			break;
+			
+			case 'i':
+				printf( "replay 1.0.1\n" );
+				return EXIT_SUCCESS;
 			break;
 			
 			case 'h':

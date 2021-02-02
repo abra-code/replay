@@ -246,6 +246,8 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1DA1152625B5A77B00C0C6A5 /* ReplayTargetCommon.xcconfig */;
 			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.1;
 			};
 			name = Debug;
 		};
@@ -253,6 +255,8 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1DA1152625B5A77B00C0C6A5 /* ReplayTargetCommon.xcconfig */;
 			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.1;
 			};
 			name = Release;
 		};

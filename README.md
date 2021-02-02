@@ -59,6 +59,7 @@ Options:
                      but it is possible if needed.
   -l, --stdout PATH  log standard output to provided file path.
   -m, --stderr PATH  log standard error to provided file path.
+  -i, --version      Display version.
   -h, --help         Display this help.
 
 Playlist format:
@@ -191,7 +192,7 @@ B. [create directory] requires just a single path, e.g.:
 4. [execute] requires tool path and may have optional parameters separated with the same delimiter (not space delimited!), e.g.:
 [execute]	/bin/echo	Hello from replay!
 [execute stdout=false]	/bin/echo	This will not be printed
-In the following example uses a different separator: "+" to explicitly show delimited parameters:
+The following example uses a different separator: "+" to explicitly show delimited parameters:
 [execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep ".txt"
 5. [echo] requires one string after separator. Supported modifiers are raw=true and newline=false
 
@@ -361,6 +362,7 @@ With a couple of notes:
 
 Options:
 
+  -i, --version      Display version.
   -h, --help         Display this help
 
 See also:
