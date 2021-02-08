@@ -84,8 +84,8 @@
 		1DA1153425B5AC0200C0C6A5 /* xcconfigs */ = {
 			isa = PBXGroup;
 			children = (
-				1DA1153525B5AC0200C0C6A5 /* ReplayProjectRelease.xcconfig */,
 				1DA1153625B5AC0200C0C6A5 /* ReplayProjectCommon.xcconfig */,
+				1DA1153525B5AC0200C0C6A5 /* ReplayProjectRelease.xcconfig */,
 				1DA1153725B5AC0200C0C6A5 /* ReplayProjectDebug.xcconfig */,
 				1DA1153825B5AC0200C0C6A5 /* DispatchTargetCommon.xcconfig */,
 			);
@@ -175,8 +175,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1DA1153825B5AC0200C0C6A5 /* DispatchTargetCommon.xcconfig */;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 1.0.1;
-				MARKETING_VERSION = 1.0.1;
 			};
 			name = Debug;
 		};
@@ -184,8 +182,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1DA1153825B5AC0200C0C6A5 /* DispatchTargetCommon.xcconfig */;
 			buildSettings = {
-				CURRENT_PROJECT_VERSION = 1.0.1;
-				MARKETING_VERSION = 1.0.1;
 			};
 			name = Release;
 		};

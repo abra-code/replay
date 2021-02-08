@@ -7,6 +7,9 @@ REPLAY_GROUP_ID=\"group\"
 // Optional xcconfig with code signing settings for distribution by Abracode
 #include? "ReplayDistribution.xcconfig"
 
+CURRENT_PROJECT_VERSION = 1.0.1
+MARKETING_VERSION = 1.0.1
+
 GCC_PREPROCESSOR_DEFINITIONS = $(inherited) REPLAY_GROUP_ID=$(REPLAY_GROUP_ID)
 
 MACOSX_DEPLOYMENT_TARGET = 10.15
