@@ -33,8 +33,10 @@ StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSStrin
 	NSUInteger chunkStart = 0;
 	for(NSUInteger i = 0; i < length; i++)
 	{
-		//minimal env var sequence is 4 chars: ${A}
-		if((uniChars[i] == (unichar)'$') && ((i+3) < length) && (uniChars[i+1] == (unichar)'{'))
+		// minimal env var sequence is 4 chars: ${A}
+		// ${} is not considred an env variable and is treated as regular string
+		if((uniChars[i] == (unichar)'$') && ((i+3) < length) &&
+		   (uniChars[i+1] == (unichar)'{') && (uniChars[i+2] != (unichar)'}'))
 		{
 			//flush previous chunk if any
 			if(i > chunkStart)
