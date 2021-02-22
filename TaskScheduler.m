@@ -13,14 +13,14 @@
 // private contract between TaskScheduler and TaskProxy:
 
 @interface TaskProxy()
-	- (void)incrementDependencyCount;
-	- (void)decrementDependencyCount;
+	- (void)incrementDependencyCount __attribute__((objc_direct));
+	- (void)decrementDependencyCount __attribute__((objc_direct));
 @end
 
 
 @implementation TaskScheduler
 
--(instancetype) initWithConcurrencyLimit:(intptr_t)concurrencyLimit
+-(instancetype) initWithConcurrencyLimit:(intptr_t)concurrencyLimit __attribute__((objc_direct))
 {
 	self = [super init];
 	if(self != nil)
@@ -41,7 +41,7 @@
 	return self;
 }
 
-- (void)startExecutionAndWait
+- (void)startExecutionAndWait __attribute__((objc_direct))
 {
 	//this starts the graph execution by reaching 0 dependecy count in _rootTask
 	[_rootTask decrementDependencyCount];

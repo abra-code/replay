@@ -11,9 +11,9 @@
 
 @interface TaskScheduler : NSObject
 
-@property(nonatomic, readonly, strong) TaskProxy *rootTask;
+@property(nonatomic, readonly, strong, direct) TaskProxy *rootTask;
 
-- (instancetype) initWithConcurrencyLimit:(intptr_t)concurrencyLimit;
-- (void)startExecutionAndWait;
+- (instancetype) initWithConcurrencyLimit:(intptr_t)concurrencyLimit __attribute__((objc_direct));
+- (void)startExecutionAndWait __attribute__((objc_direct));
 
 @end //TaskScheduler

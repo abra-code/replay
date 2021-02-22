@@ -11,7 +11,7 @@
 
 @interface OutputSerializer : NSObject
 
-+ (nonnull instancetype)sharedOutputSerializer;
++ (nonnull instancetype)sharedOutputSerializer __attribute__((objc_direct));
 
 @end //OutputSerializer
 

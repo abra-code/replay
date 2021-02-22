@@ -12,17 +12,17 @@
 
 @interface TaskProxy : NSObject<MedusaTask>
 
-@property(nonatomic) NSDictionary *stepDescription;
+@property(nonatomic, direct) NSDictionary *stepDescription;
 @property(nonatomic) NSUInteger inputCount;
 @property(nonatomic, unsafe_unretained) FileNode** inputs;
 
 @property(nonatomic) NSUInteger outputCount;
 @property(nonatomic, unsafe_unretained) FileNode** outputs;
 
-@property(nonatomic) bool executed;
+@property(nonatomic, direct) bool executed;
 
 - (id)initWithTask:(dispatch_block_t)task;
 - (void)linkNextTask:(TaskProxy*)nextTask;
-- (void)describeTaskToStdErr;
+- (void)describeTaskToStdErr __attribute__((objc_direct));
 
 @end

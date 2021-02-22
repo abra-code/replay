@@ -23,17 +23,17 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface OutputSerializer()
 
-@property(nonatomic, readonly, strong) NSThread *thread;
-@property(nonatomic) CFMutableDictionaryRef pendingOutputs;
-@property(nonatomic) NSInteger lastPrintedActionIndex;
+@property(nonatomic, readonly, strong, direct) NSThread *thread;
+@property(nonatomic, direct) CFMutableDictionaryRef pendingOutputs;
+@property(nonatomic, direct) NSInteger lastPrintedActionIndex;
 
 @end //OutputSerializer
 
 //helper object because we can only pass one param to [NSTread performSelector:onThread:withObject:waitUntilDone:]
 @interface ActionOutputSpec : NSObject
-	@property(nonatomic, strong) NSString *string; //the idea is to provide either a single string or an array but not both
-	@property(nonatomic, strong) NSArray<NSString *> *array;
-	@property(nonatomic) NSInteger actionIndex;
+	@property(nonatomic, strong, direct) NSString *string; //the idea is to provide either a single string or an array but not both
+	@property(nonatomic, strong, direct) NSArray<NSString *> *array;
+	@property(nonatomic, direct) NSInteger actionIndex;
 @end
 
 @implementation ActionOutputSpec
@@ -48,7 +48,7 @@ static void EmptyCallback(__unused void *info)
 
 @implementation OutputSerializer
 
-+ (nonnull instancetype)sharedOutputSerializer
++ (nonnull instancetype)sharedOutputSerializer __attribute__((objc_direct))
 {
 	static OutputSerializer *sOutputSerializer = nil;
 
@@ -232,7 +232,7 @@ void printPendingOutput(id pendingOutput)
 }
 
 // executing on calling thread
-- (void)scheduleOutputString:(nullable NSString *)string withActionIndex:(NSInteger)actionIndex
+- (void)scheduleOutputString:(nullable NSString *)string withActionIndex:(NSInteger)actionIndex __attribute__((objc_direct))
 {
 	ActionOutputSpec *actionOutputSpec = [ActionOutputSpec new];
 	actionOutputSpec.string = string;
@@ -245,7 +245,7 @@ void printPendingOutput(id pendingOutput)
 }
 
 // executing on calling thread
-- (void)scheduleOutputStrings:(nullable NSArray<NSString*> *)array withActionIndex:(NSInteger)actionIndex
+- (void)scheduleOutputStrings:(nullable NSArray<NSString*> *)array withActionIndex:(NSInteger)actionIndex __attribute__((objc_direct))
 {
 	ActionOutputSpec *actionOutputSpec = [ActionOutputSpec new];
 	actionOutputSpec.array = array;
@@ -258,7 +258,7 @@ void printPendingOutput(id pendingOutput)
 }
 
 // executing on calling thread
-- (void)scheduleErrorString:(nullable NSString *)string
+- (void)scheduleErrorString:(nullable NSString *)string __attribute__((objc_direct))
 {
 	ActionOutputSpec *logErrorSpec = [ActionOutputSpec new];
 	logErrorSpec.string = string;

@@ -1037,4 +1037,3 @@ Echo(NSString *text, ReplayContext *context, ActionContext *actionContext)
 	return true;
 }
 
-#pragma mark -

@@ -5,7 +5,7 @@
 NS_ASSUME_NONNULL_BEGIN
 
 @interface AtomicError : NSObject
-	@property(atomic, strong) NSError *error;
+	@property(atomic, strong, direct) NSError *error;
 @end
 
 

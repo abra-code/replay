@@ -199,7 +199,7 @@ static void ExecuteMedusasWithScheduler(NSArray<TaskProxy*> *allTasks, FileNode 
 {
 	ConnectImplicitProducers(fileTreeRoot);
 
-	TaskScheduler *scheduler = [TaskScheduler initWithConcurrencyLimit:0];
+	TaskScheduler *scheduler = [[TaskScheduler alloc] initWithConcurrencyLimit:0];
 
 	//graph root task is created by the scheduler
 	//we build the graph by adding children tasks to the root

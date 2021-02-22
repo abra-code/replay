@@ -13,9 +13,9 @@
 //#define TRACE_PROXY 1
 
 @interface TaskProxy()
-	@property(nonatomic, strong) NSMutableSet<TaskProxy*> *nextTasks;
-	@property(nonatomic, strong) dispatch_block_t taskBlock;
-	@property(nonatomic) NSInteger pendingDependenciesCount;
+	@property(nonatomic, strong, direct) NSMutableSet<TaskProxy*> *nextTasks;
+	@property(nonatomic, strong, direct) dispatch_block_t taskBlock;
+	@property(nonatomic, direct) NSInteger pendingDependenciesCount;
 @end
 
 @implementation TaskProxy
@@ -92,7 +92,7 @@
 	}
 }
 
-- (void)incrementDependencyCount
+- (void)incrementDependencyCount __attribute__((objc_direct))
 {
 	@synchronized (self)
 	{
@@ -106,7 +106,7 @@
 // and reduces the count in each downstream task which waits for it
 // When the number of pending dependenices reaches 0
 // it is a signal fot the task that it can be scheduled for execution and gets dispatched here
--(void)decrementDependencyCount
+-(void)decrementDependencyCount __attribute__((objc_direct))
 {
 	@synchronized (self)
 	{
@@ -126,7 +126,7 @@
 	}
 }
 
-- (void)executeTask
+- (void)executeTask __attribute__((objc_direct))
 {
 #if TRACE_PROXY
 	printf("executing proxy = %p\n", (__bridge void *)self);
@@ -183,7 +183,7 @@
 }
 #endif //ENABLE_DEBUG_DUMP
 
-- (void)describeTaskToStdErr
+- (void)describeTaskToStdErr __attribute__((objc_direct))
 {
 	char path[2048];
 
