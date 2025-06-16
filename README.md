@@ -55,7 +55,7 @@ Options:
                      identifying a group of actions to be executed concurrently. Subsequent requests to add actions
                      with "dispatch" tool must refer to the same name. "replay" server listens to request messages
                      sent by "dispatch". If the server is not running for given batch name, the first request to add
-                     an action starts "replay" in server mode. Therefore staring the server manually is not required
+                     an action starts "replay" in server mode. Therefore starting the server manually is not required
                      but it is possible if needed.
   -l, --stdout PATH  log standard output to provided file path.
   -m, --stderr PATH  log standard error to provided file path.

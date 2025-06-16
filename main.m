@@ -252,7 +252,7 @@ DisplayHelp(void)
 		"                     identifying a group of actions to be executed concurrently. Subsequent requests to add actions\n"
 		"                     with \"dispatch\" tool must refer to the same name. \"replay\" server listens to request messages\n"
 		"                     sent by \"dispatch\". If the server is not running for given batch name, the first request to add\n"
-		"                     an action starts \"replay\" in server mode. Therefore staring the server manually is not required\n"
+		"                     an action starts \"replay\" in server mode. Therefore starting the server manually is not required\n"
 		"                     but it is possible if needed.\n"
 		"  -l, --stdout PATH  log standard output to provided file path.\n"
 		"  -m, --stderr PATH  log standard error to provided file path.\n"
