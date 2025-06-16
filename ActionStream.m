@@ -150,7 +150,7 @@ AddOptionsToActionDescription(NSMutableDictionary *actionDescription, NSArray<NS
 // [create directory]	/path/to/create/directory
 // 4. [execute] requires tool path and may have optional parameters separated with the same delimiter (not space delimited!), e.g.:
 // [execute]	/bin/echo	Hello from replay!
-// In the following example uses a different separator: "+" to explicitly show delimited parameters:
+// The following example uses a different separator: "+" to explicitly show delimited parameters:
 // [execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep ".txt"
 
 NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
