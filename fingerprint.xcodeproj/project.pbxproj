@@ -3,12 +3,8 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 50;
+	objectVersion = 70;
 	objects = {
-
-/* Begin PBXBuildFile section */
-		1DA89D4626A577DB009FE969 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DA89D4526A577DB009FE969 /* main.m */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		1DA89D4026A577DB009FE969 /* CopyFiles */ = {
@@ -24,12 +20,15 @@
 
 /* Begin PBXFileReference section */
 		1DA89D4226A577DB009FE969 /* fingerprint */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = fingerprint; sourceTree = BUILT_PRODUCTS_DIR; };
-		1DA89D4526A577DB009FE969 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		1DA89D4D26A578E0009FE969 /* ReplayProjectRelease.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectRelease.xcconfig; sourceTree = "<group>"; };
 		1DA89D4E26A578E0009FE969 /* ReplayProjectCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectCommon.xcconfig; sourceTree = "<group>"; };
 		1DA89D4F26A578E0009FE969 /* ReplayProjectDebug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectDebug.xcconfig; sourceTree = "<group>"; };
 		1DA89D5226A578E0009FE969 /* FingerprintTargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FingerprintTargetCommon.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		1DFF72672ED05B3700860A62 /* fingerprint */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = fingerprint; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		1DA89D3F26A577DB009FE969 /* Frameworks */ = {
@@ -45,7 +44,7 @@
 		1DA89D3926A577DB009FE969 = {
 			isa = PBXGroup;
 			children = (
-				1DA89D4426A577DB009FE969 /* fingerprint */,
+				1DFF72672ED05B3700860A62 /* fingerprint */,
 				1DA89D4C26A578E0009FE969 /* xcconfigs */,
 				1DA89D4326A577DB009FE969 /* Products */,
 			);
@@ -57,14 +56,6 @@
 				1DA89D4226A577DB009FE969 /* fingerprint */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		1DA89D4426A577DB009FE969 /* fingerprint */ = {
-			isa = PBXGroup;
-			children = (
-				1DA89D4526A577DB009FE969 /* main.m */,
-			);
-			path = fingerprint;
 			sourceTree = "<group>";
 		};
 		1DA89D4C26A578E0009FE969 /* xcconfigs */ = {
@@ -92,6 +83,9 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1DFF72672ED05B3700860A62 /* fingerprint */,
 			);
 			name = fingerprint;
 			productName = fingerprint;
@@ -134,7 +128,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1DA89D4626A577DB009FE969 /* main.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
