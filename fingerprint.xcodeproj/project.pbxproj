@@ -3,11 +3,33 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 70;
+	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1DFF72542ECF2BF100860A62 /* libblake3.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DFF72342ECF2B6C00860A62 /* libblake3.a */; };
+		1DFF725F2ECF2D6900860A62 /* libfast-crc32.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DFF72592ECF2D5500860A62 /* libfast-crc32.a */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1DFF72382ECF2B8F00860A62 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1D7ED2962E9648EB003BA8A7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1DFF72332ECF2B6C00860A62;
+			remoteInfo = blake3;
+		};
+		1DFF725D2ECF2D6100860A62 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1D7ED2962E9648EB003BA8A7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1DFF72582ECF2D5500860A62;
+			remoteInfo = "fast-crc32";
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXCopyFilesBuildPhase section */
-		1DA89D4026A577DB009FE969 /* CopyFiles */ = {
+		1D7ED29C2E9648EB003BA8A7 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = /usr/share/man/man1/;
@@ -19,19 +41,89 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		1DA89D4226A577DB009FE969 /* fingerprint */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = fingerprint; sourceTree = BUILT_PRODUCTS_DIR; };
-		1DA89D4D26A578E0009FE969 /* ReplayProjectRelease.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectRelease.xcconfig; sourceTree = "<group>"; };
-		1DA89D4E26A578E0009FE969 /* ReplayProjectCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectCommon.xcconfig; sourceTree = "<group>"; };
-		1DA89D4F26A578E0009FE969 /* ReplayProjectDebug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectDebug.xcconfig; sourceTree = "<group>"; };
-		1DA89D5226A578E0009FE969 /* FingerprintTargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FingerprintTargetCommon.xcconfig; sourceTree = "<group>"; };
+		1D7ED29E2E9648EB003BA8A7 /* fingerprint */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = fingerprint; sourceTree = BUILT_PRODUCTS_DIR; };
+		1DEA53F12ED46C4500554E45 /* FingerprintTargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FingerprintTargetCommon.xcconfig; sourceTree = "<group>"; };
+		1DEA53F22ED46C4500554E45 /* ReplayProjectCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectCommon.xcconfig; sourceTree = "<group>"; };
+		1DEA53F32ED46C4500554E45 /* ReplayProjectDebug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectDebug.xcconfig; sourceTree = "<group>"; };
+		1DEA53F42ED46C4500554E45 /* ReplayProjectRelease.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectRelease.xcconfig; sourceTree = "<group>"; };
+		1DFF72342ECF2B6C00860A62 /* libblake3.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libblake3.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		1DFF72592ECF2D5500860A62 /* libfast-crc32.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libfast-crc32.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1DFF728D2ED31C8700860A62 /* Exceptions for "blake3" folder in "blake3" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				blake3_neon.c,
+				blake3_sse2.c,
+			);
+			target = 1DFF72332ECF2B6C00860A62 /* blake3 */;
+		};
+		1DFF72922ED31E4600860A62 /* Exceptions for "fast-crc32" folder in "fast-crc32" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ab_neon_eor3_crc32c_v9s3x2e_s3.c,
+				ab_sse_crc32c_v4s3x3k4096e.c,
+			);
+			target = 1DFF72582ECF2D5500860A62 /* fast-crc32 */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+		1D1F23912ECBFF31009AD50C /* Exceptions for "fingerprint" folder in "Compile Sources" phase from "fingerprint" target */ = {
+			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
+			buildPhase = 1D7ED29A2E9648EB003BA8A7 /* Sources */;
+			membershipExceptions = (
+				FileInfo.h,
+			);
+		};
+/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		1DFF72672ED05B3700860A62 /* fingerprint */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = fingerprint; sourceTree = "<group>"; };
+		1D7ED2A02E9648EB003BA8A7 /* fingerprint */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1D1F23912ECBFF31009AD50C /* Exceptions for "fingerprint" folder in "Compile Sources" phase from "fingerprint" target */,
+			);
+			path = fingerprint;
+			sourceTree = "<group>";
+		};
+		1DFF724C2ECF2BD800860A62 /* blake3 */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1DFF728D2ED31C8700860A62 /* Exceptions for "blake3" folder in "blake3" target */,
+			);
+			path = blake3;
+			sourceTree = "<group>";
+		};
+		1DFF72612ECF2D7900860A62 /* fast-crc32 */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1DFF72922ED31E4600860A62 /* Exceptions for "fast-crc32" folder in "fast-crc32" target */,
+			);
+			path = "fast-crc32";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		1DA89D3F26A577DB009FE969 /* Frameworks */ = {
+		1D7ED29B2E9648EB003BA8A7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1DFF725F2ECF2D6900860A62 /* libfast-crc32.a in Frameworks */,
+				1DFF72542ECF2BF100860A62 /* libblake3.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1DFF72322ECF2B6C00860A62 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1DFF72572ECF2D5500860A62 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -41,90 +133,192 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		1DA89D3926A577DB009FE969 = {
+		1D7ED2952E9648EB003BA8A7 = {
 			isa = PBXGroup;
 			children = (
-				1DFF72672ED05B3700860A62 /* fingerprint */,
-				1DA89D4C26A578E0009FE969 /* xcconfigs */,
-				1DA89D4326A577DB009FE969 /* Products */,
+				1DFF72612ECF2D7900860A62 /* fast-crc32 */,
+				1DFF724C2ECF2BD800860A62 /* blake3 */,
+				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
+				1DFF72532ECF2BF100860A62 /* Frameworks */,
+				1DEA53F62ED46C4500554E45 /* xcconfigs */,
+				1D7ED29F2E9648EB003BA8A7 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		1DA89D4326A577DB009FE969 /* Products */ = {
+		1D7ED29F2E9648EB003BA8A7 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				1DA89D4226A577DB009FE969 /* fingerprint */,
+				1D7ED29E2E9648EB003BA8A7 /* fingerprint */,
+				1DFF72342ECF2B6C00860A62 /* libblake3.a */,
+				1DFF72592ECF2D5500860A62 /* libfast-crc32.a */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		1DA89D4C26A578E0009FE969 /* xcconfigs */ = {
+		1DEA53F62ED46C4500554E45 /* xcconfigs */ = {
 			isa = PBXGroup;
 			children = (
-				1DA89D4D26A578E0009FE969 /* ReplayProjectRelease.xcconfig */,
-				1DA89D4E26A578E0009FE969 /* ReplayProjectCommon.xcconfig */,
-				1DA89D4F26A578E0009FE969 /* ReplayProjectDebug.xcconfig */,
-				1DA89D5226A578E0009FE969 /* FingerprintTargetCommon.xcconfig */,
+				1DEA53F12ED46C4500554E45 /* FingerprintTargetCommon.xcconfig */,
+				1DEA53F22ED46C4500554E45 /* ReplayProjectCommon.xcconfig */,
+				1DEA53F32ED46C4500554E45 /* ReplayProjectDebug.xcconfig */,
+				1DEA53F42ED46C4500554E45 /* ReplayProjectRelease.xcconfig */,
 			);
 			path = xcconfigs;
 			sourceTree = "<group>";
 		};
+		1DFF72532ECF2BF100860A62 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
+/* Begin PBXHeadersBuildPhase section */
+		1DFF72302ECF2B6C00860A62 /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1DFF72552ECF2D5500860A62 /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
+
 /* Begin PBXNativeTarget section */
-		1DA89D4126A577DB009FE969 /* fingerprint */ = {
+		1D7ED29D2E9648EB003BA8A7 /* fingerprint */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 1DA89D4926A577DB009FE969 /* Build configuration list for PBXNativeTarget "fingerprint" */;
+			buildConfigurationList = 1D7ED2A52E9648EB003BA8A7 /* Build configuration list for PBXNativeTarget "fingerprint" */;
 			buildPhases = (
-				1DA89D3E26A577DB009FE969 /* Sources */,
-				1DA89D3F26A577DB009FE969 /* Frameworks */,
-				1DA89D4026A577DB009FE969 /* CopyFiles */,
+				1D7ED29A2E9648EB003BA8A7 /* Sources */,
+				1D7ED29B2E9648EB003BA8A7 /* Frameworks */,
+				1D7ED29C2E9648EB003BA8A7 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1DFF725E2ECF2D6100860A62 /* PBXTargetDependency */,
+				1DFF72392ECF2B8F00860A62 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
+			);
+			name = fingerprint;
+			packageProductDependencies = (
+			);
+			productName = "file-finder";
+			productReference = 1D7ED29E2E9648EB003BA8A7 /* fingerprint */;
+			productType = "com.apple.product-type.tool";
+		};
+		1DFF72332ECF2B6C00860A62 /* blake3 */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1DFF72352ECF2B6C00860A62 /* Build configuration list for PBXNativeTarget "blake3" */;
+			buildPhases = (
+				1DFF72302ECF2B6C00860A62 /* Headers */,
+				1DFF72312ECF2B6C00860A62 /* Sources */,
+				1DFF72322ECF2B6C00860A62 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				1DFF72672ED05B3700860A62 /* fingerprint */,
+				1DFF724C2ECF2BD800860A62 /* blake3 */,
 			);
-			name = fingerprint;
-			productName = fingerprint;
-			productReference = 1DA89D4226A577DB009FE969 /* fingerprint */;
-			productType = "com.apple.product-type.tool";
+			name = blake3;
+			packageProductDependencies = (
+			);
+			productName = blake3;
+			productReference = 1DFF72342ECF2B6C00860A62 /* libblake3.a */;
+			productType = "com.apple.product-type.library.static";
+		};
+		1DFF72582ECF2D5500860A62 /* fast-crc32 */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1DFF725A2ECF2D5500860A62 /* Build configuration list for PBXNativeTarget "fast-crc32" */;
+			buildPhases = (
+				1DFF72552ECF2D5500860A62 /* Headers */,
+				1DFF72562ECF2D5500860A62 /* Sources */,
+				1DFF72572ECF2D5500860A62 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1DFF72612ECF2D7900860A62 /* fast-crc32 */,
+			);
+			name = "fast-crc32";
+			packageProductDependencies = (
+			);
+			productName = "fast-crc32";
+			productReference = 1DFF72592ECF2D5500860A62 /* libfast-crc32.a */;
+			productType = "com.apple.product-type.library.static";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		1DA89D3A26A577DB009FE969 /* Project object */ = {
+		1D7ED2962E9648EB003BA8A7 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 1250;
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 2610;
 				TargetAttributes = {
-					1DA89D4126A577DB009FE969 = {
-						CreatedOnToolsVersion = 12.5.1;
+					1D7ED29D2E9648EB003BA8A7 = {
+						CreatedOnToolsVersion = 26.0.1;
+						LastSwiftMigration = 2610;
+					};
+					1DFF72332ECF2B6C00860A62 = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					1DFF72582ECF2D5500860A62 = {
+						CreatedOnToolsVersion = 26.1.1;
 					};
 				};
 			};
-			buildConfigurationList = 1DA89D3D26A577DB009FE969 /* Build configuration list for PBXProject "fingerprint" */;
-			compatibilityVersion = "Xcode 9.3";
+			buildConfigurationList = 1D7ED2992E9648EB003BA8A7 /* Build configuration list for PBXProject "fingerprint" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
 			);
-			mainGroup = 1DA89D3926A577DB009FE969;
-			productRefGroup = 1DA89D4326A577DB009FE969 /* Products */;
+			mainGroup = 1D7ED2952E9648EB003BA8A7;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1D7ED29F2E9648EB003BA8A7 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				1DA89D4126A577DB009FE969 /* fingerprint */,
+				1DFF72582ECF2D5500860A62 /* fast-crc32 */,
+				1DFF72332ECF2B6C00860A62 /* blake3 */,
+				1D7ED29D2E9648EB003BA8A7 /* fingerprint */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
-		1DA89D3E26A577DB009FE969 /* Sources */ = {
+		1D7ED29A2E9648EB003BA8A7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1DFF72312ECF2B6C00860A62 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1DFF72562ECF2D5500860A62 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -133,57 +327,155 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		1DFF72392ECF2B8F00860A62 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1DFF72332ECF2B6C00860A62 /* blake3 */;
+			targetProxy = 1DFF72382ECF2B8F00860A62 /* PBXContainerItemProxy */;
+		};
+		1DFF725E2ECF2D6100860A62 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1DFF72582ECF2D5500860A62 /* fast-crc32 */;
+			targetProxy = 1DFF725D2ECF2D6100860A62 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
-		1DA89D4726A577DB009FE969 /* Debug */ = {
+		1D7ED2A32E9648EB003BA8A7 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 1DA89D4F26A578E0009FE969 /* ReplayProjectDebug.xcconfig */;
+			baseConfigurationReference = 1DEA53F32ED46C4500554E45 /* ReplayProjectDebug.xcconfig */;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"BLAKE3_NO_SSE41=1",
+					"BLAKE3_NO_AVX512=1",
+					"BLAKE3_NO_AVX2=1",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
+			};
+			name = Debug;
+		};
+		1D7ED2A42E9648EB003BA8A7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1DEA53F42ED46C4500554E45 /* ReplayProjectRelease.xcconfig */;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"BLAKE3_NO_SSE41=1",
+					"BLAKE3_NO_AVX512=1",
+					"BLAKE3_NO_AVX2=1",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
+			};
+			name = Release;
+		};
+		1D7ED2A62E9648EB003BA8A7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1DEA53F12ED46C4500554E45 /* FingerprintTargetCommon.xcconfig */;
 			buildSettings = {
 			};
 			name = Debug;
 		};
-		1DA89D4826A577DB009FE969 /* Release */ = {
+		1D7ED2A72E9648EB003BA8A7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 1DA89D4D26A578E0009FE969 /* ReplayProjectRelease.xcconfig */;
+			baseConfigurationReference = 1DEA53F12ED46C4500554E45 /* FingerprintTargetCommon.xcconfig */;
 			buildSettings = {
 			};
 			name = Release;
 		};
-		1DA89D4A26A577DB009FE969 /* Debug */ = {
+		1DFF72362ECF2B6C00860A62 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 1DA89D5226A578E0009FE969 /* FingerprintTargetCommon.xcconfig */;
 			buildSettings = {
+				EXECUTABLE_PREFIX = lib;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 			};
 			name = Debug;
 		};
-		1DA89D4B26A577DB009FE969 /* Release */ = {
+		1DFF72372ECF2B6C00860A62 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 1DA89D5226A578E0009FE969 /* FingerprintTargetCommon.xcconfig */;
 			buildSettings = {
+				EXECUTABLE_PREFIX = lib;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		1DFF725B2ECF2D5500860A62 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				EXECUTABLE_PREFIX = lib;
+				"OTHER_CFLAGS[arch=x86_64]" = (
+					"-mcrc32",
+					"-mpclmul",
+				);
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		1DFF725C2ECF2D5500860A62 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				EXECUTABLE_PREFIX = lib;
+				"OTHER_CFLAGS[arch=x86_64]" = (
+					"-mcrc32",
+					"-mpclmul",
+				);
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		1DA89D3D26A577DB009FE969 /* Build configuration list for PBXProject "fingerprint" */ = {
+		1D7ED2992E9648EB003BA8A7 /* Build configuration list for PBXProject "fingerprint" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				1DA89D4726A577DB009FE969 /* Debug */,
-				1DA89D4826A577DB009FE969 /* Release */,
+				1D7ED2A32E9648EB003BA8A7 /* Debug */,
+				1D7ED2A42E9648EB003BA8A7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1DA89D4926A577DB009FE969 /* Build configuration list for PBXNativeTarget "fingerprint" */ = {
+		1D7ED2A52E9648EB003BA8A7 /* Build configuration list for PBXNativeTarget "fingerprint" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				1DA89D4A26A577DB009FE969 /* Debug */,
-				1DA89D4B26A577DB009FE969 /* Release */,
+				1D7ED2A62E9648EB003BA8A7 /* Debug */,
+				1D7ED2A72E9648EB003BA8A7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1DFF72352ECF2B6C00860A62 /* Build configuration list for PBXNativeTarget "blake3" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1DFF72362ECF2B6C00860A62 /* Debug */,
+				1DFF72372ECF2B6C00860A62 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1DFF725A2ECF2D5500860A62 /* Build configuration list for PBXNativeTarget "fast-crc32" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1DFF725B2ECF2D5500860A62 /* Debug */,
+				1DFF725C2ECF2D5500860A62 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = 1DA89D3A26A577DB009FE969 /* Project object */;
+	rootObject = 1D7ED2962E9648EB003BA8A7 /* Project object */;
 }
