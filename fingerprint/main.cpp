@@ -14,7 +14,7 @@ static void print_usage(std::ostream& stream)
     stream << "Calculate a combined checksum, aka a fingerprint, of all files in specified directory/ies matching the GLOB pattern(s)\n";
     stream << "\n";
     stream << "  -g, --glob=PATTERN  Glob patterns (repeatable, unexpanded) to match files under PATHs\n";
-	stream << "  -H, --hash=ALGO     Hash algorithm: crc32 (default) or blake3\n";
+	stream << "  -H, --hash=ALGO     Hash algorithm: crc32c (default) or blake3\n";
 	stream << "  -X, --xattr=ON|OFF  Cache file hashes in xattrs (default: on)\n";
 	stream << "  -h, --help          Print this help message\n";
 	stream << "\n";
@@ -22,18 +22,18 @@ static void print_usage(std::ostream& stream)
     stream << "Globs apply to match/filter files discovered under each PATH.\n";
     stream << "When glob pattern is not specified, all files under provided directory/ies are fingerprinted\n";
     stream << "\n";
-    stream << "With --xattr=ON the tool caches computed file checksums and saves FileInfo in \"public.fingerprint.crc32\"\n";
+    stream << "With --xattr=ON the tool caches computed file checksums and saves FileInfo in \"public.fingerprint.crc32c\"\n";
     stream << "or \"public.fingerprint.blake3\" xattr for files, depending on hash choice and then reads it back on next\n";
     stream << "fingerprinting if file inode, size and modification dates are unchanged.\n";
     stream << "FileInfo is a 32 byte structure:\n";
     stream << "\t\"inode\" : 8 bytes,\n";
     stream << "\t\"size\" : 8 bytes,\n";
     stream << "\t\"mtime_ns\" : 8 bytes,\n";
-    stream << "\t{ crc32 : 4 bytes, reserved: 4 bytes } or blake3 : 8 bytes\n";
+    stream << "\t{ crc32c : 4 bytes, reserved: 4 bytes } or blake3 : 8 bytes\n";
     stream << "xattr caching option significantly speeds up subsequent fingerprinting after initial checksum caclulation.\n";
     stream << "Turning it off makes the tool always perform file hashing, which might be justified in a zero trust \n";
     stream << "hostile environment at the file I/O and CPU expense. In a trusted or non-critical environment without malicious suspects,\n";
-    stream << "the combination of lightweight crc32 and xattr caching provides excellent performance and very low chances of collisions.\n";
+    stream << "the combination of lightweight crc32c and xattr caching provides excellent performance and very low chances of collisions.\n";
 }
 
 int main(int argc, char * argv[])
@@ -48,7 +48,7 @@ int main(int argc, char * argv[])
 
     std::unordered_set<std::string> globs;
     std::unordered_set<std::string> paths;
-    std::string hash_type = "crc32";
+    std::string hash_type = "crc32c";
     std::string xattr = "on";
 
 	int opt;
@@ -76,9 +76,9 @@ int main(int argc, char * argv[])
 
     // resolve hash_type option
     std::transform(hash_type.begin(), hash_type.end(), hash_type.begin(), ::tolower);
-    if(hash_type == "crc32")
+    if(hash_type == "crc32c")
     {
-        g_hash = HashAlgorithm::CRC32;
+        g_hash = HashAlgorithm::CRC32C;
     }
     else if(hash_type == "blake3")
     {
@@ -111,20 +111,32 @@ int main(int argc, char * argv[])
     // Collect positional dir paths
 	while (optind < argc)
     {
-        paths.emplace(argv[optind++]);
+        char real_path[PATH_MAX] = {};
+        const char *search_dir = argv[optind++];
+        char *dir_path = realpath(search_dir, real_path);
+        if (dir_path == nullptr)
+        {
+            std::cerr << "Specified directory does not exist: " << real_path << '\n';
+            return EXIT_FAILURE;
+        }
+
+        paths.emplace(dir_path);
 	}
 
-	// Default to current directory if no paths provided
     if (paths.empty())
     {
-        char* rp = realpath(".", nullptr);
-        if (rp != nullptr)
-        {
-            paths.emplace(rp);
-            free(rp);
-        } else {
-            paths.emplace(".");
-        }
+        print_usage(std::cerr);
+        return 1;
+        
+        // don't like the idea of defaulting to current directory if no paths provided
+//        char* rp = realpath(".", nullptr);
+//        if (rp != nullptr)
+//        {
+//            paths.emplace(rp);
+//            free(rp);
+//        } else {
+//            paths.emplace(".");
+//        }
     }
 
     // empty globs is OK, the code handles it properly by including all files
