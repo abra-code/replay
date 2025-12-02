@@ -12,10 +12,26 @@
 struct GlobPattern;
 struct FileInfo;
 
-enum class HashAlgorithm
+enum class FileHashAlgorithm
 {
     CRC32C,
     BLAKE3
+};
+
+enum class FingerprintOptions
+{
+    // Default: just combine hashes of file content from sorted absolute paths
+    // Downside: renamed files or directories not affecting the paths order do not change the fingerprint
+    Default = 0,
+    
+    // HashAbsolutePaths: include absolute paths in hashes in addition to content hashes
+    // Downside: different fingerprint for dirs with the same content in different locations
+    HashAbsolutePaths,
+    
+    // HashRelativePaths: include relative paths in hashes in addition to content hashes
+    // The base directories are the ones specified for search or resolved from symlinks
+    // Any explicit file paths outside of these directories are absolute
+    HashRelativePaths
 };
 
 class fingerprint
@@ -31,7 +47,7 @@ public:
     static void wait_for_all_tasks() noexcept;
 
     // this can be called only after all dispatched tasks finished
-    static uint64_t sort_and_compute_fingerprint() noexcept;
+    static uint64_t sort_and_compute_fingerprint(FingerprintOptions fingerprintOptions) noexcept;
     
     static void list_matched_files() noexcept;
     

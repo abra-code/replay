@@ -23,7 +23,7 @@
 extern "C" uint32_t crc32_impl(uint32_t crc0, const char* buf, size_t len);
 
 extern bool g_use_xatrr_optimization;
-extern HashAlgorithm g_hash;
+extern FileHashAlgorithm g_hash;
 
 extern bool g_verbose;
 extern bool g_test_perf;
@@ -38,13 +38,16 @@ static constexpr const char* kBlake3XattrName = "public.fingerprint.blake3";
 // this is a shared container that must be mutated only on serial shared_container_mutation_queue
 static std::vector<std::pair<std::string, FileInfo>> s_all_matched_files;
 
+// this is a shared container for search directories that must be mutated only on serial shared_container_mutation_queue
+static std::unordered_set<std::string> s_search_bases;
+
 void
 fingerprint::set_exiting() noexcept
 {
     s_exiting = true;
 }
 
-static inline bool
+static inline __attribute__((always_inline)) bool
 is_exiting() noexcept
 {
     return s_exiting;
@@ -65,7 +68,7 @@ struct GlobPattern
 
 // we always set FNM_CASEFOLD (case insensitive match) when preparing globs
 
-static inline bool matches_any_glob(const char* relative_path,
+static inline __attribute__((always_inline)) bool matches_any_glob(const char* relative_path,
                                     const std::vector<GlobPattern>& patterns) noexcept
 {
     assert(relative_path != nullptr && relative_path[0] != '\0');
@@ -84,9 +87,9 @@ static inline bool matches_any_glob(const char* relative_path,
     return false;
 }
 
-static inline void compute_buffer_hash(const void *buffer, size_t size, FileInfo &fileInfo)
+static inline __attribute__((always_inline)) void compute_buffer_hash(const void *buffer, size_t size, FileInfo &fileInfo)
 {
-    if (g_hash == HashAlgorithm::CRC32C)
+    if (g_hash == FileHashAlgorithm::CRC32C)
     {
         fileInfo.hash.crc32c = crc32_impl(0, (const char*)buffer, size);
     }
@@ -99,7 +102,7 @@ static inline void compute_buffer_hash(const void *buffer, size_t size, FileInfo
     }
 }
 
-static inline void compute_file_hash(const std::string &path, FileInfo &info)
+static inline __attribute__((always_inline)) void compute_file_hash(const std::string &path, FileInfo &info)
 {
     // Don't try to read non-existent files
     if (info.is_nonexistent())
@@ -170,10 +173,10 @@ static inline void compute_file_hash(const std::string &path, FileInfo &info)
 
 // returns true if file info stored in xattr is the same as current iteration info & stores the hash in appropriate current_file_info.hash
 // returns false if file info does not match or xattr cannot be read
-static inline bool read_xattr_fileinfo(const std::string& path, FileInfoCore& current_file_info) noexcept
+static inline __attribute__((always_inline)) bool read_xattr_fileinfo(const std::string& path, FileInfoCore& current_file_info) noexcept
 {
     FileInfoCore cached_file_info {};
-    const char* xattr_name = (g_hash == HashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
+    const char* xattr_name = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
     ssize_t attr_size = getxattr(path.c_str(), xattr_name, &cached_file_info, sizeof(FileInfoCore), 0, XATTR_NOFOLLOW);
 
     if (attr_size != sizeof(FileInfoCore))
@@ -187,11 +190,11 @@ static inline bool read_xattr_fileinfo(const std::string& path, FileInfoCore& cu
     
     if (is_file_info_unchanged)
     { // we read the cached hash if the file info is unchanged
-        if(g_hash == HashAlgorithm::CRC32C)
+        if(g_hash == FileHashAlgorithm::CRC32C)
         {
             current_file_info.hash.crc32c = cached_file_info.hash.crc32c;
         }
-        else if(g_hash == HashAlgorithm::BLAKE3)
+        else if(g_hash == FileHashAlgorithm::BLAKE3)
         {
             current_file_info.hash.blake3 = cached_file_info.hash.blake3;
         }
@@ -201,11 +204,11 @@ static inline bool read_xattr_fileinfo(const std::string& path, FileInfoCore& cu
 }
 
 
-static inline void write_xattr_fileinfo(const std::string& path, const FileInfoCore& info) noexcept
+static inline __attribute__((always_inline)) void write_xattr_fileinfo(const std::string& path, const FileInfoCore& info) noexcept
 {
     errno = 0; //clear any potetnially lingering errors from previous operation
     
-    const char* xattrName = (g_hash == HashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
+    const char* xattrName = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
     
     int ret = ::setxattr(path.c_str(),
                        xattrName,
@@ -231,7 +234,7 @@ static inline void write_xattr_fileinfo(const std::string& path, const FileInfoC
 }
 
 
-static inline void add_to_matched_files(std::string path, FileInfo info)
+static inline __attribute__((always_inline)) void add_to_matched_files(std::string path, FileInfo info)
 {
     dispatch_queue_t shared_container_mutation_queue = get_shared_container_mutation_queue();
     dispatch_group_t task_group = get_all_tasks_group();
@@ -379,7 +382,7 @@ resolve_symlink_chain(const std::filesystem::path& start) noexcept
     return result;
 }
 
-static inline bool is_path_under_directory(const std::string& start_dir, const std::string& path) noexcept
+static inline __attribute__((always_inline)) bool is_path_under_directory(const std::string& start_dir, const std::string& path) noexcept
 {
     std::filesystem::path dir(start_dir);
     std::filesystem::path file(path);
@@ -543,6 +546,10 @@ fingerprint::find_files_internal(std::string search_dir,
     if (!search_dir.empty() && search_dir.back() == '/')
         search_dir.pop_back();
 
+    dispatch_sync(get_shared_container_mutation_queue(), ^{
+                s_search_bases.emplace(std::move(search_dir));
+            });
+    
     struct timeval time_start;
     struct timeval time_end;
     ::gettimeofday(&time_start, nullptr);
@@ -664,6 +671,28 @@ fingerprint::wait_for_all_tasks() noexcept
     dispatch_group_wait(get_all_tasks_group(), DISPATCH_TIME_FOREVER);
 }
 
+static inline __attribute__((always_inline)) std::string get_path_for_fingerprint(const std::string& abs_path, FingerprintOptions options)
+{
+    if (options == FingerprintOptions::HashRelativePaths)
+    {
+        std::string best_rel;
+        size_t best_len = 0;
+
+        for (const auto& base : s_search_bases) {
+            if (abs_path.starts_with(base) && base.size() > best_len) {
+                std::string rel = abs_path.substr(base.size());
+                if (!rel.empty() && rel[0] == '/') rel.erase(0, 1);
+                best_len = base.size();
+                best_rel = std::move(rel);
+            }
+        }
+        return best_rel.empty() ? abs_path : best_rel;
+    }
+
+    return abs_path; // fallback for HashAbsolutePaths or Default (which does not use it)
+}
+
+
 // file paths usually are more diverse at the end than the beginning
 // esitmate is 40-60% less comparison work needed if we sort with reverse comparator
 
@@ -688,7 +717,7 @@ struct ReversePathComparator
 
 
 uint64_t
-fingerprint::sort_and_compute_fingerprint() noexcept
+fingerprint::sort_and_compute_fingerprint(FingerprintOptions fingerprintOptions) noexcept
 {
     std::sort(s_all_matched_files.begin(), s_all_matched_files.end(), [](const auto& x, const auto& y) {
         return ReversePathComparator{}(x.first, y.first);
@@ -718,28 +747,25 @@ fingerprint::sort_and_compute_fingerprint() noexcept
     blake3_hasher hasher;
     blake3_hasher_init(&hasher);
 
-    if (g_hash == HashAlgorithm::CRC32C)
+    for (const auto& [path, info] : s_all_matched_files)
     {
-        for (const auto& [path, info] : s_all_matched_files)
-        {
-            // Skip files that don't exist (inode=0, size=0, mtime=0)
-            if (info.inode != 0 || info.size != 0 || info.mtime_ns != 0)
-            {
-                blake3_hasher_update(&hasher, &info.hash.crc32c, sizeof(info.hash.crc32c));
-            }
-        }
-    }
-    else
-    {
-        for (const auto& [path, info] : s_all_matched_files)
-        {
-            if (info.inode != 0 || info.size != 0 || info.mtime_ns != 0)
-            {
-                blake3_hasher_update(&hasher, &info.hash.blake3, sizeof(info.hash.blake3));
-            }
-        }
-    }
+        // Skip non-existent files with sentinel hashes
+        if (info.inode == 0 && info.size == 0 && info.mtime_ns == 0)
+            continue;
 
+        // Include path only if requested
+        if (fingerprintOptions != FingerprintOptions::Default)
+        {
+            std::string path_to_hash = get_path_for_fingerprint(path, fingerprintOptions);
+            blake3_hasher_update(&hasher, path_to_hash.data(), path_to_hash.size() + 1); // +1 for trailing '\0'
+        }
+
+        if (g_hash == FileHashAlgorithm::CRC32C)
+            blake3_hasher_update(&hasher, &info.hash.crc32c, sizeof(info.hash.crc32c));
+        else
+            blake3_hasher_update(&hasher, &info.hash.blake3, sizeof(info.hash.blake3));
+    }
+    
     uint8_t output[8] = {0};
     blake3_hasher_finalize(&hasher, output, sizeof(output));
 
@@ -757,7 +783,7 @@ fingerprint::list_matched_files() noexcept
     {
         if (info.is_nonexistent()) continue;
 
-        if (g_hash == HashAlgorithm::CRC32C)
+        if (g_hash == FileHashAlgorithm::CRC32C)
             printf("%08x\t%s\n", info.hash.crc32c, path.c_str());
         else
             printf("%016llx\t%s\n", (unsigned long long)info.hash.blake3, path.c_str());

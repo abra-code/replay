@@ -15,7 +15,7 @@
 #include "fingerprint.h"
 #include "dispatch_queues_helper.h"
 
-HashAlgorithm g_hash = HashAlgorithm::CRC32C;
+FileHashAlgorithm g_hash = FileHashAlgorithm::CRC32C;
 bool g_use_xatrr_optimization = true;
 
 bool g_verbose = false;
@@ -29,6 +29,12 @@ static void print_usage(std::ostream& stream)
     stream << "\n";
     stream << "  -g, --glob=PATTERN  Glob patterns (repeatable, unexpanded) to match files under directories\n";
     stream << "  -H, --hash=ALGO     Hash algorithm: crc32c (default) or blake3\n";
+    stream << "  -F, --fingerprint-mode=MODE  Options to include paths in final fingerprint.\n";
+    stream << "    MODE values:\n";
+    stream << "        default  : only file content hashes (rename-insensitive)\n";
+    stream << "        absolute : include full absolute paths (detects moves/renames)\n";
+    stream << "        relative : use relative paths when under searched dirs (recommended)\n";
+    stream << "    Default: default\n";
     stream << "  -X, --xattr=ON|OFF  Cache hashes in file extended attributes, aka xattrs (default: ON)\n";
     stream << "  -l, --list          List matched files with their hashes\n";
     stream << "  -h, --help          Print this help message\n";
@@ -64,6 +70,7 @@ int main(int argc, char * argv[])
     static const struct option long_options[] = {
         { "glob", required_argument,  nullptr, 'g' },
         { "hash", required_argument,  nullptr, 'H' },
+        { "fingerprint-mode",required_argument, nullptr, 'F' },
         { "xattr", required_argument, nullptr, 'X' },
         { "list",  no_argument,       nullptr, 'l' },
         { "help", no_argument,        nullptr, 'h' },
@@ -76,9 +83,10 @@ int main(int argc, char * argv[])
     std::string hash_type = "crc32c";
     std::string xattr = "on";
     bool list_files = false;
+    FingerprintOptions fingerprint_mode = FingerprintOptions::Default;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "g:H:X:hv", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "g:H:F:X:lhv", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -93,7 +101,26 @@ int main(int argc, char * argv[])
                 hash_type = optarg;
             }
             break;
-                
+
+            case 'F':
+            {
+                std::string mode = optarg;
+                std::transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+                if (mode == "default")
+                    fingerprint_mode = FingerprintOptions::Default;
+                else if (mode == "absolute")
+                    fingerprint_mode = FingerprintOptions::HashAbsolutePaths;
+                else if (mode == "relative")
+                    fingerprint_mode = FingerprintOptions::HashRelativePaths;
+                else
+                {
+                    std::cerr << "Error: invalid --fingerprint-mode: " << optarg << "\n";
+                    std::cerr << "       Valid values: default, absolute, relative\n";
+                    return EXIT_FAILURE;
+                }
+            }
+            break;
+            
             case 'X':
             {
                 xattr = optarg;
@@ -132,11 +159,11 @@ int main(int argc, char * argv[])
     std::transform(hash_type.begin(), hash_type.end(), hash_type.begin(), ::tolower);
     if(hash_type == "crc32c")
     {
-        g_hash = HashAlgorithm::CRC32C;
+        g_hash = FileHashAlgorithm::CRC32C;
     }
     else if(hash_type == "blake3")
     {
-        g_hash = HashAlgorithm::BLAKE3;
+        g_hash = FileHashAlgorithm::BLAKE3;
     }
     else
     {
@@ -211,7 +238,7 @@ int main(int argc, char * argv[])
 
 	::gettimeofday(&time_tasks_end, nullptr);
 
-	uint64_t fingerprint = fingerprint::sort_and_compute_fingerprint();
+	uint64_t fingerprint = fingerprint::sort_and_compute_fingerprint(fingerprint_mode);
     result = fingerprint::get_result();
 
 	::gettimeofday(&time_end, nullptr);
