@@ -24,20 +24,27 @@ double g_traversal_time = 0.0;
 static void print_usage(std::ostream& stream)
 {
     stream << "\n";
-    stream << "Usage: fingerprint [-g, --glob=PATTERN]... [-H, --hash=ALGO] [-X, --xattr=ON|OFF] [DIR_PATH]...\n";
-    stream << "Calculate a combined checksum, aka fingerprint, of all files in specified directory/ies matching the GLOB pattern(s)\n";
+    stream << "Usage: fingerprint [-g, --glob=PATTERN]... [-H, --hash=ALGO] [-X, --xattr=ON|OFF] [PATH]...\n";
+    stream << "Calculate a combined hash, aka fingerprint, of all files in specified path(s) matching the GLOB pattern(s)\n";
     stream << "\n";
-    stream << "  -g, --glob=PATTERN  Glob patterns (repeatable, unexpanded) to match files under PATHs\n";
+    stream << "  -g, --glob=PATTERN  Glob patterns (repeatable, unexpanded) to match files under directories\n";
     stream << "  -H, --hash=ALGO     Hash algorithm: crc32c (default) or blake3\n";
     stream << "  -X, --xattr=ON|OFF  Cache hashes in file extended attributes, aka xattrs (default: ON)\n";
+    stream << "  -l, --list          List matched files with their hashes\n";
     stream << "  -h, --help          Print this help message\n";
     stream << "  -v, --verbose       Print all status information\n";
     stream << "\n";
-    stream << "DIR_PATH arguments (positional) are base directories/paths for deep iteration.\n";
-    stream << "Globs apply to match/filter files discovered under each DIR_PATH.\n";
-    stream << "When glob pattern is not specified, all files under provided directory/ies are fingerprinted\n";
+    stream << "PATH arguments (positional) can be:\n";
+    stream << "  - Directories for recursive traversal\n";
+    stream << "  - Individual files to fingerprint directly\n";
+    stream << "  - Symlinks (entire symlink chains are followed and fingerprinted)\n";
+    stream << "  - Non-existent paths (treated as files with sentinel hash value)\n";
     stream << "\n";
-    stream << "With --xattr=ON the tool caches computed file checksums and saves FileInfo in \"public.fingerprint.crc32c\"\n";
+    stream << "Paths can be absolute or relative. Relative paths are resolved against the current directory.\n";
+    stream << "Glob patterns apply only to files discovered during directory traversal, not to directly specified files.\n";
+    stream << "When no glob pattern is specified, all files under provided directories are fingerprinted.\n";
+    stream << "\n";
+    stream << "With --xattr=ON the tool caches computed file hashes and saves FileInfo in \"public.fingerprint.crc32c\"\n";
     stream << "or \"public.fingerprint.blake3\" xattr for files, depending on hash choice and then reads it back on next\n";
     stream << "fingerprinting if file inode, size and modification dates are unchanged.\n";
     stream << "FileInfo is a 32 byte structure:\n";
@@ -45,7 +52,7 @@ static void print_usage(std::ostream& stream)
     stream << "\t\"size\" : 8 bytes,\n";
     stream << "\t\"mtime_ns\" : 8 bytes,\n";
     stream << "\t{ crc32c : 4 bytes, reserved: 4 bytes } or blake3 : 8 bytes\n";
-    stream << "xattr caching option significantly speeds up subsequent fingerprinting after initial checksum caclulation.\n";
+    stream << "xattr caching option significantly speeds up subsequent fingerprinting after initial hash calculation.\n";
     stream << "Turning it off makes the tool always perform file hashing, which might be justified in a zero trust\n";
     stream << "hostile environment at the file I/O and CPU expense. In a trusted or non-critical environment without malicious suspects,\n";
     stream << "the combination of lightweight crc32c and xattr caching provides excellent performance and very low chances of collisions.\n";
@@ -55,18 +62,20 @@ static void print_usage(std::ostream& stream)
 int main(int argc, char * argv[])
 {
     static const struct option long_options[] = {
-        { "glob", required_argument, nullptr, 'g' },
-        { "hash", required_argument, nullptr, 'H' },
+        { "glob", required_argument,  nullptr, 'g' },
+        { "hash", required_argument,  nullptr, 'H' },
         { "xattr", required_argument, nullptr, 'X' },
-        { "help", no_argument, nullptr, 'h' },
-        { "verbose", no_argument, nullptr, 'v' },
-        { nullptr, 0, nullptr, 0 }
+        { "list",  no_argument,       nullptr, 'l' },
+        { "help", no_argument,        nullptr, 'h' },
+        { "verbose", no_argument,     nullptr, 'v' },
+        { nullptr, 0,                 nullptr, 0 }
     };
 
     std::unordered_set<std::string> globs;
     std::unordered_set<std::string> paths;
     std::string hash_type = "crc32c";
     std::string xattr = "on";
+    bool list_files = false;
 
     int opt;
     while ((opt = getopt_long(argc, argv, "g:H:X:hv", long_options, nullptr)) != -1)
@@ -88,6 +97,12 @@ int main(int argc, char * argv[])
             case 'X':
             {
                 xattr = optarg;
+            }
+            break;
+                
+            case 'l':
+            {
+                list_files = true;
             }
             break;
                 
@@ -150,21 +165,13 @@ int main(int argc, char * argv[])
     // Collect positional dir paths
     while (optind < argc)
     {
-        char real_path[PATH_MAX] = {};
-        const char *search_dir = argv[optind++];
-        char *dir_path = realpath(search_dir, real_path);
-        if (dir_path == nullptr)
-        {
-            std::cerr << "Specified directory does not exist: " << real_path << '\n';
-            return EXIT_FAILURE;
-        }
-
-        paths.emplace(dir_path);
+        const char *search_path = argv[optind++];
+        paths.emplace(search_path);
     }
-
+    
     if (paths.empty())
     {
-        std::cerr << "No directories specified to fingerprint\n";
+        std::cerr << "No paths specified to fingerprint\n";
         print_usage(std::cerr);
         return EXIT_FAILURE;
     }
@@ -199,20 +206,26 @@ int main(int argc, char * argv[])
     
 	::gettimeofday(&time_start, nullptr);
 	
-	result = fingerprint::find_files(paths, globs);
+    result = fingerprint::find_and_process_paths(paths, globs);
 	fingerprint::wait_for_all_tasks();
 
 	::gettimeofday(&time_tasks_end, nullptr);
 
 	uint64_t fingerprint = fingerprint::sort_and_compute_fingerprint();
-			
+    result = fingerprint::get_result();
+
 	::gettimeofday(&time_end, nullptr);
 
-	std::cout << "\nFingerprint: " << fingerprint << "\n";
+    if (list_files)
+    {
+        std::cout << std::endl << "Matched files (" << hash_type << " hash & path):" << std::endl;
+        fingerprint::list_matched_files();
+        std::cout << std::endl;
+    }
+    
+    printf("\nFingerprint: %016llx\n\n", (unsigned long long)fingerprint);
 
-	result = fingerprint::get_result();
-
-    if(g_verbose)
+    if (g_verbose)
     {
         std::cout << "\nDirectory traversal time: " << (g_traversal_time*1000.0) << " ms\n";
 

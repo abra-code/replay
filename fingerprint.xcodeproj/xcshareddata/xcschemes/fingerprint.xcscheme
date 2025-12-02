@@ -54,11 +54,15 @@
       <CommandLineArguments>
          <CommandLineArgument
             argument = "--verbose"
+            isEnabled = "NO">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "--list"
             isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument
             argument = "--xattr=OFF"
-            isEnabled = "YES">
+            isEnabled = "NO">
          </CommandLineArgument>
          <CommandLineArgument
             argument = "--hash=blake3"
