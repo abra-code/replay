@@ -22,8 +22,8 @@
 
 extern "C" uint32_t crc32_impl(uint32_t crc0, const char* buf, size_t len);
 
-extern bool g_use_xatrr_optimization;
 extern FileHashAlgorithm g_hash;
+extern XattrMode g_xattr_mode;
 
 extern bool g_verbose;
 extern bool g_test_perf;
@@ -268,23 +268,54 @@ static void process_matched_file_async(std::string path, FileInfo info) noexcept
         dispatch_group_async(task_group, get_file_processing_queue(), ^{
             
             FileInfo fileInfo = info;
+
             bool needs_hash = true;
-            
-            if (g_use_xatrr_optimization)
+            bool write_xattr = false;
+
+            if (g_xattr_mode == XattrMode::Clear)
             {
-                bool is_file_info_unchanged = read_xattr_fileinfo(path, fileInfo);
-                needs_hash = !is_file_info_unchanged;
+                const char* xattr_name = (g_hash == FileHashAlgorithm::CRC32C)
+                                         ? kCrc32CXattrName : kBlake3XattrName;
+                ::removexattr(path.c_str(), xattr_name, XATTR_NOFOLLOW);
+                // force recompute, don't write
+            }
+            else if (g_xattr_mode == XattrMode::On)
+            {
+                // Only here do we try to read and possibly skip hashing
+                bool cache_hit = read_xattr_fileinfo(path, fileInfo);
+                if (cache_hit)
+                {
+                    needs_hash = false;
+                    write_xattr = false;  // nothing to do
+                }
+                else
+                {
+                    needs_hash = true;
+                    write_xattr = true;   // cache miss, compute and store
+                }
+            }
+            else if (g_xattr_mode == XattrMode::Refresh)
+            {
+                // Force recompute, write result back
+                needs_hash = true;
+                write_xattr = true;
+            }
+            else // Off
+            {
+                needs_hash = true;
+                write_xattr = false;
             }
 
             if (needs_hash)
             {
                 compute_file_hash(path, fileInfo);
-                if (g_use_xatrr_optimization)
-                {
-                    write_xattr_fileinfo(path, fileInfo);
-                }
             }
 
+            if (write_xattr)
+            {
+                write_xattr_fileinfo(path, fileInfo);
+            }
+            
             add_to_matched_files(std::move(path), std::move(fileInfo));
             dispatch_semaphore_signal(cpu_limit_semaphore);
         });

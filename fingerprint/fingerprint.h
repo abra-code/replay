@@ -34,6 +34,13 @@ enum class FingerprintOptions
     HashRelativePaths
 };
 
+enum class XattrMode {
+    On,      // use cache if valid
+    Off,     // never read/write xattrs
+    Refresh, // force recompute + write/update xattr
+    Clear    // don't use xattr + delete existing ones
+};
+
 class fingerprint
 {
 public:

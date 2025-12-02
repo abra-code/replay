@@ -16,7 +16,7 @@
 #include "dispatch_queues_helper.h"
 
 FileHashAlgorithm g_hash = FileHashAlgorithm::CRC32C;
-bool g_use_xatrr_optimization = true;
+XattrMode g_xattr_mode = XattrMode::On;
 
 bool g_verbose = false;
 double g_traversal_time = 0.0;
@@ -24,18 +24,20 @@ double g_traversal_time = 0.0;
 static void print_usage(std::ostream& stream)
 {
     stream << "\n";
-    stream << "Usage: fingerprint [-g, --glob=PATTERN]... [-H, --hash=ALGO] [-X, --xattr=ON|OFF] [PATH]...\n";
+    stream << "Usage: fingerprint [-g, --glob=PATTERN]... [OPTIONS]... [PATH]...\n";
     stream << "Calculate a combined hash, aka fingerprint, of all files in specified path(s) matching the GLOB pattern(s)\n";
-    stream << "\n";
+    stream << "OPTIONS:\n";
     stream << "  -g, --glob=PATTERN  Glob patterns (repeatable, unexpanded) to match files under directories\n";
-    stream << "  -H, --hash=ALGO     Hash algorithm: crc32c (default) or blake3\n";
-    stream << "  -F, --fingerprint-mode=MODE  Options to include paths in final fingerprint.\n";
-    stream << "    MODE values:\n";
-    stream << "        default  : only file content hashes (rename-insensitive)\n";
+    stream << "  -H, --hash=ALGO     File content hash algorithm: crc32c (default) or blake3\n";
+    stream << "  -F, --fingerprint-mode=MODE  Options to include paths in final fingerprint:\n";
+    stream << "        default  : only file content hashes (rename-insensitive) - default if not specified\n";
     stream << "        absolute : include full absolute paths (detects moves/renames)\n";
     stream << "        relative : use relative paths when under searched dirs (recommended)\n";
-    stream << "    Default: default\n";
-    stream << "  -X, --xattr=ON|OFF  Cache hashes in file extended attributes, aka xattrs (default: ON)\n";
+    stream << "  -X, --xattr=MODE    Control extended attribute (xattr) hash caching:\n";
+    stream << "        on      : use cache if valid, update if changed - default\n";
+    stream << "        off     : disable xattr caching\n";
+    stream << "        refresh : force recompute and update xattrs\n";
+    stream << "        clear   : disable caching and delete existing xattrs\n";
     stream << "  -l, --list          List matched files with their hashes\n";
     stream << "  -h, --help          Print this help message\n";
     stream << "  -v, --verbose       Print all status information\n";
@@ -175,17 +177,17 @@ int main(int argc, char * argv[])
     // resolve xattr option
     std::transform(xattr.begin(), xattr.end(), xattr.begin(), ::tolower);
     if (xattr == "on")
-    {
-        g_use_xatrr_optimization = true;
-    }
-    else if(xattr == "off")
-    {
-        g_use_xatrr_optimization = false;
-    }
+        g_xattr_mode = XattrMode::On;
+    else if (xattr == "off")
+        g_xattr_mode = XattrMode::Off;
+    else if (xattr == "refresh")
+        g_xattr_mode = XattrMode::Refresh;
+    else if (xattr == "clear")
+        g_xattr_mode = XattrMode::Clear;
     else
     {
-        std::cerr << "Invalid --xattr value: " << optarg << std::endl;
-        print_usage(std::cerr);
+        std::cerr << "Error: invalid --xattr value: " << optarg << "\n";
+        std::cerr << "       Valid values: on, off, refresh, clear\n";
         return EXIT_FAILURE;
     }
 
