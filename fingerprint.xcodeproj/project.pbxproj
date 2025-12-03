@@ -42,6 +42,8 @@
 
 /* Begin PBXFileReference section */
 		1D7ED29E2E9648EB003BA8A7 /* fingerprint */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = fingerprint; sourceTree = BUILT_PRODUCTS_DIR; };
+		1DBF0BB02EE02B1E00CB10C9 /* Blake3TargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Blake3TargetCommon.xcconfig; sourceTree = "<group>"; };
+		1DBF0BB12EE02C1F00CB10C9 /* FastCrc32TargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FastCrc32TargetCommon.xcconfig; sourceTree = "<group>"; };
 		1DEA53F12ED46C4500554E45 /* FingerprintTargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FingerprintTargetCommon.xcconfig; sourceTree = "<group>"; };
 		1DEA53F22ED46C4500554E45 /* ReplayProjectCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectCommon.xcconfig; sourceTree = "<group>"; };
 		1DEA53F32ED46C4500554E45 /* ReplayProjectDebug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectDebug.xcconfig; sourceTree = "<group>"; };
@@ -159,6 +161,8 @@
 			isa = PBXGroup;
 			children = (
 				1DEA53F12ED46C4500554E45 /* FingerprintTargetCommon.xcconfig */,
+				1DBF0BB02EE02B1E00CB10C9 /* Blake3TargetCommon.xcconfig */,
+				1DBF0BB12EE02C1F00CB10C9 /* FastCrc32TargetCommon.xcconfig */,
 				1DEA53F22ED46C4500554E45 /* ReplayProjectCommon.xcconfig */,
 				1DEA53F32ED46C4500554E45 /* ReplayProjectDebug.xcconfig */,
 				1DEA53F42ED46C4500554E45 /* ReplayProjectRelease.xcconfig */,
@@ -345,16 +349,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1DEA53F32ED46C4500554E45 /* ReplayProjectDebug.xcconfig */;
 			buildSettings = {
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"BLAKE3_NO_SSE41=1",
-					"BLAKE3_NO_AVX512=1",
-					"BLAKE3_NO_AVX2=1",
-				);
-				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 14.6;
 			};
 			name = Debug;
 		};
@@ -362,15 +356,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1DEA53F42ED46C4500554E45 /* ReplayProjectRelease.xcconfig */;
 			buildSettings = {
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"BLAKE3_NO_SSE41=1",
-					"BLAKE3_NO_AVX512=1",
-					"BLAKE3_NO_AVX2=1",
-				);
-				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 14.6;
 			};
 			name = Release;
 		};
@@ -390,45 +375,29 @@
 		};
 		1DFF72362ECF2B6C00860A62 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1DBF0BB02EE02B1E00CB10C9 /* Blake3TargetCommon.xcconfig */;
 			buildSettings = {
-				EXECUTABLE_PREFIX = lib;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
 			};
 			name = Debug;
 		};
 		1DFF72372ECF2B6C00860A62 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1DBF0BB02EE02B1E00CB10C9 /* Blake3TargetCommon.xcconfig */;
 			buildSettings = {
-				EXECUTABLE_PREFIX = lib;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
 			};
 			name = Release;
 		};
 		1DFF725B2ECF2D5500860A62 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1DBF0BB12EE02C1F00CB10C9 /* FastCrc32TargetCommon.xcconfig */;
 			buildSettings = {
-				EXECUTABLE_PREFIX = lib;
-				"OTHER_CFLAGS[arch=x86_64]" = (
-					"-mcrc32",
-					"-mpclmul",
-				);
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
 			};
 			name = Debug;
 		};
 		1DFF725C2ECF2D5500860A62 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1DBF0BB12EE02C1F00CB10C9 /* FastCrc32TargetCommon.xcconfig */;
 			buildSettings = {
-				EXECUTABLE_PREFIX = lib;
-				"OTHER_CFLAGS[arch=x86_64]" = (
-					"-mcrc32",
-					"-mpclmul",
-				);
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
 			};
 			name = Release;
 		};

@@ -17,6 +17,9 @@
 #include "dispatch_queues_helper.h"
 #include "env_var_expand.h"
 
+#define STRINGIFY(x) #x
+#define STRINGIFY_VALUE(x) STRINGIFY(x)
+
 FileHashAlgorithm g_hash = FileHashAlgorithm::CRC32C;
 XattrMode g_xattr_mode = XattrMode::On;
 
@@ -81,6 +84,7 @@ int main(int argc, char * argv[])
         { "inputs", required_argument, nullptr, 'I' },
         { "list",  no_argument,       nullptr, 'l' },
         { "help", no_argument,        nullptr, 'h' },
+        { "version", no_argument,     nullptr, 'V' },
         { "verbose", no_argument,     nullptr, 'v' },
         { nullptr, 0,                 nullptr, 0 }
     };
@@ -93,7 +97,7 @@ int main(int argc, char * argv[])
     FingerprintOptions fingerprint_mode = FingerprintOptions::Default;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "g:H:F:X:I:lhv", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "g:H:F:X:I:lhVv", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -163,6 +167,13 @@ int main(int argc, char * argv[])
             }
             break;
                 
+            case 'V':
+            {
+                printf("fingerprint %s\n", STRINGIFY_VALUE(REPLAY_VERSION));
+                return EXIT_SUCCESS;
+            }
+            break;
+
             case 'v':
             {
                 g_verbose = true;

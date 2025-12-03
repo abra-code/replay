@@ -9,6 +9,8 @@
 #include <mach-o/dyld.h>
 #import "ReplayServer.h"
 
+#define STRINGIFY(x) #x
+#define STRINGIFY_VALUE(x) STRINGIFY(x)
 
 static inline BOOL
 StartChildProcess(NSString *toolPath, NSArray<NSString*> *arguments)
@@ -291,7 +293,7 @@ DisplayHelp(void)
 		"\n"
 		"Options:\n"
 		"\n"
-		"  -i, --version      Display version.\n"
+		"  -V, --version      Display version.\n"
 		"  -h, --help         Display this help\n"
 		"\n"
 		"See also:\n"
@@ -327,9 +329,9 @@ int main(int argc, const char * argv[])
 			return EXIT_SUCCESS;
 		}
 		
-		if((argc == 2) && ([batchName isEqualToString:@"--version"] || [batchName isEqualToString:@"-i"]))
+		if((argc == 2) && ([batchName isEqualToString:@"--version"] || [batchName isEqualToString:@"-V"]))
 		{
-			printf( "dispatch 1.0.1\n" );
+            printf( "dispatch %s\n", STRINGIFY_VALUE(REPLAY_VERSION) );
 			return EXIT_SUCCESS;
 		}
 

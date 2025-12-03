@@ -17,6 +17,9 @@
 #import "ActionStream.h"
 #import "ReplayServer.h"
 
+#define STRINGIFY(x) #x
+#define STRINGIFY_VALUE(x) STRINGIFY(x)
+
 #if DEBUG
 	#define TRACE 0
 #endif
@@ -210,7 +213,7 @@ static struct option sLongOptions[] =
 	{"start-server",    required_argument,  NULL, 'r'},
 	{"stdout",          required_argument,  NULL, 'l'},
 	{"stderr",          required_argument,  NULL, 'm'},
-	{"version",			no_argument,		NULL, 'i'},
+	{"version",			no_argument,		NULL, 'V'},
 	{"help",			no_argument,		NULL, 'h'},
 	{NULL, 				0, 					NULL,  0 }
 };
@@ -256,7 +259,7 @@ DisplayHelp(void)
 		"                     but it is possible if needed.\n"
 		"  -l, --stdout PATH  log standard output to provided file path.\n"
 		"  -m, --stderr PATH  log standard error to provided file path.\n"
-		"  -i, --version      Display version.\n"
+		"  -V, --version      Display version.\n"
 		"  -h, --help         Display this help.\n"
 		"\n"
 	);
@@ -569,7 +572,7 @@ int main(int argc, const char * argv[])
 	while(true)
 	{
 		int index = 0;
-		int oneOption = getopt_long (argc, (char * const *)argv, "vnst:pk:efor:l:m:ih", sLongOptions, &index);
+		int oneOption = getopt_long (argc, (char * const *)argv, "Vnst:pk:efor:l:m:ih", sLongOptions, &index);
 		if (oneOption == -1) // end of options is signalled by -1
 			break;
 			
@@ -639,8 +642,8 @@ int main(int argc, const char * argv[])
 			}
 			break;
 			
-			case 'i':
-				printf( "replay 1.0.1\n" );
+			case 'V':
+				printf( "replay %s\n", STRINGIFY_VALUE(REPLAY_VERSION) );
 				return EXIT_SUCCESS;
 			break;
 			
