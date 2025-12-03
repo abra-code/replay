@@ -24,7 +24,6 @@ The content of `replay --help`:
 
 ```
 
-
 replay -- execute a declarative script of actions, aka a playlist
 
 Usage:
@@ -284,14 +283,12 @@ See also:
 
   dispatch --help
 
-
 ```
 
 #  
 The content of  `dispatch --help`:
  
 ```
-
 
 dispatch -- companion tool for "replay" to simplify adding tasks for concurrent execution
 
@@ -368,6 +365,56 @@ Options:
 See also:
 
   replay --help
+
+```
+
+#  
+The content of  `fingerprint --help`:
+ 
+```
+
+Usage: fingerprint [-g, --glob=PATTERN]... [OPTIONS]... [PATH]...
+Calculate a combined hash, aka fingerprint, of all files in specified path(s) matching the GLOB pattern(s)
+OPTIONS:
+  -g, --glob=PATTERN  Glob patterns (repeatable, unexpanded) to match files under directories
+  -H, --hash=ALGO     File content hash algorithm: crc32c (default) or blake3
+  -F, --fingerprint-mode=MODE  Options to include paths in final fingerprint:
+        default  : only file content hashes (rename-insensitive) - default if not specified
+        absolute : include full absolute paths (detects moves/renames)
+        relative : use relative paths when under searched dirs (recommended)
+  -X, --xattr=MODE    Control extended attribute (xattr) hash caching:
+        on      : use cache if valid, update if changed - default
+        off     : disable xattr caching
+        refresh : force recompute and update xattrs
+        clear   : disable caching and delete existing xattrs
+  -I, --inputs=FILE   Read input paths from FILE (one path per line, repeatable)
+                      Supports Xcode .xcfilelist with ${VAR}/$(VAR) and plain lists.
+  -l, --list          List matched files with their hashes
+  -h, --help          Print this help message
+  -v, --verbose       Print all status information
+
+PATH arguments (positional) can be:
+  - Directories for recursive traversal
+  - Individual files to fingerprint directly
+  - Symlinks (entire symlink chains are followed and fingerprinted)
+  - Non-existent paths (treated as files with sentinel hash value)
+
+Paths can be absolute or relative. Relative paths are resolved against the current directory.
+Glob patterns apply only to files discovered during directory traversal, not to directly specified files.
+When no glob pattern is specified, all files under provided directories are fingerprinted.
+
+With --xattr=ON the tool caches computed file hashes and saves FileInfo in "public.fingerprint.crc32c"
+or "public.fingerprint.blake3" xattr for files, depending on hash choice and then reads it back on next
+fingerprinting if file inode, size and modification dates are unchanged.
+FileInfo is a 32 byte structure:
+	"inode" : 8 bytes,
+	"size" : 8 bytes,
+	"mtime_ns" : 8 bytes,
+	{ crc32c : 4 bytes, reserved: 4 bytes } or blake3 : 8 bytes
+xattr caching option significantly speeds up subsequent fingerprinting after initial hash calculation.
+Turning it off makes the tool always perform file hashing, which might be justified in a zero trust
+hostile environment at the file I/O and CPU expense. In a trusted or non-critical environment without malicious suspects,
+the combination of lightweight crc32c and xattr caching provides excellent performance and very low chances of collisions.
 
 ```
 
