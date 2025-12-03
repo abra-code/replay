@@ -803,20 +803,31 @@ fingerprint::sort_and_compute_fingerprint(FingerprintOptions fingerprintOptions)
     return *(const uint64_t*)output;
 }
 
-void
-fingerprint::list_matched_files() noexcept
+void fingerprint::list_matched_files() noexcept
 {
     // Sort in natural forward order
     std::sort(s_all_matched_files.begin(), s_all_matched_files.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
 
+    std::string out;
+    out.reserve(s_all_matched_files.size() * 128); // a guestimate of max chars per line
+
     for (const auto& [path, info] : s_all_matched_files)
     {
         if (info.is_nonexistent()) continue;
 
+        char line[PATH_MAX + 64];
+        int len;
+
         if (g_hash == FileHashAlgorithm::CRC32C)
-            printf("%08x\t%s\n", info.hash.crc32c, path.c_str());
+            len = std::snprintf(line, sizeof(line), "%08x\t%s\n",
+                                info.hash.crc32c, path.c_str());
         else
-            printf("%016llx\t%s\n", (unsigned long long)info.hash.blake3, path.c_str());
+            len = std::snprintf(line, sizeof(line), "%016llx\t%s\n",
+                                (unsigned long long)info.hash.blake3, path.c_str());
+
+        out.append(line, len);
     }
+
+    std::fwrite(out.data(), 1, out.size(), stdout);
 }
