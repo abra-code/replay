@@ -6,6 +6,7 @@
 //
 
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <atomic>
 #include <assert.h>
@@ -14,6 +15,7 @@
 
 #include "fingerprint.h"
 #include "dispatch_queues_helper.h"
+#include "env_var_expand.h"
 
 FileHashAlgorithm g_hash = FileHashAlgorithm::CRC32C;
 XattrMode g_xattr_mode = XattrMode::On;
@@ -38,6 +40,8 @@ static void print_usage(std::ostream& stream)
     stream << "        off     : disable xattr caching\n";
     stream << "        refresh : force recompute and update xattrs\n";
     stream << "        clear   : disable caching and delete existing xattrs\n";
+    stream << "  -I, --inputs=FILE   Read input paths from FILE (one path per line, repeatable)\n";
+    stream << "                      Supports Xcode .xcfilelist with ${VAR}/$(VAR) and plain lists.\n";
     stream << "  -l, --list          List matched files with their hashes\n";
     stream << "  -h, --help          Print this help message\n";
     stream << "  -v, --verbose       Print all status information\n";
@@ -74,6 +78,7 @@ int main(int argc, char * argv[])
         { "hash", required_argument,  nullptr, 'H' },
         { "fingerprint-mode",required_argument, nullptr, 'F' },
         { "xattr", required_argument, nullptr, 'X' },
+        { "inputs", required_argument, nullptr, 'I' },
         { "list",  no_argument,       nullptr, 'l' },
         { "help", no_argument,        nullptr, 'h' },
         { "verbose", no_argument,     nullptr, 'v' },
@@ -88,7 +93,7 @@ int main(int argc, char * argv[])
     FingerprintOptions fingerprint_mode = FingerprintOptions::Default;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "g:H:F:X:lhv", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "g:H:F:X:I:lhv", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -126,6 +131,22 @@ int main(int argc, char * argv[])
             case 'X':
             {
                 xattr = optarg;
+            }
+            break;
+
+            case 'I':
+            {
+                auto input_paths = read_input_file_list(optarg);
+                if (input_paths.empty() && std::ifstream(optarg).fail())
+                {
+                    std::cerr << "Error: cannot open inputs file: " << optarg << '\n';
+                    return EXIT_FAILURE;
+                }
+                
+                for (auto& path : input_paths)
+                {
+                    paths.emplace(std::move(path));
+                }
             }
             break;
                 
