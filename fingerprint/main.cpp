@@ -47,6 +47,7 @@ static void print_usage(std::ostream& stream)
     stream << "                      Supports Xcode .xcfilelist with ${VAR}/$(VAR) and plain lists.\n";
     stream << "  -l, --list          List matched files with their hashes\n";
     stream << "  -h, --help          Print this help message\n";
+    stream << "  -V, --version       Display version.\n";
     stream << "  -v, --verbose       Print all status information\n";
     stream << "\n";
     stream << "PATH arguments (positional) can be:\n";

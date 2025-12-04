@@ -58,7 +58,7 @@ Options:
                      but it is possible if needed.
   -l, --stdout PATH  log standard output to provided file path.
   -m, --stderr PATH  log standard error to provided file path.
-  -i, --version      Display version.
+  -V, --version      Display version.
   -h, --help         Display this help.
 
 Playlist format:
@@ -359,7 +359,7 @@ With a couple of notes:
 
 Options:
 
-  -i, --version      Display version.
+  -V, --version      Display version.
   -h, --help         Display this help
 
 See also:
@@ -391,6 +391,7 @@ OPTIONS:
                       Supports Xcode .xcfilelist with ${VAR}/$(VAR) and plain lists.
   -l, --list          List matched files with their hashes
   -h, --help          Print this help message
+  -V, --version       Display version.
   -v, --verbose       Print all status information
 
 PATH arguments (positional) can be:

@@ -44,6 +44,7 @@
 		1D7ED29E2E9648EB003BA8A7 /* fingerprint */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = fingerprint; sourceTree = BUILT_PRODUCTS_DIR; };
 		1DBF0BB02EE02B1E00CB10C9 /* Blake3TargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Blake3TargetCommon.xcconfig; sourceTree = "<group>"; };
 		1DBF0BB12EE02C1F00CB10C9 /* FastCrc32TargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FastCrc32TargetCommon.xcconfig; sourceTree = "<group>"; };
+		1DBF0BDD2EE14D3000CB10C9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1DEA53F12ED46C4500554E45 /* FingerprintTargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FingerprintTargetCommon.xcconfig; sourceTree = "<group>"; };
 		1DEA53F22ED46C4500554E45 /* ReplayProjectCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectCommon.xcconfig; sourceTree = "<group>"; };
 		1DEA53F32ED46C4500554E45 /* ReplayProjectDebug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectDebug.xcconfig; sourceTree = "<group>"; };
@@ -138,6 +139,7 @@
 		1D7ED2952E9648EB003BA8A7 = {
 			isa = PBXGroup;
 			children = (
+				1DBF0BDD2EE14D3000CB10C9 /* Info.plist */,
 				1DFF72612ECF2D7900860A62 /* fast-crc32 */,
 				1DFF724C2ECF2BD800860A62 /* blake3 */,
 				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
