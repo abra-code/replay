@@ -204,35 +204,75 @@ static inline __attribute__((always_inline)) bool read_xattr_fileinfo(const std:
 }
 
 
-static inline __attribute__((always_inline)) void write_xattr_fileinfo(const std::string& path, const FileInfoCore& info) noexcept
+static inline __attribute__((always_inline)) void write_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcept
 {
-    errno = 0; //clear any potetnially lingering errors from previous operation
+    bool forced_writable = false;
+    if ((info.mode & S_IWUSR) == 0) // if the file is not user-writable
+    {
+        int mode_change_status = lchmod(path.c_str(), info.mode | S_IWUSR); // temporarily set to writable
+        //int mode_change_status = set_file_mode_flags(path, info.mode | S_IWUSR);
+        forced_writable = (mode_change_status == 0);
+    }
+    
+    errno = 0; //clear any potentially lingering errors from previous operation
     
     const char* xattrName = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
     
-    int ret = ::setxattr(path.c_str(),
+    int xattr_result = ::setxattr(path.c_str(),
                        xattrName,
                        &info,
                        sizeof(FileInfoCore), //only the core part of the FileInfo is persisted
                        0,              // position (ignored)
                        XATTR_NOFOLLOW); // or 0 to not follow symlinks
     
-    if (ret != 0)
+    int err = errno;
+    
+    if (forced_writable)
+    {
+        lchmod(path.c_str(), info.mode); // restore original permissions
+    }
+    
+    if (xattr_result != 0)
     {
         // optional: log error, but ignore in release
-        int err = errno;
-        std::cerr << "setxattr failed ret = " << ret << " errno = " << err << " for " << path << '\n';
+        std::cerr << "setxattr failed result = " << xattr_result << " errno = " << err << " for " << path << '\n';
     }
-    else
+    else if(err != 0)
     {
-        int err = errno;
-        if(err != 0)
-        {
-            std::cerr << "setxattr returned 0 but failed with errno = " << err << " for " << path << '\n';
-        }
+        std::cerr << "setxattr returned 0 but failed with errno = " << err << " for " << path << '\n';
     }
 }
 
+static inline __attribute__((always_inline)) void clear_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcept
+{
+    bool forced_writable = false;
+    if ((info.mode & S_IWUSR) == 0) // if the file is not user-writable
+    {
+        int mode_change_status = lchmod(path.c_str(), info.mode | S_IWUSR); // temporarily set to writable
+        forced_writable = (mode_change_status == 0);
+    }
+
+    errno = 0; //clear any potentially lingering errors from previous operation
+    const char* xattr_name = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
+    int xattr_result = ::removexattr(path.c_str(), xattr_name, XATTR_NOFOLLOW);
+    
+    int err = errno;
+
+    if (forced_writable)
+    {
+        lchmod(path.c_str(), info.mode); // restore original permissions
+    }
+
+    if (xattr_result != 0)
+    {
+        // optional: log error, but ignore in release
+        std::cerr << "removexattr failed result = " << xattr_result << " errno = " << err << " for " << path << '\n';
+    }
+    else if(err != 0)
+    {
+        std::cerr << "removexattr returned 0 but failed with errno = " << err << " for " << path << '\n';
+    }
+}
 
 static inline __attribute__((always_inline)) void add_to_matched_files(std::string path, FileInfo info)
 {
@@ -274,9 +314,7 @@ static void process_matched_file_async(std::string path, FileInfo info) noexcept
 
             if (g_xattr_mode == XattrMode::Clear)
             {
-                const char* xattr_name = (g_hash == FileHashAlgorithm::CRC32C)
-                                         ? kCrc32CXattrName : kBlake3XattrName;
-                ::removexattr(path.c_str(), xattr_name, XATTR_NOFOLLOW);
+                clear_xattr_fileinfo(path, fileInfo);
                 // force recompute, don't write
             }
             else if (g_xattr_mode == XattrMode::On)
