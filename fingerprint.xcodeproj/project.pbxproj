@@ -91,6 +91,11 @@
 			path = fingerprint;
 			sourceTree = "<group>";
 		};
+		1DBF0C372EE49E9800CB10C9 /* glob-cpp */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "glob-cpp";
+			sourceTree = "<group>";
+		};
 		1DFF724C2ECF2BD800860A62 /* blake3 */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -142,6 +147,7 @@
 				1DBF0BDD2EE14D3000CB10C9 /* Info.plist */,
 				1DFF72612ECF2D7900860A62 /* fast-crc32 */,
 				1DFF724C2ECF2BD800860A62 /* blake3 */,
+				1DBF0C372EE49E9800CB10C9 /* glob-cpp */,
 				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
 				1DFF72532ECF2BF100860A62 /* Frameworks */,
 				1DEA53F62ED46C4500554E45 /* xcconfigs */,

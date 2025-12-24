@@ -32,7 +32,12 @@ static void print_usage(std::ostream& stream)
     stream << "Usage: fingerprint [-g, --glob=PATTERN]... [OPTIONS]... [PATH]...\n";
     stream << "Calculate a combined hash, aka fingerprint, of all files in specified path(s) matching the GLOB pattern(s)\n";
     stream << "OPTIONS:\n";
-    stream << "  -g, --glob=PATTERN  Glob patterns (repeatable, unexpanded) to match files under directories\n";
+    stream << "  -g, --glob=PATTERN  Glob patterns (repeatable, case-insensitive) to match files under directories\n";
+    stream << "        If the pattern contains '/' the match is applied to file paths relative to search directory,\n";
+    stream << "        otherwise the match is applied to filename only regardless of directory depth\n";
+    stream << "  -r, --regex=PATTERN Extended regex patterns (repeatable, case-insensitive)\n";
+    stream << "        Uses ECMAScript syntax (also known as JavaScript regex)\n";
+    stream << "        Pattern match is always applied to file paths relative to search directory\n";
     stream << "  -H, --hash=ALGO     File content hash algorithm: crc32c (default) or blake3\n";
     stream << "  -F, --fingerprint-mode=MODE  Options to include paths in final fingerprint:\n";
     stream << "        default  : only file content hashes (rename-insensitive) - default if not specified\n";
@@ -79,6 +84,7 @@ int main(int argc, char * argv[])
 {
     static const struct option long_options[] = {
         { "glob", required_argument,  nullptr, 'g' },
+        { "regex", required_argument, nullptr, 'r' },
         { "hash", required_argument,  nullptr, 'H' },
         { "fingerprint-mode",required_argument, nullptr, 'F' },
         { "xattr", required_argument, nullptr, 'X' },
@@ -90,7 +96,8 @@ int main(int argc, char * argv[])
         { nullptr, 0,                 nullptr, 0 }
     };
 
-    std::unordered_set<std::string> globs;
+    std::unordered_set<std::string> glob_patterns;
+    std::unordered_set<std::string> regex_patterns;
     std::unordered_set<std::string> paths;
     std::string hash_type = "crc32c";
     std::string xattr = "on";
@@ -98,13 +105,23 @@ int main(int argc, char * argv[])
     FingerprintOptions fingerprint_mode = FingerprintOptions::Default;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "g:H:F:X:I:lhVv", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "g:r:H:F:X:I:lhVv", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
             case 'g':
             {
-                globs.insert(optarg);
+                std::string pattern(optarg);
+                std::transform(pattern.begin(), pattern.end(), pattern.begin(), ::tolower);
+                glob_patterns.insert(pattern);
+            }
+            break;
+            
+            case 'r':
+            {
+                std::string pattern(optarg);
+                std::transform(pattern.begin(), pattern.end(), pattern.begin(), ::tolower);
+                regex_patterns.insert(std::move(pattern));  // new container
             }
             break;
             
@@ -250,12 +267,28 @@ int main(int argc, char * argv[])
             std::cout << "\t" << path << std::endl;
         }
         
-        std::cout << "specifed globs: " << std::endl;
-        for (const auto& glob : globs)
+        std::cout << "specifed glob patterns: " << std::endl;
+        for (const auto& glob_pattern : glob_patterns)
         {
-            std::cout << "\t" << glob << std::endl;
+            std::cout << "\t" << glob_pattern << std::endl;
         }
         
+        if (glob_patterns.empty())
+        {
+            std::cout << "\t<none>" << std::endl;
+        }
+        
+        std::cout << "specifed regex patterns: " << std::endl;
+        for (const auto& regex_pattern : regex_patterns)
+        {
+            std::cout << "\t" << regex_pattern << std::endl;
+        }
+
+        if (regex_patterns.empty())
+        {
+            std::cout << "\t<none>" << std::endl;
+        }
+
         std::cout << "hash algorithm: " << hash_type << std::endl;
         std::cout << "xattr cache: " << xattr << std::endl;
     }
@@ -268,7 +301,7 @@ int main(int argc, char * argv[])
     
 	::gettimeofday(&time_start, nullptr);
 	
-    result = fingerprint::find_and_process_paths(paths, globs);
+    result = fingerprint::find_and_process_paths(paths, glob_patterns, regex_patterns);
 	fingerprint::wait_for_all_tasks();
 
 	::gettimeofday(&time_tasks_end, nullptr);

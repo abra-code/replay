@@ -54,7 +54,7 @@
       <CommandLineArguments>
          <CommandLineArgument
             argument = "--verbose"
-            isEnabled = "NO">
+            isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument
             argument = "--list"
@@ -62,18 +62,38 @@
          </CommandLineArgument>
          <CommandLineArgument
             argument = "--xattr=OFF"
-            isEnabled = "NO">
-         </CommandLineArgument>
-         <CommandLineArgument
-            argument = "--hash=blake3"
             isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument
+            argument = "--hash=blake3"
+            isEnabled = "NO">
+         </CommandLineArgument>
+         <CommandLineArgument
             argument = "--glob=&apos;*.m&apos;"
+            isEnabled = "NO">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "--glob=&apos;**/*.cpp&apos;"
+            isEnabled = "NO">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "--regex=&apos;.*/src/.*\.cpp&apos;"
+            isEnabled = "YES">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "--regex=&apos;.*/include/.*\.h&apos;"
             isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument
             argument = "/Users/tkukielk/Development"
+            isEnabled = "NO">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "/Users/tkukielk/fingerprint_data.txt"
+            isEnabled = "NO">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "/Users/tkukielk/glob_test"
             isEnabled = "YES">
          </CommandLineArgument>
       </CommandLineArguments>

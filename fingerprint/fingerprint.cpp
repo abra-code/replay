@@ -7,18 +7,24 @@
 
 #include <iostream>
 #include <filesystem>
+#include <regex>
 
 #include <assert.h>
 #include <sys/time.h>
 #include <sys/mman.h>
+#include <sys/attr.h>
 #include <sys/xattr.h>
+
 #include <fnmatch.h>
+#include "glob.h"
 
 #include "blake3.h"
 
 #include "fingerprint.h"
 #include "FileInfo.h"
 #include "dispatch_queues_helper.h"
+
+#define FINGERPRINT_USE_GLOB_CPP 1
 
 extern "C" uint32_t crc32_impl(uint32_t crc0, const char* buf, size_t len);
 
@@ -47,8 +53,8 @@ fingerprint::set_exiting() noexcept
     s_exiting = true;
 }
 
-static inline __attribute__((always_inline)) bool
-is_exiting() noexcept
+static inline __attribute__((always_inline))
+bool is_exiting() noexcept
 {
     return s_exiting;
 }
@@ -59,35 +65,131 @@ fingerprint::get_result() noexcept
     return s_result;
 }
 
+#if FINGERPRINT_USE_GLOB_CPP
 
-struct GlobPattern
+struct Glob
+{
+    explicit Glob(const std::string& pattern, int flags) noexcept
+        : glob(pattern),
+          flags(flags)
+    {
+    }
+    
+    mutable glob::glob glob;
+    int                flags;     // FNM_CASEFOLD | FNM_PATHNAME (if needed)
+};
+
+#else
+
+struct Glob
 {
     std::string pattern;
     int         flags;     // FNM_CASEFOLD | FNM_PATHNAME (if needed)
 };
 
+#endif // FINGERPRINT_USE_GLOB_CPP
+
+
+static inline __attribute__((always_inline))
+std::vector<Glob> compile_globs(const std::unordered_set<std::string>& glob_patterns) noexcept
+{
+    // Compile globs once — (empty vector = match-all)
+    std::vector<Glob> compiled_globs;
+    if (!glob_patterns.empty() && !glob_patterns.contains(""))
+    {
+        compiled_globs.reserve(glob_patterns.size());
+        for (const auto& glob_pattern : glob_patterns)
+        {
+            int flags = FNM_CASEFOLD;
+            if ((glob_pattern.find('/') != std::string::npos) || (glob_pattern.find("**") != std::string::npos))
+                flags |= FNM_PATHNAME;
+            
+            compiled_globs.emplace_back(glob_pattern, flags);
+        }
+    }
+
+    return compiled_globs;
+}
+
+
 // we always set FNM_CASEFOLD (case insensitive match) when preparing globs
 
-static inline __attribute__((always_inline)) bool matches_any_glob(const char* relative_path,
-                                    const std::vector<GlobPattern>& patterns) noexcept
+static bool matches_any_glob(const char* relative_path,
+                             const std::vector<Glob>& patterns) noexcept
 {
     assert(relative_path != nullptr && relative_path[0] != '\0');
     assert(relative_path[strlen(relative_path) - 1] != '/');  // no trailing slash
     
-    const char* basename = std::strrchr(relative_path, '/');
-    basename = (basename != nullptr) ? basename + 1 : relative_path;
+#if FINGERPRINT_USE_GLOB_CPP
+    std::string lowercase_path(relative_path);
+    std::transform(lowercase_path.begin(), lowercase_path.end(), lowercase_path.begin(), ::tolower);
+    const char* path = lowercase_path.c_str();
+#else
+    const char* path = relative_path;
+#endif
+    
+    const char* basename = std::strrchr(path, '/');
+    basename = (basename != nullptr) ? basename + 1 : path;
 
     for (const auto& g : patterns)
     {
-        const char* str = (g.flags & FNM_PATHNAME) ? relative_path
+        const char* str = (g.flags & FNM_PATHNAME) ? path
                                                   : basename;
-        if (fnmatch(g.pattern.c_str(), str, g.flags) == 0)
+#if FINGERPRINT_USE_GLOB_CPP
+        bool is_matched = glob::glob_match(str, g.glob);
+#else
+        bool is_matched = (::fnmatch(g.pattern.c_str(), str, g.flags) == 0);
+#endif
+        if(is_matched)
             return true;
     }
     return false;
 }
 
-static inline __attribute__((always_inline)) void compute_buffer_hash(const void *buffer, size_t size, FileInfo &fileInfo)
+struct Regex
+{
+    std::regex re;
+};
+
+static inline __attribute__((always_inline))
+std::vector<Regex> compile_regexes(const std::unordered_set<std::string>& regex_patterns) noexcept
+{
+    std::vector<Regex> compiled;
+    if (regex_patterns.empty())
+    {
+        return compiled;
+    }
+    
+    compiled.reserve(regex_patterns.size());
+    for (const auto& pat : regex_patterns)
+    {
+        try
+        {
+            // ECMAScript + icase = case-insensitive
+            compiled.emplace_back(Regex{ std::regex(pat, std::regex::ECMAScript | std::regex::icase) });
+        }
+        catch (const std::regex_error& e)
+        {
+            std::cerr << "Invalid regex pattern: " << pat << " (" << e.what() << ")\n";
+            s_result = EXIT_FAILURE;
+        }
+    }
+    return compiled;
+}
+
+static bool matches_any_regex(const std::string& relative_path,
+                              const std::vector<Regex>& regexes) noexcept
+{
+    for (const auto& r : regexes)
+    {
+        if (std::regex_search(relative_path, r.re))
+            return true;
+    }
+    return false;
+}
+
+static inline __attribute__((always_inline))
+void compute_buffer_hash(const void *buffer, size_t size, FileInfo &fileInfo)
 {
     if (g_hash == FileHashAlgorithm::CRC32C)
     {
@@ -102,7 +204,8 @@ static inline __attribute__((always_inline)) void compute_buffer_hash(const void
     }
 }
 
-static inline __attribute__((always_inline)) void compute_file_hash(const std::string &path, FileInfo &info)
+static inline __attribute__((always_inline))
+void compute_file_hash(const std::string &path, FileInfo &info)
 {
     // Don't try to read non-existent files
     if (info.is_nonexistent())
@@ -173,7 +276,8 @@ static inline __attribute__((always_inline)) void compute_file_hash(const std::s
 
 // returns true if file info stored in xattr is the same as current iteration info & stores the hash in appropriate current_file_info.hash
 // returns false if file info does not match or xattr cannot be read
-static inline __attribute__((always_inline)) bool read_xattr_fileinfo(const std::string& path, FileInfoCore& current_file_info) noexcept
+static inline __attribute__((always_inline))
+bool read_xattr_fileinfo(const std::string& path, FileInfoCore& current_file_info) noexcept
 {
     FileInfoCore cached_file_info {};
     const char* xattr_name = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
@@ -204,7 +308,8 @@ static inline __attribute__((always_inline)) bool read_xattr_fileinfo(const std:
 }
 
 
-static inline __attribute__((always_inline)) void write_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcept
+static inline __attribute__((always_inline))
+void write_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcept
 {
     bool forced_writable = false;
     if ((info.mode & S_IWUSR) == 0) // if the file is not user-writable
@@ -243,7 +348,8 @@ static inline __attribute__((always_inline)) void write_xattr_fileinfo(const std
     }
 }
 
-static inline __attribute__((always_inline)) void clear_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcept
+static inline __attribute__((always_inline))
+void clear_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcept
 {
     bool forced_writable = false;
     if ((info.mode & S_IWUSR) == 0) // if the file is not user-writable
@@ -274,7 +380,8 @@ static inline __attribute__((always_inline)) void clear_xattr_fileinfo(const std
     }
 }
 
-static inline __attribute__((always_inline)) void add_to_matched_files(std::string path, FileInfo info)
+static inline __attribute__((always_inline))
+void add_to_matched_files(std::string path, FileInfo info)
 {
     dispatch_queue_t shared_container_mutation_queue = get_shared_container_mutation_queue();
     dispatch_group_t task_group = get_all_tasks_group();
@@ -451,7 +558,8 @@ resolve_symlink_chain(const std::filesystem::path& start) noexcept
     return result;
 }
 
-static inline __attribute__((always_inline)) bool is_path_under_directory(const std::string& start_dir, const std::string& path) noexcept
+static inline __attribute__((always_inline))
+bool is_path_under_directory(const std::string& start_dir, const std::string& path) noexcept
 {
     std::filesystem::path dir(start_dir);
     std::filesystem::path file(path);
@@ -466,22 +574,9 @@ static inline __attribute__((always_inline)) bool is_path_under_directory(const 
 // Main entry point - separates directories from files
 int
 fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths,
-                                    const std::unordered_set<std::string>& globs) noexcept
+                                    const std::unordered_set<std::string>& glob_patterns,
+                                    const std::unordered_set<std::string>& regex_patterns) noexcept
 {
-    // Pre-compile globs once — (empty vector = match-all)
-    std::vector<GlobPattern> compiled_globs;
-    if (!globs.empty() && !globs.contains(""))
-    {
-        compiled_globs.reserve(globs.size());
-        for (const auto& g : globs)
-        {
-            int flags = FNM_CASEFOLD;
-            if (g.find('/') != std::string::npos)
-                flags |= FNM_PATHNAME;
-            compiled_globs.push_back({g, flags});
-        }
-    }
-
     dispatch_queue_t directory_traversal_queue = get_directory_traversal_queue();
     dispatch_group_t task_group = get_all_tasks_group();
 
@@ -514,7 +609,7 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
                 std::string dir_path = abs_clean.string();
                 dispatch_group_async(task_group, directory_traversal_queue, ^{
                     if (is_exiting()) { return; }
-                    __unused int find_result = find_files_internal(dir_path, compiled_globs);
+                    __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns);
                 });
             }
             else if (S_ISLNK(st.st_mode))
@@ -539,7 +634,7 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
                         std::string dir_path = path;  // Copy the path for capture
                         dispatch_group_async(task_group, directory_traversal_queue, ^{
                             if (is_exiting()) { return; }
-                            __unused int find_result = find_files_internal(dir_path, compiled_globs);
+                            __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns);
                         });
                     }
                     else
@@ -592,7 +687,6 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
     return s_result;
 }
 
-
 // fts_read() is a solid choice for directory traversal
 // for crawling with retrival of additonal file attributes
 // and it does not require recursion in client code so stack depletion is not an issue
@@ -601,7 +695,8 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
 
 int
 fingerprint::find_files_internal(std::string search_dir,
-                                 const std::vector<GlobPattern> &compiled_globs) noexcept
+                                 const std::unordered_set<std::string>& glob_patterns,
+                                 const std::unordered_set<std::string>& regex_patterns) noexcept
 {
     assert(search_dir.size() > 0);
     
@@ -623,6 +718,9 @@ fingerprint::find_files_internal(std::string search_dir,
     struct timeval time_end;
     ::gettimeofday(&time_start, nullptr);
 
+    std::vector<Glob> compiled_globs = compile_globs(glob_patterns);
+    std::vector<Regex> compiled_regexes = compile_regexes(regex_patterns);
+    
     // FTS_LOGICAL has an undesired behavior of:
     // 1. listing files twice:
     //    - under path with symlinked dir
@@ -655,7 +753,7 @@ fingerprint::find_files_internal(std::string search_dir,
             case FTS_SLNONE: // symbolic link with non-existent target
             {
                 // No glob filtering
-                if (compiled_globs.empty())
+                if (compiled_globs.empty() && compiled_regexes.empty())
                 {
                     process_matched_file(ent->fts_path, ent->fts_statp);
                     break;
@@ -665,7 +763,7 @@ fingerprint::find_files_internal(std::string search_dir,
                 const char* relative_path = ent->fts_path + search_dir.length();
                 if (*relative_path == '/') ++relative_path;
                 
-                if (matches_any_glob(relative_path, compiled_globs))
+                if (matches_any_glob(relative_path, compiled_globs) || matches_any_regex(relative_path, compiled_regexes))
                 {
                     process_matched_file(ent->fts_path, ent->fts_statp);
                 }
@@ -694,7 +792,7 @@ fingerprint::find_files_internal(std::string search_dir,
                                 std::string dir_path = path;  // Copy the path for capture
                                 dispatch_group_async(get_all_tasks_group(), get_directory_traversal_queue(), ^{
                                     if (is_exiting()) { return; }
-                                    __unused int find_result = find_files_internal(dir_path, compiled_globs);
+                                    __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns);
                                 });
                             }
                             else

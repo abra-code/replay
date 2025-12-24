@@ -48,7 +48,8 @@ public:
     // separates directories from files and dispatches appropriately
     // may be started from any thread, typically main
     static int find_and_process_paths(const std::unordered_set<std::string>& paths,
-                                      const std::unordered_set<std::string>& globs) noexcept;
+                                      const std::unordered_set<std::string>& glob_patterns,
+                                      const std::unordered_set<std::string>& regex_patterns) noexcept;
 
     // the client should wait for all background tasks to finish
     static void wait_for_all_tasks() noexcept;
@@ -65,7 +66,9 @@ public:
     
 private:
     // expected to be called on directory_traversal_queue
-    static int find_files_internal(std::string search_dir, const std::vector<GlobPattern> &compiled_globs) noexcept;
+    static int find_files_internal(std::string search_dir,
+                                   const std::unordered_set<std::string>& glob_patterns,
+                                   const std::unordered_set<std::string>& regex_patterns) noexcept;
     
     // process individual files directly (globs ignored)
     // expected to be called on directory_traversal_queue
