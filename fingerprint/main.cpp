@@ -8,6 +8,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <filesystem>
 #include <atomic>
 #include <assert.h>
 #include <sys/time.h>
@@ -51,6 +52,7 @@ static void print_usage(std::ostream& stream)
     stream << "  -I, --inputs=FILE   Read input paths from FILE (one path per line, repeatable)\n";
     stream << "                      Supports Xcode .xcfilelist with ${VAR}/$(VAR) and plain lists.\n";
     stream << "  -l, --list          List matched files with their hashes\n";
+    stream << "  -s, --snapshot=PATH Save snapshot of matched files with hashes to PATH (.tsv, .plist, or .json)\n";
     stream << "  -h, --help          Print this help message\n";
     stream << "  -V, --version       Display version.\n";
     stream << "  -v, --verbose       Print all status information\n";
@@ -90,6 +92,7 @@ int main(int argc, char * argv[])
         { "xattr", required_argument, nullptr, 'X' },
         { "inputs", required_argument, nullptr, 'I' },
         { "list",  no_argument,       nullptr, 'l' },
+        { "snapshot", required_argument, nullptr, 's' },
         { "help", no_argument,        nullptr, 'h' },
         { "version", no_argument,     nullptr, 'V' },
         { "verbose", no_argument,     nullptr, 'v' },
@@ -102,10 +105,11 @@ int main(int argc, char * argv[])
     std::string hash_type = "crc32c";
     std::string xattr = "on";
     bool list_files = false;
+    std::string snapshot_path;
     FingerprintOptions fingerprint_mode = FingerprintOptions::Default;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "g:r:H:F:X:I:lhVv", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "g:r:H:F:X:I:lshVv", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -175,6 +179,12 @@ int main(int argc, char * argv[])
             case 'l':
             {
                 list_files = true;
+            }
+            break;
+                
+            case 's':
+            {
+                snapshot_path = optarg;
             }
             break;
                 
@@ -316,6 +326,28 @@ int main(int argc, char * argv[])
         std::cout << std::endl << "Matched files (" << hash_type << " hash & path):" << std::endl;
         fingerprint::list_matched_files();
         std::cout << std::endl;
+    }
+    
+    if (!snapshot_path.empty())
+    {
+        std::filesystem::path snap(snapshot_path);
+        std::string ext = snap.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        
+        int snap_result;
+        if (ext.empty() || ext == ".tsv")
+        {
+            snap_result = fingerprint::save_snapshot_tsv(snapshot_path);
+        }
+        else
+        {
+            std::cerr << "Error: unsupported snapshot format: " << ext << "\n";
+            std::cerr << "       Supported formats: .tsv (or no extension)\n";
+            snap_result = EXIT_FAILURE;
+        }
+        
+        if (snap_result != EXIT_SUCCESS)
+            result = snap_result;
     }
     
     printf("\nFingerprint: %016llx\n\n", (unsigned long long)fingerprint);

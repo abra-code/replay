@@ -59,6 +59,8 @@ public:
     
     static void list_matched_files() noexcept;
     
+    static int save_snapshot_tsv(const std::string& path) noexcept;
+    
     // flag to stop all tasks. safe to call on any thread
     static void set_exiting() noexcept;
     

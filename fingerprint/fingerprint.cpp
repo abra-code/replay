@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <filesystem>
+#include <fstream>
 #include <regex>
 
 #include <assert.h>
@@ -966,4 +967,52 @@ void fingerprint::list_matched_files() noexcept
     }
 
     std::fwrite(out.data(), 1, out.size(), stdout);
+}
+
+int fingerprint::save_snapshot_tsv(const std::string& path) noexcept
+{
+    if (path.empty())
+    {
+        std::cerr << "Error: snapshot path is empty\n";
+        return EXIT_FAILURE;
+    }
+
+    std::sort(s_all_matched_files.begin(), s_all_matched_files.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    std::string out;
+    out.reserve(s_all_matched_files.size() * 128);
+
+    for (const auto& [file_path, info] : s_all_matched_files)
+    {
+        if (info.is_nonexistent()) continue;
+
+        char line[PATH_MAX + 64];
+        int len;
+
+        if (g_hash == FileHashAlgorithm::CRC32C)
+            len = std::snprintf(line, sizeof(line), "%s\t%08x\n",
+                                file_path.c_str(), info.hash.crc32c);
+        else
+            len = std::snprintf(line, sizeof(line), "%s\t%016llx\n",
+                                file_path.c_str(), (unsigned long long)info.hash.blake3);
+
+        out.append(line, len);
+    }
+
+    std::ofstream outfile(path, std::ios::out | std::ios::binary);
+    if (!outfile)
+    {
+        std::cerr << "Error: cannot open snapshot file for writing: " << path << "\n";
+        return EXIT_FAILURE;
+    }
+
+    outfile.write(out.data(), out.size());
+    if (!outfile)
+    {
+        std::cerr << "Error: failed to write snapshot file: " << path << "\n";
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
 }
