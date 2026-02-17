@@ -10,6 +10,7 @@
 #include <string>
 #include <filesystem>
 #include <atomic>
+#include <ctime>
 #include <assert.h>
 #include <sys/time.h>
 #include <getopt.h>
@@ -334,15 +335,42 @@ int main(int argc, char * argv[])
         std::string ext = snap.extension().string();
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         
+        SnapshotMetadata metadata;
+        metadata.input_paths.assign(paths.begin(), paths.end());
+        metadata.glob_patterns.assign(glob_patterns.begin(), glob_patterns.end());
+        metadata.regex_patterns.assign(regex_patterns.begin(), regex_patterns.end());
+        std::sort(metadata.input_paths.begin(), metadata.input_paths.end());
+        std::sort(metadata.glob_patterns.begin(), metadata.glob_patterns.end());
+        std::sort(metadata.regex_patterns.begin(), metadata.regex_patterns.end());
+        metadata.hash_algorithm = g_hash;
+        metadata.fingerprint_mode = fingerprint_mode;
+        metadata.fingerprint = fingerprint;
+        
+        struct tm tm_buf;
+        localtime_r(&time_end.tv_sec, &tm_buf);
+        char timestamp_buf[64];
+        size_t len = std::strftime(timestamp_buf, sizeof(timestamp_buf), "%Y-%m-%d %H:%M:%S", &tm_buf);
+        len += std::snprintf(timestamp_buf + len, sizeof(timestamp_buf) - len, ".%06ld", (long)time_end.tv_usec);
+        (void)len;
+        metadata.snapshot_timestamp = timestamp_buf;
+        
         int snap_result;
         if (ext.empty() || ext == ".tsv")
         {
-            snap_result = fingerprint::save_snapshot_tsv(snapshot_path);
+            snap_result = fingerprint::save_snapshot_tsv(snapshot_path, metadata);
+        }
+        else if (ext == ".json")
+        {
+            snap_result = fingerprint::save_snapshot_json(snapshot_path, metadata);
+        }
+        else if (ext == ".plist")
+        {
+            snap_result = fingerprint::save_snapshot_plist(snapshot_path, metadata);
         }
         else
         {
             std::cerr << "Error: unsupported snapshot format: " << ext << "\n";
-            std::cerr << "       Supported formats: .tsv (or no extension)\n";
+            std::cerr << "       Supported formats: .tsv, .json, .plist (or no extension)\n";
             snap_result = EXIT_FAILURE;
         }
         

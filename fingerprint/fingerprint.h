@@ -8,6 +8,7 @@
 #pragma once
 #include <unordered_set>
 #include <vector>
+#include <CoreFoundation/CoreFoundation.h>
 
 struct GlobPattern;
 struct FileInfo;
@@ -41,6 +42,17 @@ enum class XattrMode {
     Clear    // don't use xattr + delete existing ones
 };
 
+struct SnapshotMetadata
+{
+    std::vector<std::string> input_paths;
+    std::vector<std::string> glob_patterns;
+    std::vector<std::string> regex_patterns;
+    FileHashAlgorithm hash_algorithm;
+    FingerprintOptions fingerprint_mode;
+    uint64_t fingerprint;
+    std::string snapshot_timestamp;
+};
+
 class fingerprint
 {
 public:
@@ -56,17 +68,21 @@ public:
 
     // this can be called only after all dispatched tasks finished
     static uint64_t sort_and_compute_fingerprint(FingerprintOptions fingerprintOptions) noexcept;
-    
+
+    static int get_result() noexcept;
+
     static void list_matched_files() noexcept;
     
-    static int save_snapshot_tsv(const std::string& path) noexcept;
+    static int save_snapshot_tsv(const std::string& path, const SnapshotMetadata& metadata) noexcept;
+    
+    static int save_snapshot_json(const std::string& path, const SnapshotMetadata& metadata) noexcept;
+    static int save_snapshot_plist(const std::string& path, const SnapshotMetadata& metadata) noexcept;
+
+private:
     
     // flag to stop all tasks. safe to call on any thread
     static void set_exiting() noexcept;
-    
-    static int get_result() noexcept;
-    
-private:
+
     // expected to be called on directory_traversal_queue
     static int find_files_internal(std::string search_dir,
                                    const std::unordered_set<std::string>& glob_patterns,

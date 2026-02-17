@@ -9,6 +9,9 @@
 #include <filesystem>
 #include <fstream>
 #include <regex>
+#include <ctime>
+
+#include <CoreFoundation/CoreFoundation.h>
 
 #include <assert.h>
 #include <sys/time.h>
@@ -24,6 +27,8 @@
 #include "fingerprint.h"
 #include "FileInfo.h"
 #include "dispatch_queues_helper.h"
+#include "json_serialization.h"
+#include "CFObj.h"
 
 #define FINGERPRINT_USE_GLOB_CPP 1
 
@@ -731,7 +736,7 @@ fingerprint::find_files_internal(std::string search_dir,
     
     char *paths[2] = {const_cast<char*>(search_dir.c_str()), nullptr};
     FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_XDEV | FTS_NOCHDIR, nullptr);
-    if (!fts)
+    if (fts == nullptr)
     {
         std::cerr << "fts_open failed for: " << search_dir << '\n';
         s_result = EXIT_FAILURE;
@@ -969,7 +974,7 @@ void fingerprint::list_matched_files() noexcept
     std::fwrite(out.data(), 1, out.size(), stdout);
 }
 
-int fingerprint::save_snapshot_tsv(const std::string& path) noexcept
+int fingerprint::save_snapshot_tsv(const std::string& path, const SnapshotMetadata& metadata) noexcept
 {
     if (path.empty())
     {
@@ -983,36 +988,229 @@ int fingerprint::save_snapshot_tsv(const std::string& path) noexcept
     std::string out;
     out.reserve(s_all_matched_files.size() * 128);
 
+    const char* hash_column = (g_hash == FileHashAlgorithm::CRC32C) ? "crc32c" : "blake3";
+    out += "path\t";
+    out += hash_column;
+    out += "\tsize\tinode\tmtime_ns\tmode\n";
+
     for (const auto& [file_path, info] : s_all_matched_files)
     {
         if (info.is_nonexistent()) continue;
 
-        char line[PATH_MAX + 64];
+        char line[PATH_MAX + 128];
         int len;
 
+        char hash_hex[32];
         if (g_hash == FileHashAlgorithm::CRC32C)
-            len = std::snprintf(line, sizeof(line), "%s\t%08x\n",
-                                file_path.c_str(), info.hash.crc32c);
+            std::snprintf(hash_hex, sizeof(hash_hex), "%08x", info.hash.crc32c);
         else
-            len = std::snprintf(line, sizeof(line), "%s\t%016llx\n",
-                                file_path.c_str(), (unsigned long long)info.hash.blake3);
+            std::snprintf(hash_hex, sizeof(hash_hex), "%016llx", (unsigned long long)info.hash.blake3);
+
+        char mode_hex[16];
+        std::snprintf(mode_hex, sizeof(mode_hex), "%04o", info.mode & 07777);
+
+        len = std::snprintf(line, sizeof(line), "%s\t%s\t%lld\t%llu\t%lld\t%s\n",
+                            file_path.c_str(), hash_hex,
+                            (long long)info.size, (unsigned long long)info.inode,
+                            (long long)info.mtime_ns, mode_hex);
 
         out.append(line, len);
     }
 
     std::ofstream outfile(path, std::ios::out | std::ios::binary);
-    if (!outfile)
+    if (outfile.fail())
     {
         std::cerr << "Error: cannot open snapshot file for writing: " << path << "\n";
         return EXIT_FAILURE;
     }
 
     outfile.write(out.data(), out.size());
-    if (!outfile)
+    if (outfile.fail())
     {
         std::cerr << "Error: failed to write snapshot file: " << path << "\n";
         return EXIT_FAILURE;
     }
 
     return EXIT_SUCCESS;
+}
+
+static CFMutableDictionaryRef build_snapshot_dictionary(const SnapshotMetadata& metadata) noexcept
+{
+    CFObj<CFMutableDictionaryRef> root_dict(CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+
+    CFObj<CFMutableDictionaryRef> params_dict(CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+
+    {
+        CFObj<CFMutableArrayRef> arr(CFArrayCreateMutable(kCFAllocatorDefault, metadata.input_paths.size(),
+            &kCFTypeArrayCallBacks));
+        for (const auto& p : metadata.input_paths)
+        {
+            CFObj<CFStringRef> cfstr(CFStringCreateWithCString(kCFAllocatorDefault, p.c_str(), kCFStringEncodingUTF8));
+            CFArrayAppendValue(arr, cfstr);
+        }
+        CFDictionarySetValue(params_dict, CFSTR("input_paths"), arr);
+    }
+
+    {
+        CFObj<CFMutableArrayRef> arr(CFArrayCreateMutable(kCFAllocatorDefault, metadata.glob_patterns.size(),
+            &kCFTypeArrayCallBacks));
+        for (const auto& p : metadata.glob_patterns)
+        {
+            CFObj<CFStringRef> cfstr(CFStringCreateWithCString(kCFAllocatorDefault, p.c_str(), kCFStringEncodingUTF8));
+            CFArrayAppendValue(arr, cfstr);
+        }
+        CFDictionarySetValue(params_dict, CFSTR("glob_patterns"), arr);
+    }
+
+    {
+        CFObj<CFMutableArrayRef> arr(CFArrayCreateMutable(kCFAllocatorDefault, metadata.regex_patterns.size(),
+            &kCFTypeArrayCallBacks));
+        for (const auto& p : metadata.regex_patterns)
+        {
+            CFObj<CFStringRef> cfstr(CFStringCreateWithCString(kCFAllocatorDefault, p.c_str(), kCFStringEncodingUTF8));
+            CFArrayAppendValue(arr, cfstr);
+        }
+        CFDictionarySetValue(params_dict, CFSTR("regex_patterns"), arr);
+    }
+
+    CFStringRef hash_algo = (metadata.hash_algorithm == FileHashAlgorithm::CRC32C) ?
+        CFSTR("crc32c") : CFSTR("blake3");
+    CFDictionarySetValue(params_dict, CFSTR("hash_algorithm"), hash_algo);
+
+    CFStringRef fp_mode = CFSTR("default");
+    switch (metadata.fingerprint_mode)
+    {
+        case FingerprintOptions::HashAbsolutePaths: fp_mode = CFSTR("absolute"); break;
+        case FingerprintOptions::HashRelativePaths: fp_mode = CFSTR("relative"); break;
+        default: fp_mode = CFSTR("default"); break;
+    }
+    CFDictionarySetValue(params_dict, CFSTR("fingerprint_mode"), fp_mode);
+
+    char fp_hex[32];
+    std::snprintf(fp_hex, sizeof(fp_hex), "%016llx", (unsigned long long)metadata.fingerprint);
+    CFObj<CFStringRef> fingerprint_str(CFStringCreateWithCString(kCFAllocatorDefault, fp_hex, kCFStringEncodingUTF8));
+    CFDictionarySetValue(params_dict, CFSTR("fingerprint"), fingerprint_str);
+
+    if (!metadata.snapshot_timestamp.empty())
+    {
+        CFObj<CFStringRef> timestamp(CFStringCreateWithCString(kCFAllocatorDefault, metadata.snapshot_timestamp.c_str(),
+            kCFStringEncodingUTF8));
+        CFDictionarySetValue(params_dict, CFSTR("snapshot_timestamp"), timestamp);
+    }
+
+    CFDictionarySetValue(root_dict, CFSTR("fingerprint_params"), params_dict);
+    params_dict = nullptr;
+
+    CFObj<CFMutableArrayRef> files_arr(CFArrayCreateMutable(kCFAllocatorDefault, s_all_matched_files.size(),
+        &kCFTypeArrayCallBacks));
+    for (const auto& [file_path, info] : s_all_matched_files)
+    {
+        if (info.is_nonexistent()) continue;
+
+        CFObj<CFMutableDictionaryRef> file_dict(CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+
+        CFObj<CFStringRef> path_cfstr(CFStringCreateWithCString(kCFAllocatorDefault, file_path.c_str(), kCFStringEncodingUTF8));
+        CFDictionarySetValue(file_dict, CFSTR("path"), path_cfstr);
+
+        char hash_hex[32];
+        if (g_hash == FileHashAlgorithm::CRC32C)
+            std::snprintf(hash_hex, sizeof(hash_hex), "%08x", info.hash.crc32c);
+        else
+            std::snprintf(hash_hex, sizeof(hash_hex), "%016llx", (unsigned long long)info.hash.blake3);
+
+        CFObj<CFStringRef> hash_cfstr(CFStringCreateWithCString(kCFAllocatorDefault, hash_hex, kCFStringEncodingUTF8));
+        CFDictionarySetValue(file_dict, CFSTR("hash"), hash_cfstr);
+
+        CFObj<CFNumberRef> inode_num(CFNumberCreate(kCFAllocatorDefault, kCFNumberLongLongType, &info.inode));
+        CFDictionarySetValue(file_dict, CFSTR("inode"), inode_num);
+
+        CFObj<CFNumberRef> size_num(CFNumberCreate(kCFAllocatorDefault, kCFNumberLongLongType, &info.size));
+        CFDictionarySetValue(file_dict, CFSTR("size"), size_num);
+
+        CFObj<CFNumberRef> mtime_num(CFNumberCreate(kCFAllocatorDefault, kCFNumberLongLongType, &info.mtime_ns));
+        CFDictionarySetValue(file_dict, CFSTR("mtime_ns"), mtime_num);
+
+        char mode_hex[16];
+        std::snprintf(mode_hex, sizeof(mode_hex), "%04o", info.mode & 07777);
+        CFObj<CFStringRef> mode_str(CFStringCreateWithCString(kCFAllocatorDefault, mode_hex, kCFStringEncodingUTF8));
+        CFDictionarySetValue(file_dict, CFSTR("mode"), mode_str);
+
+        CFArrayAppendValue(files_arr, file_dict);
+    }
+
+    CFDictionarySetValue(root_dict, CFSTR("files"), files_arr);
+    files_arr = nullptr;
+
+    return root_dict.Detach();
+}
+
+int fingerprint::save_snapshot_plist(const std::string& path, const SnapshotMetadata& metadata) noexcept
+{
+    if (path.empty())
+    {
+        std::cerr << "Error: snapshot path is empty\n";
+        return EXIT_FAILURE;
+    }
+
+    std::sort(s_all_matched_files.begin(), s_all_matched_files.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    CFObj<CFMutableDictionaryRef> root_dict(build_snapshot_dictionary(metadata));
+
+    CFErrorRef error = nullptr;
+    CFObj<CFDataRef> plist_data(CFPropertyListCreateData(kCFAllocatorDefault, root_dict,
+        kCFPropertyListBinaryFormat_v1_0, 0, &error));
+    root_dict = nullptr;
+    
+    if (plist_data == nullptr)
+    {
+        std::cerr << "Error: failed to serialize plist: ";
+        if (error)
+        {
+            CFObj<CFStringRef> err_str(CFErrorCopyDescription(error));
+            char err_buf[256];
+            if (CFStringGetCString(err_str, err_buf, sizeof(err_buf), kCFStringEncodingUTF8))
+                std::cerr << err_buf;
+        }
+        std::cerr << "\n";
+        return EXIT_FAILURE;
+    }
+
+    std::ofstream outfile(path, std::ios::out | std::ios::binary);
+    if (outfile.fail())
+    {
+        std::cerr << "Error: cannot open snapshot file for writing: " << path << "\n";
+        return EXIT_FAILURE;
+    }
+
+    outfile.write(reinterpret_cast<const char*>(CFDataGetBytePtr(plist_data)), CFDataGetLength(plist_data));
+    if (outfile.fail())
+    {
+        std::cerr << "Error: failed to write snapshot file: " << path << "\n";
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
+}
+
+int fingerprint::save_snapshot_json(const std::string& path, const SnapshotMetadata& metadata) noexcept
+{
+    if (path.empty())
+    {
+        std::cerr << "Error: snapshot path is empty\n";
+        return EXIT_FAILURE;
+    }
+
+    std::sort(s_all_matched_files.begin(), s_all_matched_files.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    CFObj<CFMutableDictionaryRef> root_dict(build_snapshot_dictionary(metadata));
+
+    int result = serialize_dict_to_json(root_dict, path.c_str());
+    root_dict = nullptr;
+    
+    return result;
 }

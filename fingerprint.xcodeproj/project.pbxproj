@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1D074CF12F443E17004AEAF6 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D074CF02F443E17004AEAF6 /* CoreFoundation.framework */; };
 		1DFF72542ECF2BF100860A62 /* libblake3.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DFF72342ECF2B6C00860A62 /* libblake3.a */; };
 		1DFF725F2ECF2D6900860A62 /* libfast-crc32.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DFF72592ECF2D5500860A62 /* libfast-crc32.a */; };
 /* End PBXBuildFile section */
@@ -41,6 +42,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		1D074CF02F443E17004AEAF6 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = System/Library/Frameworks/CoreFoundation.framework; sourceTree = SDKROOT; };
 		1D7ED29E2E9648EB003BA8A7 /* fingerprint */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = fingerprint; sourceTree = BUILT_PRODUCTS_DIR; };
 		1DBF0BB02EE02B1E00CB10C9 /* Blake3TargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Blake3TargetCommon.xcconfig; sourceTree = "<group>"; };
 		1DBF0BB12EE02C1F00CB10C9 /* FastCrc32TargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FastCrc32TargetCommon.xcconfig; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1D074CF12F443E17004AEAF6 /* CoreFoundation.framework in Frameworks */,
 				1DFF725F2ECF2D6900860A62 /* libfast-crc32.a in Frameworks */,
 				1DFF72542ECF2BF100860A62 /* libblake3.a in Frameworks */,
 			);
@@ -181,6 +184,7 @@
 		1DFF72532ECF2BF100860A62 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				1D074CF02F443E17004AEAF6 /* CoreFoundation.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
