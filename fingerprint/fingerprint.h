@@ -15,6 +15,8 @@ struct FileInfo;
 
 enum class FileHashAlgorithm
 {
+    MISMATCH = -1,
+    UNKNOWN,
     CRC32C,
     BLAKE3
 };
@@ -74,9 +76,21 @@ public:
     static void list_matched_files() noexcept;
     
     static int save_snapshot_tsv(const std::string& path, const SnapshotMetadata& metadata) noexcept;
-    
     static int save_snapshot_json(const std::string& path, const SnapshotMetadata& metadata) noexcept;
     static int save_snapshot_plist(const std::string& path, const SnapshotMetadata& metadata) noexcept;
+    
+    static int save_snapshot(const std::string& path, const SnapshotMetadata& metadata) noexcept;
+    static CFMutableDictionaryRef load_snapshot(const std::string& path) noexcept;
+    static int compare_snapshots(const std::string& path1, const std::string& path2) noexcept;
+    
+    static SnapshotMetadata create_snapshot_metadata(
+        const std::unordered_set<std::string>& input_paths,
+        const std::unordered_set<std::string>& glob_patterns,
+        const std::unordered_set<std::string>& regex_patterns,
+        FileHashAlgorithm hash_algorithm,
+        FingerprintOptions fingerprint_mode,
+        uint64_t fingerprint,
+        const struct timeval& timestamp) noexcept;
 
 private:
     

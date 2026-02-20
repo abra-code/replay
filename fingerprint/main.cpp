@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <atomic>
 #include <ctime>
+#include <cstdio>
 #include <assert.h>
 #include <sys/time.h>
 #include <getopt.h>
@@ -54,6 +55,11 @@ static void print_usage(std::ostream& stream)
     stream << "                      Supports Xcode .xcfilelist with ${VAR}/$(VAR) and plain lists.\n";
     stream << "  -l, --list          List matched files with their hashes\n";
     stream << "  -s, --snapshot=PATH Save snapshot of matched files with hashes to PATH (.tsv, .plist, or .json)\n";
+    stream << "  -c, --compare=PATH  Compare snapshot PATH with current fingerprint run or with another snapshot\n";
+    stream << "                      Passing two snapshot paths to compare executes fingerprint in comparison mode:\n";
+    stream << "                      fingerprint --compare=/path/to/snapshot1.json --compare=/path/to/snapshot2.json\n";
+    stream << "                      Using --compare once allows comparing previous fingerprint run to the current:\n";
+    stream << "                      fingerprint --compare=mydir-snapshot-previous.plist path/to/mydir\n";
     stream << "  -h, --help          Print this help message\n";
     stream << "  -V, --version       Display version.\n";
     stream << "  -v, --verbose       Print all status information\n";
@@ -94,6 +100,7 @@ int main(int argc, char * argv[])
         { "inputs", required_argument, nullptr, 'I' },
         { "list",  no_argument,       nullptr, 'l' },
         { "snapshot", required_argument, nullptr, 's' },
+        { "compare", required_argument, nullptr, 'c' },
         { "help", no_argument,        nullptr, 'h' },
         { "version", no_argument,     nullptr, 'V' },
         { "verbose", no_argument,     nullptr, 'v' },
@@ -107,10 +114,11 @@ int main(int argc, char * argv[])
     std::string xattr = "on";
     bool list_files = false;
     std::string snapshot_path;
+    std::vector<std::string> compare_paths;
     FingerprintOptions fingerprint_mode = FingerprintOptions::Default;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "g:r:H:F:X:I:lshVv", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "g:r:H:F:X:I:ls:c:hVv", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -188,6 +196,12 @@ int main(int argc, char * argv[])
                 snapshot_path = optarg;
             }
             break;
+            
+            case 'c':
+            {
+                compare_paths.push_back(optarg);
+            }
+            break;
                 
             case 'h':
             {
@@ -259,6 +273,20 @@ int main(int argc, char * argv[])
         paths.emplace(search_path);
     }
     
+    // Compare-only mode: two snapshots provided directly, nothing to fingerprint
+    // ignore any other arguments which migth have been passed (no verification)
+    bool compare_only_mode = (compare_paths.size() == 2);
+    if (compare_only_mode)
+    {
+        if(g_verbose)
+        {
+            std::cout << "Comparing snapshots: " << std::endl;
+            std::cout << "\t" << compare_paths[0] << std::endl;
+            std::cout << "\t" << compare_paths[1] << std::endl;
+        }
+        return fingerprint::compare_snapshots(compare_paths[0], compare_paths[1]);
+    }
+
     if (paths.empty())
     {
         std::cerr << "No paths specified to fingerprint\n";
@@ -310,17 +338,17 @@ int main(int argc, char * argv[])
 
     double time_delta = 0.0;
     
-	::gettimeofday(&time_start, nullptr);
-	
+    ::gettimeofday(&time_start, nullptr);
+    
     result = fingerprint::find_and_process_paths(paths, glob_patterns, regex_patterns);
-	fingerprint::wait_for_all_tasks();
+    fingerprint::wait_for_all_tasks();
 
-	::gettimeofday(&time_tasks_end, nullptr);
+    ::gettimeofday(&time_tasks_end, nullptr);
 
-	uint64_t fingerprint = fingerprint::sort_and_compute_fingerprint(fingerprint_mode);
+    uint64_t fingerprint = fingerprint::sort_and_compute_fingerprint(fingerprint_mode);
     result = fingerprint::get_result();
 
-	::gettimeofday(&time_end, nullptr);
+    ::gettimeofday(&time_end, nullptr);
 
     if (list_files)
     {
@@ -331,51 +359,53 @@ int main(int argc, char * argv[])
     
     if (!snapshot_path.empty())
     {
-        std::filesystem::path snap(snapshot_path);
-        std::string ext = snap.extension().string();
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        SnapshotMetadata metadata = fingerprint::create_snapshot_metadata(
+            paths, glob_patterns, regex_patterns, g_hash, fingerprint_mode, fingerprint, time_end);
         
-        SnapshotMetadata metadata;
-        metadata.input_paths.assign(paths.begin(), paths.end());
-        metadata.glob_patterns.assign(glob_patterns.begin(), glob_patterns.end());
-        metadata.regex_patterns.assign(regex_patterns.begin(), regex_patterns.end());
-        std::sort(metadata.input_paths.begin(), metadata.input_paths.end());
-        std::sort(metadata.glob_patterns.begin(), metadata.glob_patterns.end());
-        std::sort(metadata.regex_patterns.begin(), metadata.regex_patterns.end());
-        metadata.hash_algorithm = g_hash;
-        metadata.fingerprint_mode = fingerprint_mode;
-        metadata.fingerprint = fingerprint;
-        
-        struct tm tm_buf;
-        localtime_r(&time_end.tv_sec, &tm_buf);
-        char timestamp_buf[64];
-        size_t len = std::strftime(timestamp_buf, sizeof(timestamp_buf), "%Y-%m-%d %H:%M:%S", &tm_buf);
-        len += std::snprintf(timestamp_buf + len, sizeof(timestamp_buf) - len, ".%06ld", (long)time_end.tv_usec);
-        (void)len;
-        metadata.snapshot_timestamp = timestamp_buf;
-        
-        int snap_result;
-        if (ext.empty() || ext == ".tsv")
+        int snap_result = fingerprint::save_snapshot(snapshot_path, metadata);
+        if (snap_result != EXIT_SUCCESS)
+            result = snap_result;
+    }
+    
+    if (!compare_paths.empty())
+    {
+        if (compare_paths.size() == 1)
         {
-            snap_result = fingerprint::save_snapshot_tsv(snapshot_path, metadata);
-        }
-        else if (ext == ".json")
-        {
-            snap_result = fingerprint::save_snapshot_json(snapshot_path, metadata);
-        }
-        else if (ext == ".plist")
-        {
-            snap_result = fingerprint::save_snapshot_plist(snapshot_path, metadata);
+            std::string current_snapshot;
+            if (!snapshot_path.empty())
+            {
+                current_snapshot = snapshot_path;
+            }
+            else
+            {
+                // snapshot path not provided. create snapshot in a temporary file which we will delete
+                std::filesystem::path compare_path(compare_paths[0]);
+                std::string ext = compare_path.extension().string();
+                current_snapshot = (compare_path.parent_path() / (compare_path.stem().string() + ".current" + ext)).string();
+            }
+
+            SnapshotMetadata metadata = fingerprint::create_snapshot_metadata(
+                paths, glob_patterns, regex_patterns, g_hash, fingerprint_mode, fingerprint, time_end);
+
+            int snap_result = fingerprint::save_snapshot(current_snapshot, metadata);
+            if (snap_result != EXIT_SUCCESS)
+            {
+                std::cerr << "Error: failed to create temporary snapshot for comparison\n";
+                return snap_result;
+            }
+
+            int compare_result = fingerprint::compare_snapshots(compare_paths[0], current_snapshot);
+            if (snapshot_path.empty())
+            { // clean temporary file when we are not keeping the snapshot
+                std::remove(current_snapshot.c_str());
+            }
+            return compare_result;
         }
         else
         {
-            std::cerr << "Error: unsupported snapshot format: " << ext << "\n";
-            std::cerr << "       Supported formats: .tsv, .json, .plist (or no extension)\n";
-            snap_result = EXIT_FAILURE;
+            std::cerr << "Error: --compare requires either 2 paths or 1 path with --snapshot\n";
+            return EXIT_FAILURE;
         }
-        
-        if (snap_result != EXIT_SUCCESS)
-            result = snap_result;
     }
     
     printf("\nFingerprint: %016llx\n\n", (unsigned long long)fingerprint);

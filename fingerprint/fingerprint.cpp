@@ -10,6 +10,7 @@
 #include <fstream>
 #include <regex>
 #include <ctime>
+#include <map>
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -29,6 +30,7 @@
 #include "dispatch_queues_helper.h"
 #include "json_serialization.h"
 #include "CFObj.h"
+#include "CFType.h"
 
 #define FINGERPRINT_USE_GLOB_CPP 1
 
@@ -974,6 +976,106 @@ void fingerprint::list_matched_files() noexcept
     std::fwrite(out.data(), 1, out.size(), stdout);
 }
 
+static CFMutableDictionaryRef load_tsv_as_cfdict(const std::string& path) noexcept
+{
+    std::ifstream infile(path);
+    if (infile.fail())
+    {
+        std::cerr << "Error: cannot open snapshot file: " << path << "\n";
+        return nullptr;
+    }
+
+    CFObj<CFMutableDictionaryRef> root_dict(CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+
+    CFObj<CFMutableDictionaryRef> params_dict(CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+    CFDictionarySetValue(root_dict, CFSTR("fingerprint_params"), params_dict);
+    params_dict = nullptr;
+
+    CFObj<CFMutableArrayRef> files_arr(CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks));
+
+    std::string line;
+    bool first_line = true;
+    while (std::getline(infile, line))
+    {
+        if (line.empty()) continue;
+
+        if (first_line)
+        {
+            first_line = false;
+            continue;
+        }
+
+        size_t tab1 = line.find('\t');
+        size_t tab2 = line.find('\t', tab1 + 1);
+        size_t tab3 = line.find('\t', tab2 + 1);
+        size_t tab4 = line.find('\t', tab3 + 1);
+        size_t tab5 = line.find('\t', tab4 + 1);
+
+        if (tab1 == std::string::npos || tab2 == std::string::npos || tab3 == std::string::npos ||
+            tab4 == std::string::npos || tab5 == std::string::npos)
+            continue;
+
+        CFObj<CFMutableDictionaryRef> file_dict(CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+
+        std::string path_str = line.substr(0, tab1);
+        CFObj<CFStringRef> path_cf(CFStringCreateWithCString(kCFAllocatorDefault, path_str.c_str(), kCFStringEncodingUTF8));
+        CFDictionarySetValue(file_dict, CFSTR("path"), path_cf);
+
+        std::string hash_str = line.substr(tab1 + 1, tab2 - tab1 - 1);
+        CFObj<CFStringRef> hash_cf(CFStringCreateWithCString(kCFAllocatorDefault, hash_str.c_str(), kCFStringEncodingUTF8));
+        CFDictionarySetValue(file_dict, CFSTR("hash"), hash_cf);
+
+        std::string size_str = line.substr(tab2 + 1, tab3 - tab2 - 1);
+        int64_t size_val = std::stoll(size_str);
+        CFObj<CFNumberRef> size_num(CFNumberCreate(kCFAllocatorDefault, kCFNumberLongLongType, &size_val));
+        CFDictionarySetValue(file_dict, CFSTR("size"), size_num);
+
+        std::string inode_str = line.substr(tab3 + 1, tab4 - tab3 - 1);
+        uint64_t inode_val = std::stoull(inode_str);
+        CFObj<CFNumberRef> inode_num(CFNumberCreate(kCFAllocatorDefault, kCFNumberLongLongType, &inode_val));
+        CFDictionarySetValue(file_dict, CFSTR("inode"), inode_num);
+
+        std::string mtime_str = line.substr(tab4 + 1, tab5 - tab4 - 1);
+        int64_t mtime_val = std::stoll(mtime_str);
+        CFObj<CFNumberRef> mtime_num(CFNumberCreate(kCFAllocatorDefault, kCFNumberLongLongType, &mtime_val));
+        CFDictionarySetValue(file_dict, CFSTR("mtime_ns"), mtime_num);
+
+        std::string mode_str = line.substr(tab5 + 1);
+        CFObj<CFStringRef> mode_cf(CFStringCreateWithCString(kCFAllocatorDefault, mode_str.c_str(), kCFStringEncodingUTF8));
+        CFDictionarySetValue(file_dict, CFSTR("mode"), mode_cf);
+
+        CFArrayAppendValue(files_arr, file_dict);
+    }
+
+    CFDictionarySetValue(root_dict, CFSTR("files"), files_arr);
+    files_arr = nullptr;
+
+    return root_dict.Detach();
+}
+
+static void compare_metadata(CFDictionaryRef snap1, CFDictionaryRef snap2, FileHashAlgorithm& hash_algorithm) noexcept;
+static bool compare_files(CFDictionaryRef snap1, CFDictionaryRef snap2, FileHashAlgorithm hash_algorithm) noexcept;
+
+int fingerprint::compare_snapshots(const std::string& path1, const std::string& path2) noexcept
+{
+    CFObj<CFMutableDictionaryRef> snap1(load_snapshot(path1));
+    if (snap1 == nullptr)
+        return EXIT_FAILURE;
+
+    CFObj<CFMutableDictionaryRef> snap2(load_snapshot(path2));
+    if (snap2 == nullptr)
+        return EXIT_FAILURE;
+
+    FileHashAlgorithm hash_algorithm = FileHashAlgorithm::UNKNOWN;
+    compare_metadata(snap1, snap2, hash_algorithm);
+    bool found_diff = compare_files(snap1, snap2, hash_algorithm);
+
+    return found_diff ? EXIT_FAILURE : EXIT_SUCCESS;
+}
+
 int fingerprint::save_snapshot_tsv(const std::string& path, const SnapshotMetadata& metadata) noexcept
 {
     if (path.empty())
@@ -1168,7 +1270,7 @@ int fingerprint::save_snapshot_plist(const std::string& path, const SnapshotMeta
     if (plist_data == nullptr)
     {
         std::cerr << "Error: failed to serialize plist: ";
-        if (error)
+        if (error != nullptr)
         {
             CFObj<CFStringRef> err_str(CFErrorCopyDescription(error));
             char err_buf[256];
@@ -1213,4 +1315,481 @@ int fingerprint::save_snapshot_json(const std::string& path, const SnapshotMetad
     root_dict = nullptr;
     
     return result;
+}
+
+int fingerprint::save_snapshot(const std::string& path, const SnapshotMetadata& metadata) noexcept
+{
+    std::filesystem::path snap(path);
+    std::string ext = snap.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+    if (ext.empty() || ext == ".tsv")
+    {
+        return save_snapshot_tsv(path, metadata);
+    }
+    else if (ext == ".json")
+    {
+        return save_snapshot_json(path, metadata);
+    }
+    else if (ext == ".plist")
+    {
+        return save_snapshot_plist(path, metadata);
+    }
+    else
+    {
+        std::cerr << "Error: unsupported snapshot format: " << ext << "\n";
+        std::cerr << "       Supported formats: .tsv, .json, .plist (or no extension)\n";
+        return EXIT_FAILURE;
+    }
+}
+
+SnapshotMetadata fingerprint::create_snapshot_metadata(
+    const std::unordered_set<std::string>& input_paths,
+    const std::unordered_set<std::string>& glob_patterns,
+    const std::unordered_set<std::string>& regex_patterns,
+    FileHashAlgorithm hash_algorithm,
+    FingerprintOptions fingerprint_mode,
+    uint64_t fingerprint,
+    const struct timeval& timestamp) noexcept
+{
+    SnapshotMetadata metadata;
+    metadata.input_paths.assign(input_paths.begin(), input_paths.end());
+    metadata.glob_patterns.assign(glob_patterns.begin(), glob_patterns.end());
+    metadata.regex_patterns.assign(regex_patterns.begin(), regex_patterns.end());
+    std::sort(metadata.input_paths.begin(), metadata.input_paths.end());
+    std::sort(metadata.glob_patterns.begin(), metadata.glob_patterns.end());
+    std::sort(metadata.regex_patterns.begin(), metadata.regex_patterns.end());
+    metadata.hash_algorithm = hash_algorithm;
+    metadata.fingerprint_mode = fingerprint_mode;
+    metadata.fingerprint = fingerprint;
+    
+    struct tm tm_buf;
+    localtime_r(&timestamp.tv_sec, &tm_buf);
+    char timestamp_buf[64];
+    size_t len = std::strftime(timestamp_buf, sizeof(timestamp_buf), "%Y-%m-%d %H:%M:%S", &tm_buf);
+    len += std::snprintf(timestamp_buf + len, sizeof(timestamp_buf) - len, ".%06ld", (long)timestamp.tv_usec);
+    (void)len;
+    metadata.snapshot_timestamp = timestamp_buf;
+    
+    return metadata;
+}
+
+static bool sort_snapshot_files(CFMutableDictionaryRef snapshot) noexcept
+{
+    CFTypeRef files_arr = CFDictionaryGetValue(snapshot, CFSTR("files"));
+    CFArrayRef files_array = CFType<CFArrayRef>::DynamicCast(files_arr);
+    if (files_array == nullptr)
+        return false;
+
+    CFIndex count = CFArrayGetCount(files_array);
+    if (count == 0)
+        return true;
+
+    CFObj<CFMutableArrayRef> sorted_arr(CFArrayCreateMutable(kCFAllocatorDefault, count, &kCFTypeArrayCallBacks));
+
+    std::vector<CFDictionaryRef> files;
+    files.reserve(count);
+    for (CFIndex i = 0; i < count; i++)
+    {
+        CFTypeRef file = CFArrayGetValueAtIndex(files_array, i);
+        CFDictionaryRef file_dict = CFType<CFDictionaryRef>::DynamicCast(file);
+        if (file_dict != nullptr)
+            files.push_back(file_dict);
+    }
+
+    std::sort(files.begin(), files.end(),
+              [](CFDictionaryRef a, CFDictionaryRef b)
+              {
+                  CFTypeRef path_a = CFDictionaryGetValue(a, CFSTR("path"));
+                  CFTypeRef path_b = CFDictionaryGetValue(b, CFSTR("path"));
+                  CFStringRef path_a_str = CFType<CFStringRef>::DynamicCast(path_a);
+                  CFStringRef path_b_str = CFType<CFStringRef>::DynamicCast(path_b);
+                  if (path_a_str == nullptr || path_b_str == nullptr)
+                      return false;
+                  return CFStringCompare(path_a_str, path_b_str, 0) < 0;
+              });
+
+    for (const auto& f : files)
+        CFArrayAppendValue(sorted_arr, f);
+
+    CFDictionarySetValue(snapshot, CFSTR("files"), sorted_arr);
+    return true;
+}
+
+CFMutableDictionaryRef fingerprint::load_snapshot(const std::string& path) noexcept
+{
+    std::filesystem::path fs_path(path);
+    std::string ext = fs_path.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+    if (ext == ".tsv" || ext.empty())
+    {
+        CFObj<CFMutableDictionaryRef> snapshot(load_tsv_as_cfdict(path));
+        if (snapshot == nullptr)
+            return nullptr;
+        sort_snapshot_files(snapshot);
+        return snapshot.Detach();
+    }
+
+    if (ext == ".json")
+    {
+        CFObj<CFMutableDictionaryRef> snapshot(deserialize_json_from_file(path.c_str()));
+        if (snapshot == nullptr)
+            return nullptr;
+        sort_snapshot_files(snapshot);
+        return snapshot.Detach();
+    }
+
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (file.fail())
+    {
+        std::cerr << "Error: cannot open snapshot file: " << path << "\n";
+        return nullptr;
+    }
+
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::vector<char> buffer(size);
+    if (!file.read(buffer.data(), size))
+    {
+        std::cerr << "Error: failed to read snapshot file: " << path << "\n";
+        return nullptr;
+    }
+
+    CFObj<CFDataRef> data(CFDataCreate(kCFAllocatorDefault, (const UInt8*)buffer.data(), size));
+    if (data == nullptr)
+    {
+        std::cerr << "Error: failed to create CFData from file: " << path << "\n";
+        return nullptr;
+    }
+
+    CFErrorRef error_raw = nullptr;
+    CFPropertyListFormat format;
+    CFObj<CFMutableDictionaryRef> snapshot((CFMutableDictionaryRef)CFPropertyListCreateWithData(
+        kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &format, &error_raw), kCFObjRetain);
+    data = nullptr;
+
+    if (snapshot == nullptr)
+    {
+        CFObj<CFErrorRef> error(error_raw);
+        std::cerr << "Error: failed to parse snapshot file: " << path << "\n";
+        if (error != nullptr)
+        {
+            CFObj<CFStringRef> err_desc(CFErrorCopyDescription(error), kCFObjRetain);
+            char err_buf[256];
+            if (CFStringGetCString(err_desc, err_buf, sizeof(err_buf), kCFStringEncodingUTF8))
+                std::cerr << "       " << err_buf << "\n";
+        }
+        return nullptr;
+    }
+
+    if (CFGetTypeID(snapshot) != CFDictionaryGetTypeID())
+    {
+        std::cerr << "Error: snapshot is not a dictionary: " << path << "\n";
+        return nullptr;
+    }
+
+    sort_snapshot_files(snapshot);
+    return snapshot.Detach();
+}
+
+static void print_cf_string(CFStringRef str, std::ostream& out)
+{
+    char buf[1024];
+    if (CFStringGetCString(str, buf, sizeof(buf), kCFStringEncodingUTF8))
+        out << buf;
+    else
+        out << "<unknown>";
+}
+
+static std::string format_mtime(int64_t mtime_ns) noexcept
+{
+    if (mtime_ns == 0)
+        return "<unknown>";
+
+    time_t epoch_sec = mtime_ns / 1000000000;
+    struct tm* tm_info = localtime(&epoch_sec);
+    if (tm_info == nullptr)
+        return "<invalid>";
+
+    char buffer[64];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm_info);
+
+    int64_t remainder = mtime_ns % 1000000000;
+    char full_buffer[80];
+    snprintf(full_buffer, sizeof(full_buffer), "%s.%09lld", buffer, (long long)remainder);
+    return full_buffer;
+}
+
+static void compare_metadata(CFDictionaryRef snap1, CFDictionaryRef snap2, FileHashAlgorithm& hash_algorithm) noexcept
+{
+    CFStringRef key1 = CFSTR("fingerprint_params");
+    CFTypeRef params1 = CFDictionaryGetValue(snap1, key1);
+    CFTypeRef params2 = CFDictionaryGetValue(snap2, key1);
+
+    CFDictionaryRef params1_dict = CFType<CFDictionaryRef>::DynamicCast(params1);
+    CFDictionaryRef params2_dict = CFType<CFDictionaryRef>::DynamicCast(params2);
+    if (params1_dict == nullptr || params2_dict == nullptr)
+        return;
+
+    std::cout << "Fingerprint runs:\n";
+
+    CFStringRef timestamp_key = CFSTR("snapshot_timestamp");
+    CFTypeRef ts1_raw = CFDictionaryGetValue(params1_dict, timestamp_key);
+    CFTypeRef ts2_raw = CFDictionaryGetValue(params2_dict, timestamp_key);
+    CFStringRef ts1 = CFType<CFStringRef>::DynamicCast(ts1_raw);
+    CFStringRef ts2 = CFType<CFStringRef>::DynamicCast(ts2_raw);
+
+    if (ts1 != nullptr && ts2 != nullptr && CFStringCompare(ts1, ts2, 0) != 0)
+    {
+        std::cout << "\tsnapshot time:\n\t\told: ";
+        print_cf_string(ts1, std::cout);
+        std::cout << "\n\t\tnew: ";
+        print_cf_string(ts2, std::cout);
+        std::cout << "\n";
+    }
+
+    CFStringRef fp_key = CFSTR("fingerprint");
+    CFTypeRef fp1_raw = CFDictionaryGetValue(params1_dict, fp_key);
+    CFTypeRef fp2_raw = CFDictionaryGetValue(params2_dict, fp_key);
+    CFStringRef fp1 = CFType<CFStringRef>::DynamicCast(fp1_raw);
+    CFStringRef fp2 = CFType<CFStringRef>::DynamicCast(fp2_raw);
+
+    if (fp1 != nullptr && fp2 != nullptr && CFStringCompare(fp1, fp2, 0) != 0)
+    {
+        std::cout << "\tfingerprint:\n\t\told: ";
+        print_cf_string(fp1, std::cout);
+        std::cout << "\n\t\tnew: ";
+        print_cf_string(fp2, std::cout);
+        std::cout << "\n";
+    }
+
+    CFStringRef hash_key = CFSTR("hash_algorithm");
+    CFTypeRef hash1_raw = CFDictionaryGetValue(params1_dict, hash_key);
+    CFTypeRef hash2_raw = CFDictionaryGetValue(params2_dict, hash_key);
+    CFStringRef hash1 = CFType<CFStringRef>::DynamicCast(hash1_raw);
+    CFStringRef hash2 = CFType<CFStringRef>::DynamicCast(hash2_raw);
+
+    if (hash1 != nullptr && hash2 != nullptr)
+    {
+        bool same_hash_algorithms = (CFStringCompare(hash1, hash2, 0) == kCFCompareEqualTo);
+        if (same_hash_algorithms)
+        {
+            if (CFStringCompare(hash1, CFSTR("crc32c"), 0) == kCFCompareEqualTo)
+            {
+                hash_algorithm = FileHashAlgorithm::CRC32C;
+            }
+            else if (CFStringCompare(hash1, CFSTR("blake3"), 0) == kCFCompareEqualTo)
+            {
+                hash_algorithm = FileHashAlgorithm::BLAKE3;
+            }
+            else
+            {
+                hash_algorithm = FileHashAlgorithm::UNKNOWN;
+            }
+        }
+        else
+        {
+            hash_algorithm = FileHashAlgorithm::MISMATCH; // marker for non-matching hashes
+            std::cout << "\thash algorithm:\n\t\told: ";
+            print_cf_string(hash1, std::cout);
+            std::cout << "\n\t\tnew: ";
+            print_cf_string(hash2, std::cout);
+            std::cout << "\n";
+        }
+    }
+
+    CFStringRef mode_key = CFSTR("fingerprint_mode");
+    CFTypeRef mode1_raw = CFDictionaryGetValue(params1_dict, mode_key);
+    CFTypeRef mode2_raw = CFDictionaryGetValue(params2_dict, mode_key);
+    CFStringRef mode1 = CFType<CFStringRef>::DynamicCast(mode1_raw);
+    CFStringRef mode2 = CFType<CFStringRef>::DynamicCast(mode2_raw);
+
+    if (mode1 != nullptr && mode2 != nullptr && CFStringCompare(mode1, mode2, 0) != 0)
+    {
+        std::cout << "\tfingerprint mode:\n\t\told: ";
+        print_cf_string(mode1, std::cout);
+        std::cout << "\n\t\tnew: ";
+        print_cf_string(mode2, std::cout);
+        std::cout << "\n";
+    }
+
+    std::cout << "\n";
+}
+
+static bool compare_files(CFDictionaryRef snap1, CFDictionaryRef snap2, FileHashAlgorithm hash_algorithm) noexcept
+{
+    CFTypeRef files1_arr_raw = CFDictionaryGetValue(snap1, CFSTR("files"));
+    CFTypeRef files2_arr_raw = CFDictionaryGetValue(snap2, CFSTR("files"));
+
+    CFArrayRef files1_arr = CFType<CFArrayRef>::DynamicCast(files1_arr_raw);
+    CFArrayRef files2_arr = CFType<CFArrayRef>::DynamicCast(files2_arr_raw);
+    if (files1_arr == nullptr || files2_arr == nullptr)
+        return false;
+
+    std::map<std::string, CFDictionaryRef> files1;
+    std::map<std::string, CFDictionaryRef> files2;
+
+    CFIndex count1 = CFArrayGetCount(files1_arr);
+    for (CFIndex i = 0; i < count1; i++)
+    {
+        CFTypeRef file = CFArrayGetValueAtIndex(files1_arr, i);
+        CFDictionaryRef file_dict = CFType<CFDictionaryRef>::DynamicCast(file);
+        if (file_dict == nullptr)
+            continue;
+        CFTypeRef path_cf_raw = CFDictionaryGetValue(file_dict, CFSTR("path"));
+        CFStringRef path_cf = CFType<CFStringRef>::DynamicCast(path_cf_raw);
+        if (path_cf == nullptr)
+            continue;
+        char path_buf[PATH_MAX];
+        if (CFStringGetCString(path_cf, path_buf, sizeof(path_buf), kCFStringEncodingUTF8))
+            files1[path_buf] = file_dict;
+    }
+
+    CFIndex count2 = CFArrayGetCount(files2_arr);
+    for (CFIndex i = 0; i < count2; i++)
+    {
+        CFTypeRef file = CFArrayGetValueAtIndex(files2_arr, i);
+        CFDictionaryRef file_dict = CFType<CFDictionaryRef>::DynamicCast(file);
+        if (file_dict == nullptr)
+            continue;
+        CFTypeRef path_cf_raw = CFDictionaryGetValue(file_dict, CFSTR("path"));
+        CFStringRef path_cf = CFType<CFStringRef>::DynamicCast(path_cf_raw);
+        if (path_cf == nullptr)
+            continue;
+        char path_buf[PATH_MAX];
+        if (CFStringGetCString(path_cf, path_buf, sizeof(path_buf), kCFStringEncodingUTF8))
+            files2[path_buf] = file_dict;
+    }
+
+    if (hash_algorithm == FileHashAlgorithm::MISMATCH)
+    {
+        std::cout << "WARNING: Hash algorithms differ between snapshots.\n";
+        std::cout << "File content hashes are not comparable - ignoring hash differences.\n";
+        std::cout << "Only reporting additions, removals, size, and modification date changes.\n\n";
+    }
+
+    bool found_diff = false;
+
+    for (const auto& [path, file1] : files1)
+    {
+        auto it = files2.find(path);
+        if (it == files2.end())
+        {
+            std::cout << path << "\n";
+            std::cout << "\tremoved\n\n";
+            found_diff = true;
+        }
+        else
+        {
+            CFDictionaryRef file2 = it->second;
+            bool file_modified = false;
+            std::string details;
+
+            if (hash_algorithm != FileHashAlgorithm::MISMATCH) // hashes are the same
+            {
+                const char* hash_name = (hash_algorithm == FileHashAlgorithm::CRC32C) ? "crc32c" : "blake3";
+                CFTypeRef hash1_raw = CFDictionaryGetValue(file1, CFSTR("hash"));
+                CFTypeRef hash2_raw = CFDictionaryGetValue(file2, CFSTR("hash"));
+                CFStringRef hash1 = CFType<CFStringRef>::DynamicCast(hash1_raw);
+                CFStringRef hash2 = CFType<CFStringRef>::DynamicCast(hash2_raw);
+                if (hash1 != nullptr && hash2 != nullptr && CFStringCompare(hash1, hash2, 0) != 0)
+                {
+                    details += "\t";
+                    details += hash_name;
+                    details += " hash:\n";
+                    details += "\t\told: ";
+                    char hash_buf[32];
+                    if (CFStringGetCString(hash1, hash_buf, sizeof(hash_buf), kCFStringEncodingUTF8))
+                        details += hash_buf;
+                    details += "\n";
+                    details += "\t\tnew: ";
+                    if (CFStringGetCString(hash2, hash_buf, sizeof(hash_buf), kCFStringEncodingUTF8))
+                        details += hash_buf;
+                    details += "\n";
+                    file_modified = true;
+                }
+            }
+
+            CFTypeRef size1_raw = CFDictionaryGetValue(file1, CFSTR("size"));
+            CFTypeRef size2_raw = CFDictionaryGetValue(file2, CFSTR("size"));
+            CFNumberRef size1 = CFType<CFNumberRef>::DynamicCast(size1_raw);
+            CFNumberRef size2 = CFType<CFNumberRef>::DynamicCast(size2_raw);
+            if (size1 != nullptr && size2 != nullptr)
+            {
+                int64_t size1_val, size2_val;
+                CFNumberGetValue(size1, kCFNumberLongLongType, &size1_val);
+                CFNumberGetValue(size2, kCFNumberLongLongType, &size2_val);
+                if (size1_val != size2_val)
+                {
+                    details += "\tsize:\n";
+                    details += "\t\told: " + std::to_string(size1_val) + "\n";
+                    details += "\t\tnew: " + std::to_string(size2_val) + "\n";
+                    file_modified = true;
+                }
+            }
+
+            CFTypeRef mtime1_raw = CFDictionaryGetValue(file1, CFSTR("mtime_ns"));
+            CFTypeRef mtime2_raw = CFDictionaryGetValue(file2, CFSTR("mtime_ns"));
+            CFNumberRef mtime1 = CFType<CFNumberRef>::DynamicCast(mtime1_raw);
+            CFNumberRef mtime2 = CFType<CFNumberRef>::DynamicCast(mtime2_raw);
+            if (mtime1 != nullptr && mtime2 != nullptr)
+            {
+                int64_t mtime1_val, mtime2_val;
+                CFNumberGetValue(mtime1, kCFNumberLongLongType, &mtime1_val);
+                CFNumberGetValue(mtime2, kCFNumberLongLongType, &mtime2_val);
+                if (mtime1_val != mtime2_val)
+                {
+                    details += "\tmodification time:\n";
+                    details += "\t\told: " + format_mtime(mtime1_val) + "\n";
+                    details += "\t\tnew: " + format_mtime(mtime2_val) + "\n";
+                    file_modified = true;
+                }
+            }
+
+            CFTypeRef mode1_raw = CFDictionaryGetValue(file1, CFSTR("mode"));
+            CFTypeRef mode2_raw = CFDictionaryGetValue(file2, CFSTR("mode"));
+            CFStringRef mode1 = CFType<CFStringRef>::DynamicCast(mode1_raw);
+            CFStringRef mode2 = CFType<CFStringRef>::DynamicCast(mode2_raw);
+            if (mode1 != nullptr && mode2 != nullptr && CFStringCompare(mode1, mode2, 0) != 0)
+            {
+                details += "\tmode:\n";
+                details += "\t\told: ";
+                char mode_buf[16];
+                if (CFStringGetCString(mode1, mode_buf, sizeof(mode_buf), kCFStringEncodingUTF8))
+                    details += mode_buf;
+                details += "\n";
+                details += "\t\tnew: ";
+                if (CFStringGetCString(mode2, mode_buf, sizeof(mode_buf), kCFStringEncodingUTF8))
+                    details += mode_buf;
+                details += "\n";
+                file_modified = true;
+            }
+
+            if (file_modified)
+            {
+                std::cout << path << "\n";
+                std::cout << details << "\n";
+                found_diff = true;
+            }
+        }
+    }
+
+    for (const auto& [path, file2] : files2)
+    {
+        if (files1.find(path) == files1.end())
+        {
+            std::cout << path << "\n";
+            std::cout << "\tadded\n\n";
+            found_diff = true;
+        }
+    }
+
+    if (!found_diff)
+    {
+        std::cout << "File contents are identical\n";
+    }
+
+    return found_diff;
 }

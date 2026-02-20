@@ -14,6 +14,7 @@ extern "C" {
 #endif
 
 int serialize_dict_to_json(CFDictionaryRef root_dict, const char* path);
+CFMutableDictionaryRef deserialize_json_from_file(const char* path);
 
 #ifdef __cplusplus
 }
