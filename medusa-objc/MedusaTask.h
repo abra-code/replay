@@ -9,7 +9,7 @@
 
 //#define ENABLE_DEBUG_DUMP 1
 
-#import "FileTree/FileTree.h"
+#import "FileTree.h"
 
 @protocol MedusaTask
 

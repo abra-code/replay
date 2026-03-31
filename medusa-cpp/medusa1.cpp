@@ -9,6 +9,7 @@
 #include "medusa_common.h"
 #include <iostream>
 #include <random>
+#include <assert.h>
 #include "hi_res_timer.h"
 
 

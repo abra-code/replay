@@ -1,6 +1,6 @@
 #import "TaskProxy.h"
 #import "ReplayAction.h"
-#include "FileTree/FileTree.h"
+#include "FileTree.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -3,14 +3,8 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 50;
+	objectVersion = 70;
 	objects = {
-
-/* Begin PBXBuildFile section */
-		1D3FFA5D254D7A140076E19C /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D3FFA5C254D7A140076E19C /* main.m */; };
-		1D4070E6252B342900C9B7F0 /* FileTree.c in Sources */ = {isa = PBXBuildFile; fileRef = 1D4070E5252B342900C9B7F0 /* FileTree.c */; };
-		1DA1150625B31B6B00C0C6A5 /* LogStream.c in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1150525B31B6B00C0C6A5 /* LogStream.c */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		1D4070D7252B340200C9B7F0 /* CopyFiles */ = {
@@ -25,13 +19,23 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		1D3FFA5A254D74430076E19C /* FileTree.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FileTree.h; sourceTree = "<group>"; };
-		1D3FFA5C254D7A140076E19C /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		1D4070D9252B340200C9B7F0 /* FileTree */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = FileTree; sourceTree = BUILT_PRODUCTS_DIR; };
-		1D4070E5252B342900C9B7F0 /* FileTree.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = FileTree.c; sourceTree = "<group>"; };
-		1DA1150425B31B6B00C0C6A5 /* LogStream.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LogStream.h; sourceTree = SOURCE_ROOT; };
-		1DA1150525B31B6B00C0C6A5 /* LogStream.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LogStream.c; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1DDD18172F7C3AEE00DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AsyncDispatch.m,
+			);
+			target = 1D4070D8252B340200C9B7F0 /* FileTree */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		1DDD17EB2F7C385100DB718A /* file-tree */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "file-tree"; sourceTree = "<group>"; };
+		1DDD18142F7C3AE300DB718A /* common */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DDD18172F7C3AEE00DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = common; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		1D4070D6252B340200C9B7F0 /* Frameworks */ = {
@@ -47,7 +51,8 @@
 		1D4070D0252B340200C9B7F0 = {
 			isa = PBXGroup;
 			children = (
-				1D4070DB252B340200C9B7F0 /* FileTree */,
+				1DDD18142F7C3AE300DB718A /* common */,
+				1DDD17EB2F7C385100DB718A /* file-tree */,
 				1D4070DA252B340200C9B7F0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -58,18 +63,6 @@
 				1D4070D9252B340200C9B7F0 /* FileTree */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		1D4070DB252B340200C9B7F0 /* FileTree */ = {
-			isa = PBXGroup;
-			children = (
-				1D4070E5252B342900C9B7F0 /* FileTree.c */,
-				1D3FFA5A254D74430076E19C /* FileTree.h */,
-				1D3FFA5C254D7A140076E19C /* main.m */,
-				1DA1150525B31B6B00C0C6A5 /* LogStream.c */,
-				1DA1150425B31B6B00C0C6A5 /* LogStream.h */,
-			);
-			path = FileTree;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -86,6 +79,10 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1DDD17EB2F7C385100DB718A /* file-tree */,
+				1DDD18142F7C3AE300DB718A /* common */,
 			);
 			name = FileTree;
 			productName = FileTree;
@@ -128,9 +125,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1DA1150625B31B6B00C0C6A5 /* LogStream.c in Sources */,
-				1D3FFA5D254D7A140076E19C /* main.m in Sources */,
-				1D4070E6252B342900C9B7F0 /* FileTree.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

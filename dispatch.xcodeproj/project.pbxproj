@@ -3,14 +3,8 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 50;
+	objectVersion = 70;
 	objects = {
-
-/* Begin PBXBuildFile section */
-		1D34D69E259477BB00167241 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D34D69D259477BB00167241 /* main.m */; };
-		1D34D6AB2594CA7B00167241 /* ActionFromName.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D34D6AA2594CA7A00167241 /* ActionFromName.m */; };
-		1DA1150125B31B5800C0C6A5 /* LogStream.c in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1150025B31B5800C0C6A5 /* LogStream.c */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		1D34D698259477BB00167241 /* CopyFiles */ = {
@@ -26,18 +20,51 @@
 
 /* Begin PBXFileReference section */
 		1D34D69A259477BB00167241 /* dispatch */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = dispatch; sourceTree = BUILT_PRODUCTS_DIR; };
-		1D34D69D259477BB00167241 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
-		1D34D6A62594C89500167241 /* ReplayAction.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ReplayAction.h; sourceTree = SOURCE_ROOT; };
-		1D34D6AA2594CA7A00167241 /* ActionFromName.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ActionFromName.m; sourceTree = SOURCE_ROOT; };
-		1D34D6B72597645400167241 /* ReplayServer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ReplayServer.h; sourceTree = SOURCE_ROOT; };
-		1D34D6C3259AA0AF00167241 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = SOURCE_ROOT; };
-		1DA114FF25B31B5800C0C6A5 /* LogStream.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LogStream.h; sourceTree = SOURCE_ROOT; };
-		1DA1150025B31B5800C0C6A5 /* LogStream.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LogStream.c; sourceTree = SOURCE_ROOT; };
 		1DA1153525B5AC0200C0C6A5 /* ReplayProjectRelease.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectRelease.xcconfig; sourceTree = "<group>"; };
 		1DA1153625B5AC0200C0C6A5 /* ReplayProjectCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectCommon.xcconfig; sourceTree = "<group>"; };
 		1DA1153725B5AC0200C0C6A5 /* ReplayProjectDebug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectDebug.xcconfig; sourceTree = "<group>"; };
 		1DA1153825B5AC0200C0C6A5 /* DispatchTargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = DispatchTargetCommon.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1DA1CA612F7C4264000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AsyncDispatch.m,
+			);
+			target = 1D34D699259477BB00167241 /* dispatch */;
+		};
+		1DA1CA7F2F7C42C6000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ActionStream.m,
+				ConcurrentDispatchWithNoDependency.m,
+				main.m,
+				OutputSerializer.m,
+				ReplayAction.mm,
+				ReplayServer.m,
+				ReplayTask.mm,
+				SerialDispatch.m,
+				StringAndPath.m,
+			);
+			target = 1D34D699259477BB00167241 /* dispatch */;
+		};
+		1DA1CA8A2F7C4368000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				FileTree.c,
+				main.m,
+			);
+			target = 1D34D699259477BB00167241 /* dispatch */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		1DA1CA5E2F7C424F000F2E31 /* common */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1CA612F7C4264000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = common; sourceTree = "<group>"; };
+		1DA1CA742F7C42B7000F2E31 /* replay */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1CA7F2F7C42C6000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = replay; sourceTree = "<group>"; };
+		1DA1CA812F7C430C000F2E31 /* dispatch */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = dispatch; sourceTree = "<group>"; };
+		1DA1CA872F7C4362000F2E31 /* file-tree */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1CA8A2F7C4368000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "file-tree"; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		1D34D697259477BB00167241 /* Frameworks */ = {
@@ -53,7 +80,11 @@
 		1D34D691259477BB00167241 = {
 			isa = PBXGroup;
 			children = (
-				1D34D69C259477BB00167241 /* dispatch */,
+				1DA1CA872F7C4362000F2E31 /* file-tree */,
+				1DA1CA742F7C42B7000F2E31 /* replay */,
+				1DA1CA5E2F7C424F000F2E31 /* common */,
+				1DA1153425B5AC0200C0C6A5 /* xcconfigs */,
+				1DA1CA812F7C430C000F2E31 /* dispatch */,
 				1D34D69B259477BB00167241 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -64,21 +95,6 @@
 				1D34D69A259477BB00167241 /* dispatch */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		1D34D69C259477BB00167241 /* dispatch */ = {
-			isa = PBXGroup;
-			children = (
-				1D34D6C3259AA0AF00167241 /* Info.plist */,
-				1D34D69D259477BB00167241 /* main.m */,
-				1D34D6A62594C89500167241 /* ReplayAction.h */,
-				1D34D6B72597645400167241 /* ReplayServer.h */,
-				1D34D6AA2594CA7A00167241 /* ActionFromName.m */,
-				1DA1150025B31B5800C0C6A5 /* LogStream.c */,
-				1DA114FF25B31B5800C0C6A5 /* LogStream.h */,
-				1DA1153425B5AC0200C0C6A5 /* xcconfigs */,
-			);
-			path = dispatch;
 			sourceTree = "<group>";
 		};
 		1DA1153425B5AC0200C0C6A5 /* xcconfigs */ = {
@@ -106,6 +122,12 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1DA1CA5E2F7C424F000F2E31 /* common */,
+				1DA1CA742F7C42B7000F2E31 /* replay */,
+				1DA1CA812F7C430C000F2E31 /* dispatch */,
+				1DA1CA872F7C4362000F2E31 /* file-tree */,
 			);
 			name = dispatch;
 			productName = dispatch;
@@ -148,9 +170,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1DA1150125B31B5800C0C6A5 /* LogStream.c in Sources */,
-				1D34D6AB2594CA7B00167241 /* ActionFromName.m in Sources */,
-				1D34D69E259477BB00167241 /* main.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

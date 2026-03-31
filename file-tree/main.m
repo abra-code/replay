@@ -20,7 +20,7 @@ SetProducerForFilePath(FileNode *parentNode, const char *filePath, uint64_t prod
 
 
 NSArray<NSString *> *
-AllFilesInUserLibrary()
+AllFilesInUserLibrary(void)
 {
 	NSMutableArray<NSString *> *itemArray = [NSMutableArray arrayWithCapacity:0];
 	NSString *libraryDir = [NSHomeDirectory() stringByAppendingPathComponent:  @"Library"];

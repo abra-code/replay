@@ -3,17 +3,8 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 50;
+	objectVersion = 70;
 	objects = {
-
-/* Begin PBXBuildFile section */
-		1D34D68F2590410F00167241 /* FileTree.c in Sources */ = {isa = PBXBuildFile; fileRef = 1D34D68E2590410F00167241 /* FileTree.c */; };
-		1D44722625045B7F00AD4746 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D44722525045B7F00AD4746 /* main.m */; };
-		1D79DF212506338200089548 /* TaskScheduler.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D79DF202506338200089548 /* TaskScheduler.m */; };
-		1DA1151025B31BAD00C0C6A5 /* LogStream.c in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1150F25B31BAD00C0C6A5 /* LogStream.c */; };
-		1DA1151D25B4350500C0C6A5 /* AsyncDispatch.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DA1151B25B4350500C0C6A5 /* AsyncDispatch.m */; };
-		1DB8C3AF2517600C008B9BF9 /* TaskProxy.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1DB8C3AD2517600C008B9BF9 /* TaskProxy.mm */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		1D44722025045B7F00AD4746 /* CopyFiles */ = {
@@ -28,20 +19,41 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		1D34D68E2590410F00167241 /* FileTree.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = FileTree.c; path = FileTree/FileTree.c; sourceTree = "<group>"; };
-		1D3FFEE8254EAB320076E19C /* FileTree.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = FileTree.h; path = FileTree/FileTree.h; sourceTree = "<group>"; };
 		1D44722225045B7F00AD4746 /* scheduler */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = scheduler; sourceTree = BUILT_PRODUCTS_DIR; };
-		1D44722525045B7F00AD4746 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = main.m; path = scheduler/main.m; sourceTree = "<group>"; };
-		1D79DF1F2506338100089548 /* TaskScheduler.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskScheduler.h; sourceTree = "<group>"; };
-		1D79DF202506338200089548 /* TaskScheduler.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskScheduler.m; sourceTree = "<group>"; };
-		1DA1150E25B31BAD00C0C6A5 /* LogStream.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LogStream.h; sourceTree = "<group>"; };
-		1DA1150F25B31BAD00C0C6A5 /* LogStream.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LogStream.c; sourceTree = "<group>"; };
-		1DA1151B25B4350500C0C6A5 /* AsyncDispatch.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = AsyncDispatch.m; sourceTree = "<group>"; };
-		1DA1151C25B4350500C0C6A5 /* AsyncDispatch.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AsyncDispatch.h; sourceTree = "<group>"; };
-		1DB8C3AD2517600C008B9BF9 /* TaskProxy.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = TaskProxy.mm; sourceTree = "<group>"; };
-		1DB8C3AE2517600C008B9BF9 /* TaskProxy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskProxy.h; sourceTree = "<group>"; };
-		1DB8C3C925181858008B9BF9 /* MedusaTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MedusaTask.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1DDD18812F7C3CEA00DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				globoverlap.cpp,
+			);
+			target = 1D44722125045B7F00AD4746 /* scheduler */;
+		};
+		1DDD18822F7C3CF300DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				main.m,
+			);
+			target = 1D44722125045B7F00AD4746 /* scheduler */;
+		};
+		1DDD18832F7C3CFA00DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				main.mm,
+			);
+			target = 1D44722125045B7F00AD4746 /* scheduler */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		1DDD181E2F7C3B1700DB718A /* scheduler */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = scheduler; sourceTree = "<group>"; };
+		1DDD18262F7C3B3C00DB718A /* common */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = common; sourceTree = "<group>"; };
+		1DDD182D2F7C3B6200DB718A /* file-tree */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DDD18822F7C3CF300DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "file-tree"; sourceTree = "<group>"; };
+		1DDD18392F7C3B9500DB718A /* medusa-objc */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DDD18832F7C3CFA00DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "medusa-objc"; sourceTree = "<group>"; };
+		1DDD18432F7C3BF600DB718A /* glob-overlap */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DDD18812F7C3CEA00DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "glob-overlap"; sourceTree = "<group>"; };
+		1DDD184B2F7C3C1C00DB718A /* glob-cpp */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "glob-cpp"; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		1D44721F25045B7F00AD4746 /* Frameworks */ = {
@@ -57,18 +69,12 @@
 		1D44721925045B7F00AD4746 = {
 			isa = PBXGroup;
 			children = (
-				1D44722525045B7F00AD4746 /* main.m */,
-				1D3FFEE8254EAB320076E19C /* FileTree.h */,
-				1D34D68E2590410F00167241 /* FileTree.c */,
-				1DB8C3C925181858008B9BF9 /* MedusaTask.h */,
-				1DB8C3AE2517600C008B9BF9 /* TaskProxy.h */,
-				1DB8C3AD2517600C008B9BF9 /* TaskProxy.mm */,
-				1D79DF1F2506338100089548 /* TaskScheduler.h */,
-				1D79DF202506338200089548 /* TaskScheduler.m */,
-				1DA1150F25B31BAD00C0C6A5 /* LogStream.c */,
-				1DA1150E25B31BAD00C0C6A5 /* LogStream.h */,
-				1DA1151C25B4350500C0C6A5 /* AsyncDispatch.h */,
-				1DA1151B25B4350500C0C6A5 /* AsyncDispatch.m */,
+				1DDD181E2F7C3B1700DB718A /* scheduler */,
+				1DDD18392F7C3B9500DB718A /* medusa-objc */,
+				1DDD182D2F7C3B6200DB718A /* file-tree */,
+				1DDD18262F7C3B3C00DB718A /* common */,
+				1DDD184B2F7C3C1C00DB718A /* glob-cpp */,
+				1DDD18432F7C3BF600DB718A /* glob-overlap */,
 				1D44722325045B7F00AD4746 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -95,6 +101,14 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1DDD181E2F7C3B1700DB718A /* scheduler */,
+				1DDD18262F7C3B3C00DB718A /* common */,
+				1DDD182D2F7C3B6200DB718A /* file-tree */,
+				1DDD18392F7C3B9500DB718A /* medusa-objc */,
+				1DDD18432F7C3BF600DB718A /* glob-overlap */,
+				1DDD184B2F7C3C1C00DB718A /* glob-cpp */,
 			);
 			name = scheduler;
 			productName = scheduler;
@@ -138,12 +152,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1DA1151D25B4350500C0C6A5 /* AsyncDispatch.m in Sources */,
-				1D79DF212506338200089548 /* TaskScheduler.m in Sources */,
-				1D44722625045B7F00AD4746 /* main.m in Sources */,
-				1DA1151025B31BAD00C0C6A5 /* LogStream.c in Sources */,
-				1DB8C3AF2517600C008B9BF9 /* TaskProxy.mm in Sources */,
-				1D34D68F2590410F00167241 /* FileTree.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -156,7 +164,7 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++23";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
@@ -186,7 +194,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_C_LANGUAGE_STANDARD = gnu23;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
@@ -214,7 +222,7 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++23";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
@@ -244,7 +252,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_C_LANGUAGE_STANDARD = gnu23;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
