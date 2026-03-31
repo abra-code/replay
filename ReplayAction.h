@@ -56,6 +56,10 @@ typedef void (^action_handler_t)(__nullable dispatch_block_t action,
 								NSArray<NSString*> * __nullable exclusiveInputs,
 								NSArray<NSString*> * __nullable outputs);
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 Action ActionFromName(NSString *actionName, bool *isSrcDestActionPtr);
 NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen);
 void HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler);
@@ -69,5 +73,9 @@ bool CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *acti
 bool DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext);
 bool ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext);
 bool Echo(NSString *content, ReplayContext *context, ActionContext *actionContext);
+
+#ifdef __cplusplus
+}
+#endif
 
 NS_ASSUME_NONNULL_END

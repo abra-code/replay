@@ -2,6 +2,11 @@
 #import "ReplayAction.h"
 #import "StringAndPath.h"
 #import "OutputSerializer.h"
+#include "GlobOverlap.h"
+#include <fts.h>
+#include <sys/stat.h>
+#include <vector>
+#include <string>
 
 //a helper class to ensure atomic access to shared NSError from multiple threads
 @implementation AtomicError
@@ -131,6 +136,92 @@ NSArray<NSString*> *PathArrayFromFileURL(NSURL *inURL)
 	return nil;
 }
 
+// ============================================================================
+// Filesystem glob expansion
+//
+// Expands an absolute glob pattern (e.g. /Users/foo/build/**/*.o) into a list
+// of matching file paths by walking the filesystem with fts_read.
+// The pattern is split into a concrete directory prefix (longest path with no
+// metacharacters) and a glob suffix matched against relative paths from there.
+// ============================================================================
+
+static std::string concrete_prefix_of_glob(const std::string& pattern) {
+	// Find the last '/' before the first metacharacter
+	size_t meta_pos = std::string::npos;
+	for (size_t i = 0; i < pattern.size(); i++) {
+		char c = pattern[i];
+		if (c == '*' || c == '?' || c == '[' || c == '{') {
+			meta_pos = i;
+			break;
+		}
+	}
+	if (meta_pos == std::string::npos)
+		return pattern; // no metacharacters — entire path is concrete
+
+	size_t last_slash = pattern.rfind('/', meta_pos);
+	if (last_slash == std::string::npos)
+		return ".";
+	return pattern.substr(0, last_slash);
+}
+
+static std::vector<std::string> expand_glob_on_filesystem(const std::string& pattern) {
+	std::vector<std::string> results;
+
+	std::string base_dir = concrete_prefix_of_glob(pattern);
+	// The glob suffix is the pattern relative to base_dir
+	std::string glob_suffix = pattern.substr(base_dir.size());
+	if (!glob_suffix.empty() && glob_suffix[0] == '/')
+		glob_suffix = glob_suffix.substr(1);
+
+	if (glob_suffix.empty()) {
+		// No glob — pattern is a concrete path, just return it if it exists
+		struct stat st;
+		if (stat(pattern.c_str(), &st) == 0)
+			results.push_back(pattern);
+		return results;
+	}
+
+	// Compile the glob suffix for matching relative paths
+	// Lowercase both pattern and paths for case-insensitive matching (macOS APFS default)
+	std::string lowercase_suffix = glob_suffix;
+	std::transform(lowercase_suffix.begin(), lowercase_suffix.end(),
+				   lowercase_suffix.begin(), ::tolower);
+	glob::glob compiled_glob(lowercase_suffix);
+
+	char *paths[2] = { const_cast<char*>(base_dir.c_str()), nullptr };
+	FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, nullptr);
+	if (fts == nullptr)
+		return results;
+
+	FTSENT *ent;
+	while ((ent = fts_read(fts)) != nullptr) {
+		switch (ent->fts_info) {
+			case FTS_F:
+			case FTS_SL:
+			case FTS_SLNONE: {
+				const char *rel = ent->fts_path + base_dir.size();
+				if (*rel == '/') ++rel;
+
+				std::string lowercase_rel(rel);
+				std::transform(lowercase_rel.begin(), lowercase_rel.end(),
+							   lowercase_rel.begin(), ::tolower);
+
+				if (glob_match(lowercase_rel, compiled_glob))
+					results.emplace_back(ent->fts_path);
+				break;
+			}
+			case FTS_ERR:
+			case FTS_DNR:
+				break;
+			default:
+				break;
+		}
+	}
+
+	fts_close(fts);
+	return results;
+}
+
 // this function resolves each step and calls provided actionHandler
 // one or more times for each action in the step
 // one step may have multiple actions like copying a list of files to one directory
@@ -161,29 +252,81 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		NSString *destinationPath = stepDescription[@"to"];
 		if([sourcePath isKindOfClass:stringClass] && [destinationPath isKindOfClass:stringClass])
 		{//simple one-to-one form
-			NSURL *sourceURL = nil;
-			NSURL *destinationURL = nil;
 			sourcePath = StringByExpandingEnvironmentVariablesWithErrorCheck(sourcePath, context);
-			if(sourcePath != nil)
-				sourceURL = [NSURL fileURLWithPath:sourcePath];
-			
 			destinationPath = StringByExpandingEnvironmentVariablesWithErrorCheck(destinationPath, context);
-			if(destinationPath != nil)
-				destinationURL = [NSURL fileURLWithPath:destinationPath];
-			
-			// handles nil sourceURL or destinationURL by skipping action
-			NSInteger actionIndex = ++(context->actionCounter);
-			action = CreateSourceDestinationAction(replayAction, sourceURL, destinationURL, context, stepDescription, actionIndex);
-			
-			if(context->concurrent)
+			if(sourcePath == nil || destinationPath == nil)
 			{
-				if(replayAction == kFileActionMove)
-					exclusiveInputs = PathArrayFromFileURL(sourceURL);
-				else
-					inputs = PathArrayFromFileURL(sourceURL);
-				outputs = PathArrayFromFileURL(destinationURL);
+				actionHandler(nil, nil, nil, nil);
 			}
-			actionHandler(action, inputs, exclusiveInputs, outputs);
+			else if(globoverlap::is_glob_pattern(std::string([sourcePath UTF8String])))
+			{
+				// Glob source: expand at execution time, act on each match.
+				// "to" is treated as destination directory (multiple sources to one dir).
+				NSString *globPattern = sourcePath;
+				NSURL *destinationDirURL = [NSURL fileURLWithPath:destinationPath isDirectory:YES];
+				NSInteger actionIndex = ++(context->actionCounter);
+				Action capturedAction = replayAction;
+
+				action = ^{ @autoreleasepool {
+					std::string pattern([globPattern UTF8String]);
+					auto matches = expand_glob_on_filesystem(pattern);
+					if(matches.empty())
+					{
+						NSString *errStr = [NSString stringWithFormat:
+							@"error: glob pattern \"%@\" matched no files\n", globPattern];
+						PrintToStdErr(context, errStr);
+						NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+						context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+						return;
+					}
+					for(const auto& match : matches)
+					{
+						if(context->stopOnError && (context->lastError.error != nil))
+							break;
+						NSString *matchPath = [NSString stringWithUTF8String:match.c_str()];
+						NSURL *srcURL = [NSURL fileURLWithPath:matchPath];
+						NSString *fileName = [matchPath lastPathComponent];
+						NSURL *destURL = [destinationDirURL URLByAppendingPathComponent:fileName];
+						ActionContext localContext = { .settings = stepDescription, .index = actionIndex };
+						switch(capturedAction) {
+							case kFileActionClone:    CloneItem(srcURL, destURL, context, &localContext); break;
+							case kFileActionMove:     MoveItem(srcURL, destURL, context, &localContext); break;
+							case kFileActionHardlink: HardlinkItem(srcURL, destURL, context, &localContext); break;
+							default: break;
+						}
+					}
+				}};
+
+				if(context->concurrent)
+				{
+					// The glob pattern is the input for dependency analysis
+					if(replayAction == kFileActionMove)
+						exclusiveInputs = @[globPattern];
+					else
+						inputs = @[globPattern];
+					outputs = PathArrayFromFileURL(destinationDirURL);
+				}
+				actionHandler(action, inputs, exclusiveInputs, outputs);
+			}
+			else
+			{
+				// Concrete source path — original behavior
+				NSURL *sourceURL = [NSURL fileURLWithPath:sourcePath];
+				NSURL *destinationURL = [NSURL fileURLWithPath:destinationPath];
+
+				NSInteger actionIndex = ++(context->actionCounter);
+				action = CreateSourceDestinationAction(replayAction, sourceURL, destinationURL, context, stepDescription, actionIndex);
+
+				if(context->concurrent)
+				{
+					if(replayAction == kFileActionMove)
+						exclusiveInputs = PathArrayFromFileURL(sourceURL);
+					else
+						inputs = PathArrayFromFileURL(sourceURL);
+					outputs = PathArrayFromFileURL(destinationURL);
+				}
+				actionHandler(action, inputs, exclusiveInputs, outputs);
+			}
 		}
 		else
 		{//multiple items to destination directory form
@@ -191,24 +334,77 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			NSString *destinationDirPath = stepDescription[@"destination directory"];
 			if([itemPaths isKindOfClass:arrayClass] && [destinationDirPath isKindOfClass:stringClass])
 			{
-				NSArray<NSURL*> *srcItemURLs = ItemPathsToURLs(itemPaths, context);
-				if(srcItemURLs != nil)
+				NSURL *destinationDirectoryURL = nil;
+				NSString *expandedDestinationDirPath = StringByExpandingEnvironmentVariablesWithErrorCheck(destinationDirPath, context);
+				if(expandedDestinationDirPath != nil)
+					destinationDirectoryURL = [NSURL fileURLWithPath:expandedDestinationDirPath isDirectory:YES];
+
+				for(NSString *onePath in itemPaths)
 				{
-					NSURL *destinationDirectoryURL = nil;
-					NSString *expandedDestinationDirPath = StringByExpandingEnvironmentVariablesWithErrorCheck(destinationDirPath, context);
-					if(expandedDestinationDirPath != nil)
-						destinationDirectoryURL = [NSURL fileURLWithPath:expandedDestinationDirPath isDirectory:YES];
-					
-					//handles nil destinationDirectoryURL by returning empty array
-					NSArray<NSURL*> *destItemURLs = GetDestinationsForMultipleItems(srcItemURLs, destinationDirectoryURL, context);
-					NSUInteger destIndex = 0;
-					for(NSURL *srcItemURL in srcItemURLs)
+					NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(onePath, context);
+					if(expandedPath == nil)
 					{
-						NSURL *destinationURL = [destItemURLs objectAtIndex:destIndex];
-						++destIndex;
+						if(context->stopOnError)
+							break;
+						continue;
+					}
+
+					if(globoverlap::is_glob_pattern(std::string([expandedPath UTF8String])))
+					{
+						// Glob item: expand at execution time, act on each match
+						NSString *globPattern = expandedPath;
+						NSInteger actionIndex = ++(context->actionCounter);
+						Action capturedAction = replayAction;
+
+						action = ^{ @autoreleasepool {
+							std::string pattern([globPattern UTF8String]);
+							auto matches = expand_glob_on_filesystem(pattern);
+							if(matches.empty())
+							{
+								NSString *errStr = [NSString stringWithFormat:
+									@"error: glob pattern \"%@\" matched no files\n", globPattern];
+								PrintToStdErr(context, errStr);
+								NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+								context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+								return;
+							}
+							for(const auto& match : matches)
+							{
+								if(context->stopOnError && (context->lastError.error != nil))
+									break;
+								NSString *matchPath = [NSString stringWithUTF8String:match.c_str()];
+								NSURL *srcURL = [NSURL fileURLWithPath:matchPath];
+								NSString *fileName = [matchPath lastPathComponent];
+								NSURL *destURL = [destinationDirectoryURL URLByAppendingPathComponent:fileName];
+								ActionContext localContext = { .settings = stepDescription, .index = actionIndex };
+								switch(capturedAction) {
+									case kFileActionClone:    CloneItem(srcURL, destURL, context, &localContext); break;
+									case kFileActionMove:     MoveItem(srcURL, destURL, context, &localContext); break;
+									case kFileActionHardlink: HardlinkItem(srcURL, destURL, context, &localContext); break;
+									default: break;
+								}
+							}
+						}};
+
+						if(context->concurrent)
+						{
+							if(replayAction == kFileActionMove)
+								exclusiveInputs = @[globPattern];
+							else
+								inputs = @[globPattern];
+							outputs = PathArrayFromFileURL(destinationDirectoryURL);
+						}
+						actionHandler(action, inputs, exclusiveInputs, outputs);
+					}
+					else
+					{
+						// Concrete item — original behavior
+						NSURL *srcItemURL = [NSURL fileURLWithPath:expandedPath];
+						NSString *fileName = [expandedPath lastPathComponent];
+						NSURL *destinationURL = [destinationDirectoryURL URLByAppendingPathComponent:fileName];
 						NSInteger actionIndex = ++(context->actionCounter);
 						action = CreateSourceDestinationAction(replayAction, srcItemURL, destinationURL, context, stepDescription, actionIndex);
-						
+
 						if(context->concurrent)
 						{
 							if(replayAction == kFileActionMove)
@@ -235,19 +431,57 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(onePath, context);
 					if(expandedPath != nil)
 					{
-						NSURL *oneURL = [NSURL fileURLWithPath:expandedPath];
-						NSInteger actionIndex = ++(context->actionCounter);
-                        action = ^{ @autoreleasepool {
-							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
-							__unused bool isOK = DeleteItem(oneURL, context, &actionContext);
-						
-                        }};
-						
-						if(context->concurrent)
+						if(globoverlap::is_glob_pattern(std::string([expandedPath UTF8String])))
 						{
-							exclusiveInputs = PathArrayFromFileURL(oneURL);
+							// Glob item: expand at execution time, delete each match
+							NSString *globPattern = expandedPath;
+							NSInteger actionIndex = ++(context->actionCounter);
+
+							action = ^{ @autoreleasepool {
+								std::string pattern([globPattern UTF8String]);
+								auto matches = expand_glob_on_filesystem(pattern);
+								if(matches.empty())
+								{
+									NSString *errStr = [NSString stringWithFormat:
+										@"error: glob pattern \"%@\" matched no files\n", globPattern];
+									PrintToStdErr(context, errStr);
+									NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+									context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+									return;
+								}
+								for(const auto& match : matches)
+								{
+									if(context->stopOnError && (context->lastError.error != nil))
+										break;
+									NSString *matchPath = [NSString stringWithUTF8String:match.c_str()];
+									NSURL *matchURL = [NSURL fileURLWithPath:matchPath];
+									ActionContext localContext = { .settings = stepDescription, .index = actionIndex };
+									__unused bool isOK = DeleteItem(matchURL, context, &localContext);
+								}
+							}};
+
+							if(context->concurrent)
+							{
+								exclusiveInputs = @[globPattern];
+							}
+							actionHandler(action, nil, exclusiveInputs, nil);
 						}
-						actionHandler(action,  nil, exclusiveInputs, nil);
+						else
+						{
+							// Concrete item — original behavior
+							NSURL *oneURL = [NSURL fileURLWithPath:expandedPath];
+							NSInteger actionIndex = ++(context->actionCounter);
+							action = ^{ @autoreleasepool {
+								ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+								__unused bool isOK = DeleteItem(oneURL, context, &actionContext);
+							}};
+
+							if(context->concurrent)
+							{
+								exclusiveInputs = PathArrayFromFileURL(oneURL);
+							}
+							actionHandler(action, nil, exclusiveInputs, nil);
+						}
 					}
 					else if(context->stopOnError)
 					{ // one invalid path stops all actions

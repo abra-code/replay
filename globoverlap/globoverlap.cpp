@@ -3,7 +3,7 @@
 
 // ============================================================================
 // CLI test tool for glob pattern overlap detection.
-// Uses replay::patterns_overlap() from GlobOverlap.h.
+// Uses globoverlap::patterns_overlap() from GlobOverlap.h.
 // See test_overlap.sh for the test suite.
 // ============================================================================
 

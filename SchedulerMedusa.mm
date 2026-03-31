@@ -6,8 +6,9 @@
 //
 
 #import "SchedulerMedusa.h"
-#import "TaskProxy.h"
+#import "TaskProxyGlob.h"
 #include "LogStream.h"
+#include "GlobOverlap.h"
 
 //#define TRACE 1
 
@@ -76,8 +77,8 @@ static void FileNodeCFSetConnector(const void *value, void *inParentContext)
 		{
 			//override the parent values if our node has changed something and has new values to pass to child nodes
 			(node->producer != NULL)      ? (__bridge __unsafe_unretained id<MedusaTask>)node->producer : parentContext->parentNodeTask,
-			(node->isExclusiveInput != 0) ? 1 : parentContext->parentIsExclusiveInput,
-			(node->hasConsumer != 0)      ? 1 : parentContext->parentHasConsumer
+			(node->isExclusiveInput != 0) ? (uint8_t)1 : parentContext->parentIsExclusiveInput,
+			(node->hasConsumer != 0)      ? (uint8_t)1 : parentContext->parentHasConsumer
 		};
 
 		CFSetApplyFunction(node->children, FileNodeCFSetConnector, &visitorContext);
@@ -101,8 +102,8 @@ ConnectImplicitProducers(FileNode *treeRoot)
 		FileNodeVisitorContext visitorContext =
 		{
 			(__bridge __unsafe_unretained id<MedusaTask>)treeRoot->producer,
-			treeRoot->isExclusiveInput != 0,
-			treeRoot->hasConsumer != 0
+			(uint8_t)(treeRoot->isExclusiveInput != 0),
+			(uint8_t)(treeRoot->hasConsumer != 0)
 		};
 		CFSetApplyFunction(treeRoot->children, FileNodeCFSetConnector, &visitorContext);
 	}
@@ -187,5 +188,126 @@ ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *allTasks, //input li
     printf("All input count %lu\n", all_input_count);
     printf("Static input count %lu\n", static_input_count);
 #endif //TRACE
+}
+
+// ============================================================================
+// Glob-based dependency connection
+//
+// Handles three cases for dependencies that can't be resolved via the FileTree:
+//   Case 1: glob output to glob input — use NFA product construction to detect overlap
+//   Case 2: concrete output to glob input — use glob_match to check if concrete path matches
+//   Case 3: glob output to concrete input — use glob_match to check if concrete path matches
+//
+// For each overlapping pair, the producer task is linked to the consumer task
+// via [producerTask linkNextTask:consumerTask].
+// ============================================================================
+
+// Helper: check if a concrete path matches a glob pattern using glob-cpp
+static bool concrete_matches_glob(const std::string& concretePath, const std::string& pattern) {
+	glob::glob g(pattern);
+	return glob_match(concretePath, g);
+}
+
+void
+ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
+{
+#if TRACE
+	printf("Connecting glob dependencies\n");
+	clock_t begin = clock();
+#endif
+
+	for(__unsafe_unretained TaskProxy *consumerTask in allTasks)
+	{
+		const auto& globInputs = [consumerTask globInputs];
+		const auto& globExclusiveInputs = [consumerTask globExclusiveInputs];
+
+		if(globInputs.empty() && globExclusiveInputs.empty())
+			continue;
+
+		// Check both regular and exclusive glob inputs against all producers.
+		// The exclusive vs regular distinction doesn't matter for producer→consumer linking.
+		const std::vector<std::string>* inputSets[] = { &globInputs, &globExclusiveInputs };
+		for(const auto* inputSet : inputSets)
+		{
+			for(const auto& inputPattern : *inputSet)
+			{
+				for(__unsafe_unretained TaskProxy *producerTask in allTasks)
+				{
+					if(producerTask == consumerTask)
+						continue;
+
+					// Case 1: check producer's glob outputs against this glob input
+					const auto& producerGlobOutputs = [producerTask globOutputs];
+					for(const auto& outputPattern : producerGlobOutputs)
+					{
+						if(globoverlap::patterns_overlap(outputPattern, inputPattern))
+						{
+							[producerTask linkNextTask:consumerTask];
+							goto next_producer; // one link is enough per producer-consumer pair
+						}
+					}
+
+					// Case 2: check producer's concrete outputs against this glob input
+					{
+						NSUInteger outputCount = producerTask.outputCount;
+						FileNode** outputs = producerTask.outputs;
+						for(NSUInteger i = 0; i < outputCount; i++)
+						{
+							char path[2048];
+							GetPathForNode(outputs[i], path, sizeof(path));
+							if(concrete_matches_glob(path, inputPattern))
+							{
+								[producerTask linkNextTask:consumerTask];
+								goto next_producer;
+							}
+						}
+					}
+
+					next_producer:;
+				}
+			}
+		}
+	}
+
+	// Also handle Case 3 in reverse: tasks with glob outputs need to be checked
+	// against tasks with concrete inputs (those were inserted into FileTree,
+	// but a glob output producer won't appear as a node producer there)
+	for(__unsafe_unretained TaskProxy *producerTask in allTasks)
+	{
+		const auto& globOutputs = [producerTask globOutputs];
+		if(globOutputs.empty())
+			continue;
+
+		for(const auto& outputPattern : globOutputs)
+		{
+			for(__unsafe_unretained TaskProxy *consumerTask in allTasks)
+			{
+				if(consumerTask == producerTask)
+					continue;
+
+				// Check if any concrete input of the consumer matches the glob output
+				NSUInteger inputCount = consumerTask.inputCount;
+				FileNode** inputs = consumerTask.inputs;
+				for(NSUInteger i = 0; i < inputCount; i++)
+				{
+					char path[2048];
+					GetPathForNode(inputs[i], path, sizeof(path));
+					if(concrete_matches_glob(path, outputPattern))
+					{
+						[producerTask linkNextTask:consumerTask];
+						goto next_consumer;
+					}
+				}
+
+				next_consumer:;
+			}
+		}
+	}
+
+#if TRACE
+	clock_t end = clock();
+	double seconds = (double)(end - begin) / CLOCKS_PER_SEC;
+	printf("Finished connecting glob dependencies in %f seconds\n", seconds);
+#endif
 }
 

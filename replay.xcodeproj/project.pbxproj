@@ -3,16 +3,16 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 50;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		1D1212EA25576DA800E46A72 /* SchedulerMedusa.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D1212E925576DA800E46A72 /* SchedulerMedusa.m */; };
+		1D1212EA25576DA800E46A72 /* SchedulerMedusa.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1D1212E925576DA800E46A72 /* SchedulerMedusa.mm */; };
 		1D1212F325576E0400E46A72 /* FileTree.c in Sources */ = {isa = PBXBuildFile; fileRef = 1D1212F125576E0400E46A72 /* FileTree.c */; };
 		1D1212F82557725B00E46A72 /* TaskScheduler.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D1212F72557725B00E46A72 /* TaskScheduler.m */; };
-		1D1212FC2557726900E46A72 /* TaskProxy.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D1212FA2557726900E46A72 /* TaskProxy.m */; };
-		1D1213012557B5BA00E46A72 /* ReplayAction.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D1213002557B5BA00E46A72 /* ReplayAction.m */; };
-		1D1213072557C08000E46A72 /* ReplayTask.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D1213062557C08000E46A72 /* ReplayTask.m */; };
+		1D1212FC2557726900E46A72 /* TaskProxy.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1D1212FA2557726900E46A72 /* TaskProxy.mm */; };
+		1D1213012557B5BA00E46A72 /* ReplayAction.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1D1213002557B5BA00E46A72 /* ReplayAction.mm */; };
+		1D1213072557C08000E46A72 /* ReplayTask.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1D1213062557C08000E46A72 /* ReplayTask.mm */; };
 		1D12130C2557C54B00E46A72 /* SerialDispatch.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D12130B2557C54B00E46A72 /* SerialDispatch.m */; };
 		1D1213102557CC7300E46A72 /* StringAndPath.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D12130F2557CC7300E46A72 /* StringAndPath.m */; };
 		1D19043824DE9EE900276D83 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D19043724DE9EE900276D83 /* main.m */; };
@@ -38,18 +38,18 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		1D1212E925576DA800E46A72 /* SchedulerMedusa.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SchedulerMedusa.m; sourceTree = "<group>"; };
+		1D1212E925576DA800E46A72 /* SchedulerMedusa.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = SchedulerMedusa.mm; sourceTree = "<group>"; };
 		1D1212EC25576DB000E46A72 /* SchedulerMedusa.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SchedulerMedusa.h; sourceTree = "<group>"; };
 		1D1212F125576E0400E46A72 /* FileTree.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = FileTree.c; path = FileTree/FileTree.c; sourceTree = "<group>"; };
 		1D1212F225576E0400E46A72 /* FileTree.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = FileTree.h; path = FileTree/FileTree.h; sourceTree = "<group>"; };
 		1D1212F62557725B00E46A72 /* TaskScheduler.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskScheduler.h; sourceTree = "<group>"; };
 		1D1212F72557725B00E46A72 /* TaskScheduler.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskScheduler.m; sourceTree = "<group>"; };
-		1D1212FA2557726900E46A72 /* TaskProxy.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TaskProxy.m; sourceTree = "<group>"; };
+		1D1212FA2557726900E46A72 /* TaskProxy.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = TaskProxy.mm; sourceTree = "<group>"; };
 		1D1212FB2557726900E46A72 /* TaskProxy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskProxy.h; sourceTree = "<group>"; };
-		1D1213002557B5BA00E46A72 /* ReplayAction.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ReplayAction.m; sourceTree = "<group>"; };
+		1D1213002557B5BA00E46A72 /* ReplayAction.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ReplayAction.mm; sourceTree = "<group>"; };
 		1D1213032557B5F200E46A72 /* ReplayAction.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ReplayAction.h; sourceTree = "<group>"; };
 		1D1213052557C08000E46A72 /* ReplayTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ReplayTask.h; sourceTree = "<group>"; };
-		1D1213062557C08000E46A72 /* ReplayTask.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ReplayTask.m; sourceTree = "<group>"; };
+		1D1213062557C08000E46A72 /* ReplayTask.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ReplayTask.mm; sourceTree = "<group>"; };
 		1D12130A2557C54B00E46A72 /* SerialDispatch.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SerialDispatch.h; sourceTree = "<group>"; };
 		1D12130B2557C54B00E46A72 /* SerialDispatch.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SerialDispatch.m; sourceTree = "<group>"; };
 		1D12130E2557CC7300E46A72 /* StringAndPath.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = StringAndPath.h; sourceTree = "<group>"; };
@@ -74,9 +74,25 @@
 		1DA1152225B5A35700C0C6A5 /* ReplayProjectDebug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectDebug.xcconfig; sourceTree = "<group>"; };
 		1DA1152625B5A77B00C0C6A5 /* ReplayTargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayTargetCommon.xcconfig; sourceTree = "<group>"; };
 		1DCA6EB4255BFCC60063BBBD /* MedusaTask.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MedusaTask.h; sourceTree = "<group>"; };
+		1DDD16C62F7917A300DB718A /* TaskProxyGlob.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = TaskProxyGlob.h; sourceTree = "<group>"; };
 		1DFE39EF257D98E500BFE48E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		1DFE39F2257E26C000BFE48E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1DDD17A82F7B4E8100DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				globoverlap.cpp,
+			);
+			target = 1D19043324DE9EE900276D83 /* replay */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		1DDD17A62F7B4E7800DB718A /* globoverlap */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DDD17A82F7B4E8100DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = globoverlap; sourceTree = "<group>"; };
+		1DDD17AF2F7B4EBA00DB718A /* glob-cpp */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "glob-cpp"; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		1D19043124DE9EE900276D83 /* Frameworks */ = {
@@ -106,17 +122,18 @@
 				1D4B5FC5256E51500063F5E7 /* OutputSerializer.h */,
 				1D4B5FC6256E51500063F5E7 /* OutputSerializer.m */,
 				1D1213032557B5F200E46A72 /* ReplayAction.h */,
-				1D1213002557B5BA00E46A72 /* ReplayAction.m */,
+				1D1213002557B5BA00E46A72 /* ReplayAction.mm */,
 				1D34D6A72594CA3400167241 /* ActionFromName.m */,
 				1D1213052557C08000E46A72 /* ReplayTask.h */,
-				1D1213062557C08000E46A72 /* ReplayTask.m */,
+				1D1213062557C08000E46A72 /* ReplayTask.mm */,
 				1D1212EC25576DB000E46A72 /* SchedulerMedusa.h */,
-				1D1212E925576DA800E46A72 /* SchedulerMedusa.m */,
+				1D1212E925576DA800E46A72 /* SchedulerMedusa.mm */,
 				1D1212F62557725B00E46A72 /* TaskScheduler.h */,
 				1D1212F72557725B00E46A72 /* TaskScheduler.m */,
 				1DCA6EB4255BFCC60063BBBD /* MedusaTask.h */,
+				1DDD16C62F7917A300DB718A /* TaskProxyGlob.h */,
 				1D1212FB2557726900E46A72 /* TaskProxy.h */,
-				1D1212FA2557726900E46A72 /* TaskProxy.m */,
+				1D1212FA2557726900E46A72 /* TaskProxy.mm */,
 				1D1212F225576E0400E46A72 /* FileTree.h */,
 				1D1212F125576E0400E46A72 /* FileTree.c */,
 				1D34D6B3259762F100167241 /* ActionStream.h */,
@@ -125,6 +142,8 @@
 				1D34D6AE2597607D00167241 /* ReplayServer.m */,
 				1DA114F925B2FBDD00C0C6A5 /* LogStream.c */,
 				1DA114FC25B2FBE300C0C6A5 /* LogStream.h */,
+				1DDD17AF2F7B4EBA00DB718A /* glob-cpp */,
+				1DDD17A62F7B4E7800DB718A /* globoverlap */,
 				1DA1151F25B5A35700C0C6A5 /* xcconfigs */,
 				1D19043524DE9EE900276D83 /* Products */,
 			);
@@ -163,6 +182,10 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1DDD17A62F7B4E7800DB718A /* globoverlap */,
+				1DDD17AF2F7B4EBA00DB718A /* glob-cpp */,
 			);
 			name = replay;
 			productName = replay;
@@ -208,11 +231,11 @@
 			files = (
 				1D34D6AF2597607D00167241 /* ReplayServer.m in Sources */,
 				1D4B5FC7256E51500063F5E7 /* OutputSerializer.m in Sources */,
-				1D1212EA25576DA800E46A72 /* SchedulerMedusa.m in Sources */,
+				1D1212EA25576DA800E46A72 /* SchedulerMedusa.mm in Sources */,
 				1D1213102557CC7300E46A72 /* StringAndPath.m in Sources */,
 				1D1212F82557725B00E46A72 /* TaskScheduler.m in Sources */,
 				1D34D6B5259762F100167241 /* ActionStream.m in Sources */,
-				1D1213012557B5BA00E46A72 /* ReplayAction.m in Sources */,
+				1D1213012557B5BA00E46A72 /* ReplayAction.mm in Sources */,
 				1D74C1B1256B890D003EB527 /* ConcurrentDispatchWithNoDependency.m in Sources */,
 				1DA1151425B42F7B00C0C6A5 /* AsyncDispatch.m in Sources */,
 				1D34D6A82594CA3400167241 /* ActionFromName.m in Sources */,
@@ -220,8 +243,8 @@
 				1D1212F325576E0400E46A72 /* FileTree.c in Sources */,
 				1D12130C2557C54B00E46A72 /* SerialDispatch.m in Sources */,
 				1DA114FA25B2FBDD00C0C6A5 /* LogStream.c in Sources */,
-				1D1212FC2557726900E46A72 /* TaskProxy.m in Sources */,
-				1D1213072557C08000E46A72 /* ReplayTask.m in Sources */,
+				1D1212FC2557726900E46A72 /* TaskProxy.mm in Sources */,
+				1D1213072557C08000E46A72 /* ReplayTask.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

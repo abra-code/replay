@@ -6,13 +6,17 @@
 //
 
 #import <Foundation/Foundation.h>
-#import "TaskProxy.h"
+#import "TaskProxyGlob.h"
 #import "AsyncDispatch.h"
 #include "LogStream.h"
 
 //#define TRACE_PROXY 1
 
-@interface TaskProxy()
+@interface TaskProxy() {
+	std::vector<std::string> _globInputs;
+	std::vector<std::string> _globExclusiveInputs;
+	std::vector<std::string> _globOutputs;
+}
 	@property(nonatomic, strong, direct) NSMutableSet<TaskProxy*> *nextTasks;
 	@property(nonatomic, strong, direct) dispatch_block_t taskBlock;
 	@property(nonatomic, direct) NSInteger pendingDependenciesCount;
@@ -207,4 +211,17 @@
 }
 
 @end //@implementation TaskProxy
+
+@implementation TaskProxy (Glob)
+
+- (const std::vector<std::string>&)globInputs { return _globInputs; }
+- (void)setGlobInputs:(std::vector<std::string>)inputs { _globInputs = std::move(inputs); }
+
+- (const std::vector<std::string>&)globExclusiveInputs { return _globExclusiveInputs; }
+- (void)setGlobExclusiveInputs:(std::vector<std::string>)inputs { _globExclusiveInputs = std::move(inputs); }
+
+- (const std::vector<std::string>&)globOutputs { return _globOutputs; }
+- (void)setGlobOutputs:(std::vector<std::string>)outputs { _globOutputs = std::move(outputs); }
+
+@end
 

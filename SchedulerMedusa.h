@@ -19,6 +19,9 @@ void
 ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *all_medusas, //input list of all raw unconnected medusas
 								TaskProxy *rootTask);
 
+void
+ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks);
+
 #ifdef __cplusplus
 }
 #endif

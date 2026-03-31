@@ -1,7 +1,8 @@
 #import "ReplayTask.h"
-#import "TaskProxy.h"
+#import "TaskProxyGlob.h"
 #import "SchedulerMedusa.h"
 #import "TaskScheduler.h"
+#include "GlobOverlap.h"
 
 
 static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path, TaskProxy* producer, bool isExclusiveInput)
@@ -67,6 +68,13 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 			oneTask.stepDescription = replayStep;
 			[tasksFromStep addObject:oneTask];
 
+			// Classify each input/output path: glob patterns go to TaskProxy's glob properties
+			// for later overlap-based dependency analysis; concrete paths go into the FileTree
+			// as before for exact node-based dependency tracking.
+
+			std::vector<std::string> globInputList;
+			std::vector<std::string> globExclusiveInputList;
+
 			NSUInteger regularInputCount = 0;
 			if(inputs != nil)
 				regularInputCount = inputs.count;
@@ -79,30 +87,59 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 			FileNode** inputList = NULL;
 			if(totalInputCount > 0)
 			{
+				// Allocate for worst case (all concrete); actual count may be smaller
 				inputList = (FileNode**)malloc(sizeof(FileNode*) * totalInputCount);
-				oneTask.inputCount = totalInputCount;
-				oneTask.inputs = inputList;
 			}
-			
-			NSUInteger inputIndex = 0;
+
+			NSUInteger concreteInputIndex = 0;
 			if(inputs != nil)
 			{
 				for(NSString *oneInput in inputs)
 				{
-					inputList[inputIndex] = FileNodeFromPath(context->fileTreeRoot, oneInput, nil, false);
-					inputIndex++;
+					std::string path([oneInput UTF8String]);
+					if(globoverlap::is_glob_pattern(path))
+					{
+						globInputList.push_back(std::move(path));
+					}
+					else
+					{
+						inputList[concreteInputIndex] = FileNodeFromPath(context->fileTreeRoot, oneInput, nil, false);
+						concreteInputIndex++;
+					}
 				}
 			}
-			
+
 			if(exclusiveInputs != nil)
 			{
 				for(NSString *oneInput in exclusiveInputs)
 				{
-					inputList[inputIndex] = FileNodeFromPath(context->fileTreeRoot, oneInput, nil, true);
-					inputIndex++;
+					std::string path([oneInput UTF8String]);
+					if(globoverlap::is_glob_pattern(path))
+					{
+						globExclusiveInputList.push_back(std::move(path));
+					}
+					else
+					{
+						inputList[concreteInputIndex] = FileNodeFromPath(context->fileTreeRoot, oneInput, nil, true);
+						concreteInputIndex++;
+					}
 				}
 			}
-			assert(inputIndex == totalInputCount);
+
+			if(concreteInputIndex > 0)
+			{
+				oneTask.inputCount = concreteInputIndex;
+				oneTask.inputs = inputList;
+			}
+			else if(inputList != NULL)
+			{
+				free(inputList);
+			}
+
+			[oneTask setGlobInputs:std::move(globInputList)];
+			[oneTask setGlobExclusiveInputs:std::move(globExclusiveInputList)];
+
+			std::vector<std::string> globOutputList;
 
 			if(outputs != nil)
 			{
@@ -110,16 +147,33 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 				if(outputCount > 0)
 				{
 					FileNode** outputList = (FileNode**)malloc(sizeof(FileNode*) * outputCount);
-					NSUInteger i = 0;
+					NSUInteger concreteOutputIndex = 0;
 					for(NSString *oneOutput in outputs)
 					{
-						outputList[i] = FileNodeFromPath(context->fileTreeRoot, oneOutput, oneTask, false);
-						i++;
+						std::string path([oneOutput UTF8String]);
+						if(globoverlap::is_glob_pattern(path))
+						{
+							globOutputList.push_back(std::move(path));
+						}
+						else
+						{
+							outputList[concreteOutputIndex] = FileNodeFromPath(context->fileTreeRoot, oneOutput, oneTask, false);
+							concreteOutputIndex++;
+						}
 					}
-					oneTask.outputCount = outputCount;
-					oneTask.outputs = outputList;
+					if(concreteOutputIndex > 0)
+					{
+						oneTask.outputCount = concreteOutputIndex;
+						oneTask.outputs = outputList;
+					}
+					else
+					{
+						free(outputList);
+					}
 				}
 			}
+
+			[oneTask setGlobOutputs:std::move(globOutputList)];
 		});
 
 	return tasksFromStep;
@@ -130,6 +184,11 @@ static inline void
 ExecuteTasksWithScheduler(NSArray<TaskProxy*> *allTasks, ReplayContext *context, NSUInteger inputCount, NSUInteger outputCount)
 {
 	ConnectImplicitProducers(context->fileTreeRoot);
+
+	// Connect dependencies from glob patterns (glob↔glob via NFA product,
+	// concrete↔glob via glob_match). Must run before dynamic input connection
+	// so that glob-based dependencies are in place for scheduling.
+	ConnectGlobDependencies(allTasks);
 
 	TaskScheduler *scheduler = [[TaskScheduler alloc] initWithConcurrencyLimit:context->councurrencyLimit];
 
