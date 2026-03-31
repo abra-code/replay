@@ -1,0 +1,155 @@
+{
+  "glob output to glob input overlap":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["compiling"],
+      "outputs": ["build/**/*.o"]
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["linking"],
+      "inputs": ["build/**/*.o"],
+      "outputs": ["build/product"]
+    }
+  ],
+  "glob output to glob input no overlap":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["compiling"],
+      "outputs": ["build/**/*.o"]
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["linting"],
+      "inputs": ["src/**/*.h"]
+    }
+  ],
+  "concrete output to glob input":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["compile foo"],
+      "outputs": ["build/foo.o"]
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["link all"],
+      "inputs": ["build/*.o"]
+    }
+  ],
+  "glob output to concrete input":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["compile all"],
+      "outputs": ["build/**/*.o"]
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["check foo"],
+      "inputs": ["build/foo.o"]
+    }
+  ],
+  "mixed concrete and glob inputs":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["produce artifacts"],
+      "outputs": ["build/**/*.o", "build/manifest.txt"]
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["consume artifacts"],
+      "inputs": ["build/**/*.o", "build/manifest.txt"]
+    }
+  ],
+  "glob with braces":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["build libs"],
+      "outputs": ["build/**/*.{o,a,lib}"]
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["link libs"],
+      "inputs": ["build/**/*.a"]
+    }
+  ],
+  "glob exclusive inputs":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["produce output"],
+      "outputs": ["staging/**/*.dat"]
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["clean staging"],
+      "exclusive inputs": ["staging/**/*.dat"]
+    }
+  ],
+  "malformed glob treated as literal":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["step with bad glob"],
+      "inputs": ["build/[unclosed"],
+      "outputs": ["result.txt"]
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["another step"],
+      "inputs": ["result.txt"]
+    }
+  ],
+  "multiple glob outputs no false cycle":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["step A"],
+      "outputs": ["build/debug/**/*.o"]
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["step B"],
+      "inputs": ["build/debug/**/*.o"],
+      "outputs": ["build/release/**/*.o"]
+    },
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["step C"],
+      "inputs": ["build/release/**/*.o"]
+    }
+  ],
+  "glob only task with no producers still executes":
+  [
+    {
+      "action": "execute",
+      "tool": "/bin/echo",
+      "arguments": ["scan all sources"],
+      "inputs": ["src/**/*.cpp"]
+    }
+  ]
+}

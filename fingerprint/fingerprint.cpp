@@ -11,6 +11,7 @@
 #include <regex>
 #include <ctime>
 #include <map>
+#include <unordered_map>
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -22,6 +23,7 @@
 
 #include <fnmatch.h>
 #include "glob.h"
+#include "GlobOverlap.h"
 
 #include "blake3.h"
 
@@ -40,7 +42,6 @@ extern FileHashAlgorithm g_hash;
 extern XattrMode g_xattr_mode;
 
 extern bool g_verbose;
-extern bool g_test_perf;
 extern double g_traversal_time;
 
 std::atomic_bool s_exiting = false;
@@ -71,6 +72,15 @@ int
 fingerprint::get_result() noexcept
 {
     return s_result;
+}
+
+void
+fingerprint::reset() noexcept
+{
+    s_all_matched_files.clear();
+    s_search_bases.clear();
+    s_exiting = false;
+    s_result = EXIT_SUCCESS;
 }
 
 #if FINGERPRINT_USE_GLOB_CPP
@@ -194,6 +204,39 @@ static bool matches_any_regex(const std::string& relative_path,
             return true;
     }
     return false;
+}
+
+static bool path_exists_literal(const std::string& path) noexcept
+{
+    if (path.empty())
+        return false;
+
+    struct stat st{};
+    return lstat(path.c_str(), &st) == 0;
+}
+
+static std::vector<std::string> split_path_components(const std::string& path) noexcept
+{
+    std::vector<std::string> components;
+    if (path.empty()) return components;
+
+    size_t start = 0;
+    if (path[0] == '/') {
+        components.emplace_back("");
+        start = 1;
+    }
+
+    size_t pos;
+    while ((pos = path.find('/', start)) != std::string::npos) {
+        if (pos > start) {
+            components.emplace_back(path.substr(start, pos - start));
+        }
+        start = pos + 1;
+    }
+    if (start < path.length()) {
+        components.emplace_back(path.substr(start));
+    }
+    return components;
 }
 
 static inline __attribute__((always_inline))
@@ -695,6 +738,152 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
     return s_result;
 }
 
+
+int
+fingerprint::find_and_process_globbed_paths(const std::unordered_set<std::string>& paths) noexcept
+{
+    if (paths.empty())
+        return EXIT_SUCCESS;
+
+    std::unordered_set<std::string> plain_paths;
+    std::unordered_map<std::string, std::unordered_set<std::string>> dir_to_globs;
+
+    std::error_code ec;
+    std::filesystem::path base = std::filesystem::current_path(ec);
+    if (ec)
+    {
+        std::cerr << "Error: cannot get current directory: " << ec.message() << '\n';
+        s_result = EXIT_FAILURE;
+        return s_result;
+    }
+
+    for (const auto& path : paths)
+    {
+        if (is_exiting()) return s_result;
+
+        if (path_exists_literal(path))
+        {
+            // Literal path exists: it is plain file/dir/symlink (even if name contains * ? [)
+            plain_paths.insert(path);
+            continue;
+        }
+
+        if (!globoverlap::contains_glob_pattern_char(path))
+        {
+            // No glob characters and does not exist
+            std::cerr << "error: declared file does not exist: " << path << '\n';
+            s_result = EXIT_FAILURE;
+            return EXIT_FAILURE;
+        }
+
+        // === Glob case: split and verify the directory prefix exists ===
+        if (g_verbose)
+            std::cerr << "gate: treating as glob pattern: " << path << '\n';
+
+        auto components = split_path_components(path);
+        if (components.empty()) continue;
+
+        bool is_absolute = !components.empty() && components[0].empty();
+        size_t split_idx = is_absolute ? 1 : 0;
+
+        while (split_idx < components.size())
+        {
+            if (globoverlap::contains_glob_pattern_char(components[split_idx]))
+                break;
+            ++split_idx;
+        }
+
+        if (split_idx == components.size())
+        {
+            plain_paths.insert(path);
+            continue;
+        }
+
+        // Build literal directory prefix
+        std::string dir_part;
+        if (is_absolute)
+        {
+            dir_part = "/";
+            for (size_t i = 1; i < split_idx; ++i)
+            {
+                dir_part += components[i];
+                if (i + 1 < split_idx) dir_part += "/";
+            }
+        }
+        else
+        {
+            for (size_t i = 0; i < split_idx; ++i)
+            {
+                dir_part += components[i];
+                if (i + 1 < split_idx) dir_part += "/";
+            }
+        }
+
+        if (dir_part.empty())
+            dir_part = is_absolute ? "/" : ".";
+
+        // CRITICAL: the base directory for the glob MUST exist
+        if (!path_exists_literal(dir_part))
+        {
+            std::cerr << "error: glob base directory does not exist: " << dir_part 
+                      << " (from pattern: " << path << ")\n";
+            s_result = EXIT_FAILURE;
+            return EXIT_FAILURE;
+        }
+
+        // Build glob part
+        std::string glob_part;
+        for (size_t i = split_idx; i < components.size(); ++i)
+        {
+            if (!glob_part.empty()) glob_part += "/";
+            glob_part += components[i];
+        }
+        
+        bool is_well_formed_pattern = globoverlap::is_glob_pattern(glob_part);
+        if (!is_well_formed_pattern)
+        {
+            std::cerr << "error: malformed glob pattern: " << glob_part << "\n";
+            s_result = EXIT_FAILURE;
+            return EXIT_FAILURE;
+        }
+        
+        std::filesystem::path p_dir(dir_part);
+        std::filesystem::path abs_dir = p_dir.is_absolute()
+            ? p_dir.lexically_normal()
+            : (base / p_dir).lexically_normal();
+
+        dir_to_globs[abs_dir.string()].insert(std::move(glob_part));
+    }
+
+    // Plain paths
+    if (!plain_paths.empty())
+    {
+        __unused int plain_result = find_and_process_paths(plain_paths, {}, {});
+    }
+
+    // Glob paths
+    if (!dir_to_globs.empty())
+    {
+        dispatch_queue_t directory_traversal_queue = get_directory_traversal_queue();
+        dispatch_group_t task_group = get_all_tasks_group();
+
+        for (const auto& [search_dir_ref, globs_ref] : dir_to_globs)
+        {
+            if (is_exiting()) break;
+
+            std::string search_dir = search_dir_ref;
+            std::unordered_set<std::string> globs = globs_ref;
+
+            dispatch_group_async(task_group, directory_traversal_queue, ^{
+                if (is_exiting()) return;
+                __unused int find_result = find_files_internal(search_dir, globs, {});
+            });
+        }
+    }
+
+    return s_result;
+}
+
 // fts_read() is a solid choice for directory traversal
 // for crawling with retrival of additonal file attributes
 // and it does not require recursion in client code so stack depletion is not an issue
@@ -885,7 +1074,7 @@ struct ReversePathComparator
                 return a[i] < b[j];
             }
         }
-        return i > 0;  // a longer than b with common suffix → a > b
+        return i > 0;  // a longer than b with common suffix: a > b
     }
 };
 

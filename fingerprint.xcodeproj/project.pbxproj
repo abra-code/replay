@@ -8,11 +8,28 @@
 
 /* Begin PBXBuildFile section */
 		1D074CF12F443E17004AEAF6 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D074CF02F443E17004AEAF6 /* CoreFoundation.framework */; };
+		1DDD17072F7A0CAC00DB718A /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D074CF02F443E17004AEAF6 /* CoreFoundation.framework */; };
+		1DDD17082F7A0CAC00DB718A /* libfast-crc32.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DFF72592ECF2D5500860A62 /* libfast-crc32.a */; };
+		1DDD17092F7A0CAC00DB718A /* libblake3.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DFF72342ECF2B6C00860A62 /* libblake3.a */; };
 		1DFF72542ECF2BF100860A62 /* libblake3.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DFF72342ECF2B6C00860A62 /* libblake3.a */; };
 		1DFF725F2ECF2D6900860A62 /* libfast-crc32.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DFF72592ECF2D5500860A62 /* libfast-crc32.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		1DDD17022F7A0CAC00DB718A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1D7ED2962E9648EB003BA8A7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1DFF72582ECF2D5500860A62;
+			remoteInfo = "fast-crc32";
+		};
+		1DDD17042F7A0CAC00DB718A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1D7ED2962E9648EB003BA8A7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1DFF72332ECF2B6C00860A62;
+			remoteInfo = blake3;
+		};
 		1DFF72382ECF2B8F00860A62 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 1D7ED2962E9648EB003BA8A7 /* Project object */;
@@ -39,6 +56,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 		};
+		1DDD170A2F7A0CAC00DB718A /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +73,8 @@
 		1DBF0BB02EE02B1E00CB10C9 /* Blake3TargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Blake3TargetCommon.xcconfig; sourceTree = "<group>"; };
 		1DBF0BB12EE02C1F00CB10C9 /* FastCrc32TargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FastCrc32TargetCommon.xcconfig; sourceTree = "<group>"; };
 		1DBF0BDD2EE14D3000CB10C9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1DDD16FF2F7A0C9800DB718A /* GateTargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = GateTargetCommon.xcconfig; sourceTree = "<group>"; };
+		1DDD170E2F7A0CAC00DB718A /* gate */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = gate; sourceTree = BUILT_PRODUCTS_DIR; };
 		1DEA53F12ED46C4500554E45 /* FingerprintTargetCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = FingerprintTargetCommon.xcconfig; sourceTree = "<group>"; };
 		1DEA53F22ED46C4500554E45 /* ReplayProjectCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectCommon.xcconfig; sourceTree = "<group>"; };
 		1DEA53F32ED46C4500554E45 /* ReplayProjectDebug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ReplayProjectDebug.xcconfig; sourceTree = "<group>"; };
@@ -56,6 +84,27 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1DDD17102F7A0CAD00DB718A /* Exceptions for "fingerprint" folder in "gate" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				main.cpp,
+			);
+			target = 1DDD17002F7A0CAC00DB718A /* gate */;
+		};
+		1DDD179E2F7B47FC00DB718A /* Exceptions for "globoverlap" folder in "gate" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				globoverlap.cpp,
+			);
+			target = 1DDD17002F7A0CAC00DB718A /* gate */;
+		};
+		1DDD179F2F7B47FE00DB718A /* Exceptions for "globoverlap" folder in "fingerprint" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				globoverlap.cpp,
+			);
+			target = 1D7ED29D2E9648EB003BA8A7 /* fingerprint */;
+		};
 		1DFF728D2ED31C8700860A62 /* Exceptions for "blake3" folder in "blake3" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -89,6 +138,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				1D1F23912ECBFF31009AD50C /* Exceptions for "fingerprint" folder in "Compile Sources" phase from "fingerprint" target */,
+				1DDD17102F7A0CAD00DB718A /* Exceptions for "fingerprint" folder in "gate" target */,
 			);
 			path = fingerprint;
 			sourceTree = "<group>";
@@ -96,6 +146,20 @@
 		1DBF0C372EE49E9800CB10C9 /* glob-cpp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "glob-cpp";
+			sourceTree = "<group>";
+		};
+		1DDD17142F7A0D6000DB718A /* gate */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = gate;
+			sourceTree = "<group>";
+		};
+		1DDD179B2F7B47F400DB718A /* globoverlap */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1DDD179F2F7B47FE00DB718A /* Exceptions for "globoverlap" folder in "fingerprint" target */,
+				1DDD179E2F7B47FC00DB718A /* Exceptions for "globoverlap" folder in "gate" target */,
+			);
+			path = globoverlap;
 			sourceTree = "<group>";
 		};
 		1DFF724C2ECF2BD800860A62 /* blake3 */ = {
@@ -127,6 +191,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1DDD17062F7A0CAC00DB718A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1DDD17072F7A0CAC00DB718A /* CoreFoundation.framework in Frameworks */,
+				1DDD17082F7A0CAC00DB718A /* libfast-crc32.a in Frameworks */,
+				1DDD17092F7A0CAC00DB718A /* libblake3.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		1DFF72322ECF2B6C00860A62 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -152,6 +226,8 @@
 				1DFF724C2ECF2BD800860A62 /* blake3 */,
 				1DBF0C372EE49E9800CB10C9 /* glob-cpp */,
 				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
+				1DDD17142F7A0D6000DB718A /* gate */,
+				1DDD179B2F7B47F400DB718A /* globoverlap */,
 				1DFF72532ECF2BF100860A62 /* Frameworks */,
 				1DEA53F62ED46C4500554E45 /* xcconfigs */,
 				1D7ED29F2E9648EB003BA8A7 /* Products */,
@@ -164,6 +240,7 @@
 				1D7ED29E2E9648EB003BA8A7 /* fingerprint */,
 				1DFF72342ECF2B6C00860A62 /* libblake3.a */,
 				1DFF72592ECF2D5500860A62 /* libfast-crc32.a */,
+				1DDD170E2F7A0CAC00DB718A /* gate */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -171,6 +248,7 @@
 		1DEA53F62ED46C4500554E45 /* xcconfigs */ = {
 			isa = PBXGroup;
 			children = (
+				1DDD16FF2F7A0C9800DB718A /* GateTargetCommon.xcconfig */,
 				1DEA53F12ED46C4500554E45 /* FingerprintTargetCommon.xcconfig */,
 				1DBF0BB02EE02B1E00CB10C9 /* Blake3TargetCommon.xcconfig */,
 				1DBF0BB12EE02C1F00CB10C9 /* FastCrc32TargetCommon.xcconfig */,
@@ -225,12 +303,39 @@
 			);
 			fileSystemSynchronizedGroups = (
 				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
+				1DDD179B2F7B47F400DB718A /* globoverlap */,
 			);
 			name = fingerprint;
 			packageProductDependencies = (
 			);
 			productName = "file-finder";
 			productReference = 1D7ED29E2E9648EB003BA8A7 /* fingerprint */;
+			productType = "com.apple.product-type.tool";
+		};
+		1DDD17002F7A0CAC00DB718A /* gate */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1DDD170B2F7A0CAC00DB718A /* Build configuration list for PBXNativeTarget "gate" */;
+			buildPhases = (
+				1DDD17052F7A0CAC00DB718A /* Sources */,
+				1DDD17062F7A0CAC00DB718A /* Frameworks */,
+				1DDD170A2F7A0CAC00DB718A /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1DDD17012F7A0CAC00DB718A /* PBXTargetDependency */,
+				1DDD17032F7A0CAC00DB718A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
+				1DDD17142F7A0D6000DB718A /* gate */,
+				1DDD179B2F7B47F400DB718A /* globoverlap */,
+			);
+			name = gate;
+			packageProductDependencies = (
+			);
+			productName = "file-finder";
+			productReference = 1DDD170E2F7A0CAC00DB718A /* gate */;
 			productType = "com.apple.product-type.tool";
 		};
 		1DFF72332ECF2B6C00860A62 /* blake3 */ = {
@@ -315,12 +420,20 @@
 				1DFF72582ECF2D5500860A62 /* fast-crc32 */,
 				1DFF72332ECF2B6C00860A62 /* blake3 */,
 				1D7ED29D2E9648EB003BA8A7 /* fingerprint */,
+				1DDD17002F7A0CAC00DB718A /* gate */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1D7ED29A2E9648EB003BA8A7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1DDD17052F7A0CAC00DB718A /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -344,6 +457,16 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		1DDD17012F7A0CAC00DB718A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1DFF72582ECF2D5500860A62 /* fast-crc32 */;
+			targetProxy = 1DDD17022F7A0CAC00DB718A /* PBXContainerItemProxy */;
+		};
+		1DDD17032F7A0CAC00DB718A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1DFF72332ECF2B6C00860A62 /* blake3 */;
+			targetProxy = 1DDD17042F7A0CAC00DB718A /* PBXContainerItemProxy */;
+		};
 		1DFF72392ECF2B8F00860A62 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 1DFF72332ECF2B6C00860A62 /* blake3 */;
@@ -382,6 +505,22 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1DEA53F12ED46C4500554E45 /* FingerprintTargetCommon.xcconfig */;
 			buildSettings = {
+			};
+			name = Release;
+		};
+		1DDD170C2F7A0CAC00DB718A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1DDD16FF2F7A0C9800DB718A /* GateTargetCommon.xcconfig */;
+			buildSettings = {
+				INFOPLIST_FILE = Info.plist;
+			};
+			name = Debug;
+		};
+		1DDD170D2F7A0CAC00DB718A /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1DDD16FF2F7A0C9800DB718A /* GateTargetCommon.xcconfig */;
+			buildSettings = {
+				INFOPLIST_FILE = Info.plist;
 			};
 			name = Release;
 		};
@@ -430,6 +569,15 @@
 			buildConfigurations = (
 				1D7ED2A62E9648EB003BA8A7 /* Debug */,
 				1D7ED2A72E9648EB003BA8A7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1DDD170B2F7A0CAC00DB718A /* Build configuration list for PBXNativeTarget "gate" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1DDD170C2F7A0CAC00DB718A /* Debug */,
+				1DDD170D2F7A0CAC00DB718A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

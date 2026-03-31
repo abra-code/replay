@@ -65,6 +65,11 @@ public:
                                       const std::unordered_set<std::string>& glob_patterns,
                                       const std::unordered_set<std::string>& regex_patterns) noexcept;
 
+    // alternative main entry point - same general principles but
+    // - the input paths may point to actual files or directories
+    // - inpute paths may be direcoreis with GLOB patterns, e.g. /path/to/dir/**/.cpp
+    static int find_and_process_globbed_paths(const std::unordered_set<std::string>& input_paths) noexcept;
+
     // the client should wait for all background tasks to finish
     static void wait_for_all_tasks() noexcept;
 
@@ -72,6 +77,9 @@ public:
     static uint64_t sort_and_compute_fingerprint(FingerprintOptions fingerprintOptions) noexcept;
 
     static int get_result() noexcept;
+
+    // reset all state so the class can be reused for another fingerprinting run
+    static void reset() noexcept;
 
     static void list_matched_files() noexcept;
     

@@ -35,7 +35,7 @@ struct FileInfo : public FileInfoCore
         : FileInfoCore { .inode = st.st_ino,
                          .size = st.st_size,
                          .mtime_ns = (int64_t)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec,
-                         .hash = 0 },
+                         .hash = {0} },
           mode(st.st_mode)
     {
     }

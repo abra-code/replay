@@ -1,5 +1,5 @@
 //**************************************************************************************
-// Filename:	CFType.cp
+// Filename:	CFType.cpp
 // Copyright 2002-2004 Abracode, Inc.  All rights reserved.
 //
 // Description:	helper for CoreFountation types

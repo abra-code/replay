@@ -276,6 +276,10 @@ class Automata {
     return fail_state_;
   }
 
+  size_t MatchState() const {
+    return match_state_;
+  }
+
   Automata<charT>& SetFailState(size_t state_pos) {
     fail_state_ = state_pos;
     return *this;

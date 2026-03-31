@@ -3,3 +3,4 @@
 **/xcuserdata
 build/**
 xcconfigs/ReplayDistribution.xcconfig
+private
