@@ -7,24 +7,14 @@
 
 #import <Foundation/Foundation.h>
 #import "ReplayAction.h"
+#import "replay_server.h"
 
-#define GetAppGroupIdentifier() @(REPLAY_GROUP_ID)
-
-static CFStringRef kReplayServerPortFormat = CFSTR("%@.replay-port.%@");
-static CFStringRef kDispatchListenerPortFormat = CFSTR("%@.dispatch-port.%@");
-
-enum ReplayMessage
-{
-	kReplayMessageStartServer = 1,
-	kReplayMessageQueueActionDictionary,
-	kReplayMessageQueueActionLine,
-	kReplayMessageFinishAndWaitForAllActions
-};
-
-enum CallbackMessage
-{
-	kCallbackMessageHeartbeat = 1,
-	kCallbackMessageExiting
-};
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 void StartServerAndRunLoop(ReplayContext *context);
+
+#ifdef __cplusplus
+}
+#endif

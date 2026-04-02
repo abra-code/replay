@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
-#import "ReplayAction.h"
+#import "ActionFromName.h"
+#include "LogStream.h"
 
 Action
 ActionFromName(NSString *actionName, bool *isSrcDestActionPtr)

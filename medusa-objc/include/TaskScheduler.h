@@ -7,6 +7,10 @@
 
 #import <Foundation/Foundation.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 @class TaskProxy;
 
 @interface TaskScheduler : NSObject
@@ -17,3 +21,7 @@
 - (void)startExecutionAndWait __attribute__((objc_direct));
 
 @end //TaskScheduler
+
+#ifdef __cplusplus
+}
+#endif

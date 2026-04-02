@@ -19,9 +19,7 @@
 #include "fingerprint.h"
 #include "dispatch_queues_helper.h"
 #include "env_var_expand.h"
-
-#define STRINGIFY(x) #x
-#define STRINGIFY_VALUE(x) STRINGIFY(x)
+#include "replay_version.h"
 
 FileHashAlgorithm g_hash = FileHashAlgorithm::CRC32C;
 XattrMode g_xattr_mode = XattrMode::On;

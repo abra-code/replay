@@ -7,10 +7,9 @@
 
 #import <Foundation/Foundation.h>
 #include <mach-o/dyld.h>
-#import "ReplayServer.h"
-
-#define STRINGIFY(x) #x
-#define STRINGIFY_VALUE(x) STRINGIFY(x)
+#import "replay_server.h"
+#import "ActionFromName.h"
+#include "replay_version.h"
 
 static inline BOOL
 StartChildProcess(NSString *toolPath, NSArray<NSString*> *arguments)

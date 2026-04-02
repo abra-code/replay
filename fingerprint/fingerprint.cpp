@@ -22,7 +22,6 @@
 #include <sys/xattr.h>
 
 #include <fnmatch.h>
-#include "glob.h"
 #include "GlobOverlap.h"
 
 #include "blake3.h"

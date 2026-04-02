@@ -2,6 +2,7 @@
 #import "ReplayAction.h"
 #import "StringAndPath.h"
 #import "OutputSerializer.h"
+#import "ActionFromName.h"
 #include "GlobOverlap.h"
 #include <fts.h>
 #include <sys/stat.h>

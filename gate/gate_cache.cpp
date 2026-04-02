@@ -17,8 +17,8 @@
 #include <sys/stat.h>
 
 #include <CoreFoundation/CoreFoundation.h>
-#include "../fingerprint/json_serialization.h"
-#include "../fingerprint/CFObj.h"
+#include "json_serialization.h"
+#include "CFObj.h"
 #include "path_helpers.h"
 
 #include "blake3.h"

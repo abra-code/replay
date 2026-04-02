@@ -5,7 +5,7 @@
 //  Copyright © 2021 Tomasz Kukielka. All rights reserved.
 //
 
-#import <Foundation/Foundation.h>
+#include <dispatch/dispatch.h>
 
 #ifdef __cplusplus
 extern "C" {

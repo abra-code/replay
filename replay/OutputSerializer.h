@@ -9,16 +9,16 @@
 #import <Foundation/Foundation.h>
 #include "LogStream.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 @interface OutputSerializer : NSObject
 
 + (nonnull instancetype)sharedOutputSerializer __attribute__((objc_direct));
 
 @end //OutputSerializer
 
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 void PrintSerializedString(OutputSerializer * _Nullable serializer, NSString * _Nullable string, NSInteger actionIndex);
 void PrintSerializedStrings(OutputSerializer * _Nullable serializer, NSArray<NSString *> * _Nullable array, NSInteger actionIndex);

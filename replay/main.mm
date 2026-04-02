@@ -16,9 +16,8 @@
 #import "ConcurrentDispatchWithNoDependency.h"
 #import "ActionStream.h"
 #import "ReplayServer.h"
+#include "replay_version.h"
 
-#define STRINGIFY(x) #x
-#define STRINGIFY_VALUE(x) STRINGIFY(x)
 
 #if DEBUG
 	#define TRACE 0
@@ -45,7 +44,7 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 	NSURL *playlistURL = [NSURL fileURLWithFileSystemRepresentation:playlistPath isDirectory:NO relativeToURL:NULL];
 	
 	PlaylistFormat hint = kPlaylistFormatPlist; //default to plist
-	PlaylistFormat numberOfTries = 0;
+	int numberOfTries = 0;
 
 	NSString *ext = [[playlistURL pathExtension] lowercaseString];
 	if([ext isEqualToString:@"json"])
@@ -88,7 +87,7 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 			hint = kPlaylistFormatPlist;
 		}
 	}
-	while(numberOfTries < kPlaylistFormatCount);
+	while(numberOfTries < (int)kPlaylistFormatCount);
 
 	if(playlistDict == nil)
 	{
@@ -130,7 +129,7 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 	NSURL *playlistURL = [NSURL fileURLWithFileSystemRepresentation:playlistPath isDirectory:NO relativeToURL:NULL];
 	
 	PlaylistFormat hint = kPlaylistFormatPlist; //default to plist
-	PlaylistFormat numberOfTries = 0;
+	int numberOfTries = 0;
 
 	NSString *ext = [[playlistURL pathExtension] lowercaseString];
 	if([ext isEqualToString:@"json"])
@@ -172,7 +171,7 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 			hint = kPlaylistFormatPlist;
 		}
 	}
-	while(numberOfTries < kPlaylistFormatCount);
+	while(numberOfTries < (int)kPlaylistFormatCount);
 
 	if(playlistArray == nil)
 	{

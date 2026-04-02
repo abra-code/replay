@@ -27,9 +27,8 @@
 #include "gate_cache.h"
 #include "path_helpers.h"
 #include "blake3.h"
+#include "replay_version.h"
 
-#define STRINGIFY(x) #x
-#define STRINGIFY_VALUE(x) STRINGIFY(x)
 
 // Globals required by fingerprint.cpp (declared extern there)
 FileHashAlgorithm g_hash = FileHashAlgorithm::CRC32C;

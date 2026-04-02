@@ -8,6 +8,10 @@
 #import <Foundation/Foundation.h>
 #import "MedusaTask.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 @class MedusaTaskProxy;
 
 typedef struct OutputInfo
@@ -15,10 +19,6 @@ typedef struct OutputInfo
 	__unsafe_unretained id<MedusaTask> producer;
 	__strong NSMutableSet< id<MedusaTask> > *consumers; //consumers of this one output
 } OutputInfo;
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 void IndexAllOutputsForRecursiveExecution(NSArray< id<MedusaTask> > *all_medusas,
                        	OutputInfo *outputInfoArray, NSUInteger outputArrayCount);

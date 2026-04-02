@@ -15,7 +15,7 @@
 // See patterns_overlap.cpp for standalone test tool and test_overlap.sh for test suite.
 //
 
-#include "glob.h"
+#include "glob-cpp/glob.h"
 #include <iostream>
 #include <queue>
 #include <set>

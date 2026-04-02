@@ -83,6 +83,20 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1DB17C242F7E4A6B00E67624 /* Exceptions for "common" folder in "gate" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				LogStream.c,
+			);
+			target = 1DDD17002F7A0CAC00DB718A /* gate */;
+		};
+		1DB17C252F7E4A6D00E67624 /* Exceptions for "common" folder in "fingerprint" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				LogStream.c,
+			);
+			target = 1D7ED29D2E9648EB003BA8A7 /* fingerprint */;
+		};
 		1DDD17102F7A0CAD00DB718A /* Exceptions for "fingerprint" folder in "gate" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -140,6 +154,15 @@
 				1DDD17102F7A0CAD00DB718A /* Exceptions for "fingerprint" folder in "gate" target */,
 			);
 			path = fingerprint;
+			sourceTree = "<group>";
+		};
+		1DB17C212F7E4A6200E67624 /* common */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1DB17C252F7E4A6D00E67624 /* Exceptions for "common" folder in "fingerprint" target */,
+				1DB17C242F7E4A6B00E67624 /* Exceptions for "common" folder in "gate" target */,
+			);
+			path = common;
 			sourceTree = "<group>";
 		};
 		1DBF0C372EE49E9800CB10C9 /* glob-cpp */ = {
@@ -220,6 +243,7 @@
 		1D7ED2952E9648EB003BA8A7 = {
 			isa = PBXGroup;
 			children = (
+				1DB17C212F7E4A6200E67624 /* common */,
 				1DFF72612ECF2D7900860A62 /* fast-crc32 */,
 				1DFF724C2ECF2BD800860A62 /* blake3 */,
 				1DBF0C372EE49E9800CB10C9 /* glob-cpp */,
@@ -301,6 +325,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
+				1DB17C212F7E4A6200E67624 /* common */,
 				1DDD179B2F7B47F400DB718A /* glob-overlap */,
 			);
 			name = fingerprint;
@@ -326,6 +351,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
+				1DB17C212F7E4A6200E67624 /* common */,
 				1DDD17142F7A0D6000DB718A /* gate */,
 				1DDD179B2F7B47F400DB718A /* glob-overlap */,
 			);
@@ -510,7 +536,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1DDD16FF2F7A0C9800DB718A /* GateTargetCommon.xcconfig */;
 			buildSettings = {
-				INFOPLIST_FILE = Info.plist;
 			};
 			name = Debug;
 		};
@@ -518,7 +543,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1DDD16FF2F7A0C9800DB718A /* GateTargetCommon.xcconfig */;
 			buildSettings = {
-				INFOPLIST_FILE = Info.plist;
 			};
 			name = Release;
 		};

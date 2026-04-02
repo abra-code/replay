@@ -27,32 +27,9 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		1DA1CA612F7C4264000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		1DB17A212F7DFD0900E67624 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				AsyncDispatch.m,
-			);
-			target = 1D34D699259477BB00167241 /* dispatch */;
-		};
-		1DA1CA7F2F7C42C6000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				ActionStream.m,
-				ConcurrentDispatchWithNoDependency.m,
-				main.m,
-				OutputSerializer.m,
-				ReplayAction.mm,
-				ReplayServer.m,
-				ReplayTask.mm,
-				SerialDispatch.m,
-				StringAndPath.m,
-			);
-			target = 1D34D699259477BB00167241 /* dispatch */;
-		};
-		1DA1CA8A2F7C4368000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				FileTree.c,
 				main.m,
 			);
 			target = 1D34D699259477BB00167241 /* dispatch */;
@@ -60,10 +37,11 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		1DA1CA5E2F7C424F000F2E31 /* common */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1CA612F7C4264000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = common; sourceTree = "<group>"; };
-		1DA1CA742F7C42B7000F2E31 /* replay */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1CA7F2F7C42C6000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = replay; sourceTree = "<group>"; };
-		1DA1CA812F7C430C000F2E31 /* dispatch */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = dispatch; sourceTree = "<group>"; };
-		1DA1CA872F7C4362000F2E31 /* file-tree */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1CA8A2F7C4368000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "file-tree"; sourceTree = "<group>"; };
+		1DA1CA5E2F7C424F000F2E31 /* common */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = common; sourceTree = "<group>"; };
+		1DA1CA872F7C4362000F2E31 /* file-tree */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DB17A212F7DFD0900E67624 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "file-tree"; sourceTree = "<group>"; };
+		1DB17A192F7DFB3000E67624 /* action */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = action; sourceTree = "<group>"; };
+		1DB17A1C2F7DFB5100E67624 /* dispatch */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = dispatch; sourceTree = "<group>"; };
+		1DB17A202F7DFCB600E67624 /* replay-server */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "replay-server"; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -80,11 +58,12 @@
 		1D34D691259477BB00167241 = {
 			isa = PBXGroup;
 			children = (
+				1DB17A1C2F7DFB5100E67624 /* dispatch */,
+				1DB17A202F7DFCB600E67624 /* replay-server */,
+				1DB17A192F7DFB3000E67624 /* action */,
 				1DA1CA872F7C4362000F2E31 /* file-tree */,
-				1DA1CA742F7C42B7000F2E31 /* replay */,
 				1DA1CA5E2F7C424F000F2E31 /* common */,
 				1DA1153425B5AC0200C0C6A5 /* xcconfigs */,
-				1DA1CA812F7C430C000F2E31 /* dispatch */,
 				1D34D69B259477BB00167241 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -125,9 +104,10 @@
 			);
 			fileSystemSynchronizedGroups = (
 				1DA1CA5E2F7C424F000F2E31 /* common */,
-				1DA1CA742F7C42B7000F2E31 /* replay */,
-				1DA1CA812F7C430C000F2E31 /* dispatch */,
 				1DA1CA872F7C4362000F2E31 /* file-tree */,
+				1DB17A192F7DFB3000E67624 /* action */,
+				1DB17A1C2F7DFB5100E67624 /* dispatch */,
+				1DB17A202F7DFCB600E67624 /* replay-server */,
 			);
 			name = dispatch;
 			productName = dispatch;

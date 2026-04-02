@@ -4,26 +4,13 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 @interface AtomicError : NSObject
 	@property(atomic, strong, direct) NSError *error;
 @end
-
-
-typedef enum
-{
-	kActionInvalid = 0,
-	kFileActionClone,
-	kFileActionMove,
-	kFileActionHardlink,
-	kFileActionSymlink,
-	kFileActionCreate,
-	kFileActionDelete,
-	kActionExecuteTool,
-	kActionEcho,
-	kActionStartServer, // the following are only valid for "dispatch" tool
-	kActionWait         // not a real action
-} Action;
-
 
 typedef struct
 {
@@ -56,11 +43,6 @@ typedef void (^action_handler_t)(__nullable dispatch_block_t action,
 								NSArray<NSString*> * __nullable exclusiveInputs,
 								NSArray<NSString*> * __nullable outputs);
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-Action ActionFromName(NSString *actionName, bool *isSrcDestActionPtr);
 NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen);
 void HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler);
 

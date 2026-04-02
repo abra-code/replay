@@ -5,9 +5,11 @@
 //  Copyright © 2020 Tomasz Kukielka. All rights reserved.
 //
 
+#import "ActionStream.h"
 #import "ReplayServer.h"
 #import "ConcurrentDispatchWithNoDependency.h"
 #import "SerialDispatch.h"
+#import "ActionFromName.h"
 
 void
 StartReceivingActions(ReplayContext *context)
