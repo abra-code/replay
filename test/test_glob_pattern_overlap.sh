@@ -9,7 +9,7 @@ FAIL=0
 if [ ! -x "$TOOL" ]; then
     echo "Building globoverlap..."
     /bin/mkdir -p "$REPO_DIR/build"
-    /usr/bin/clang++ -std=c++20 -O2 -I"$REPO_DIR/glob-cpp/include/glob-cpp" "$REPO_DIR/globoverlap/globoverlap.cpp" -o "$TOOL"
+    /usr/bin/clang++ -std=c++20 -O2 -I"$REPO_DIR/glob-overlap/include" -I"$REPO_DIR/glob-cpp/include" "$REPO_DIR/glob-overlap/globoverlap.cpp" -o "$TOOL"
     rc=$?
     if [ $rc -ne 0 ]; then
         echo "Build failed"
