@@ -1,3 +1,15 @@
+# replay tools
+'replay' repository contains 4 tools:
+- replay: execute a list of declared actions
+- dispatch: companion tool for 'replay'
+- fingerprint: calculate deep directory hash - [readme](fingerprint/README.md)  
+- gate: cached task execution tool - [readme](gate/README.md)  
+
+To install all 4 tools locally in ~/.local/bin run the installer in terminal:
+```
+source <(/usr/bin/curl -fsSL 'https://raw.githubusercontent.com/abra-code/replay/refs/heads/master/install.sh')
+```
+
 # replay
 A macOS tool to execute a list of declared actions. Currently supported actions are:
 - file operations like clone, move, create, delete,
@@ -285,7 +297,7 @@ See also:
 
 ```
 
-#  
+# dispatch
 The content of  `dispatch --help`:
  
 ```
@@ -368,7 +380,8 @@ See also:
 
 ```
 
-#  
+# fingerprint
+'fingerprint' [readme here](fingerprint/README.md).  
 The content of  `fingerprint --help`:
  
 ```
@@ -419,3 +432,40 @@ the combination of lightweight crc32c and xattr caching provides excellent perfo
 
 ```
 
+# gate
+'gate' [readme here](gate/README.md).  
+The content of `gate --help`:
+
+```
+
+Usage: gate [OPTIONS] -- COMMAND [ARGS...]
+Execute COMMAND only if inputs have changed or outputs are missing.
+
+OPTIONS:
+  -i, --input=PATH       Input file (repeatable, supports ${VAR}/$(VAR))
+  -o, --output=PATH      Output file (repeatable, supports ${VAR}/$(VAR))
+  -I, --input-list=FILE  Read input paths from FILE (repeatable)
+                         Supports Xcode .xcfilelist with ${VAR}/$(VAR)
+  -O, --output-list=FILE Read output paths from FILE (repeatable)
+                         Supports Xcode .xcfilelist with ${VAR}/$(VAR)
+  -E, --env-list=FILE    Fingerprint env vars listed in FILE (repeatable)
+                         Each line is expanded (${VAR}/$(VAR)) and the
+                         result is included in the input fingerprint.
+  -S, --signature-key=STR  Additional string for task signature (repeatable)
+                         Use to distinguish build configurations, e.g.
+                         -S "${CONFIGURATION}" -S "${ARCHS}"
+  -c, --cache-dir=DIR    Cache directory (default: .gate-cache)
+  -C, --cache-format=FMT Cache format: plist (default) or json
+  -H, --hash=ALGO       Hash algorithm: crc32c (default) or blake3
+  -f, --force            Force execution, ignore cache (still update cache after)
+  --dry-run              Report hit/miss without executing
+  -v, --verbose          Verbose output
+  -h, --help             Print this help message
+  -V, --version          Display version
+
+Exit codes:
+  0        Cache hit (skipped) or command succeeded
+  non-zero Command's exit code on failure
+  2        Gate error (bad arguments, missing inputs, etc.)
+
+```

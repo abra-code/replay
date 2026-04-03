@@ -74,5 +74,3 @@ if [ $any_failed == 0 ]; then
 else
     echo "Some tools failed to build. Review failed build logs in /tmp"
 fi
-
-
