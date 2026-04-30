@@ -23,6 +23,7 @@ struct CacheEntry
     std::string command;
     std::vector<std::string> inputs;
     std::vector<std::string> outputs;
+    std::vector<std::string> exclude_inputs;
     uint64_t input_fingerprint;
     uint64_t output_fingerprint;
     std::string hash_algorithm;
@@ -33,8 +34,11 @@ struct CacheEntry
 // This determines the per-task cache filename.
 // signature_keys: additional arbitrary strings that distinguish task variants
 //                 (e.g. build configuration, architecture).
+// exclude_inputs: paths/globs subtracted from inputs; different exclude sets
+//                 produce different task signatures.
 std::string compute_task_signature(const std::vector<std::string>& inputs,
                                    const std::vector<std::string>& outputs,
+                                   const std::vector<std::string>& exclude_inputs,
                                    const std::string& command,
                                    const std::string& hash_algorithm,
                                    const std::vector<std::string>& signature_keys);

@@ -136,21 +136,10 @@
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
-/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-		1D1F23912ECBFF31009AD50C /* Exceptions for "fingerprint" folder in "Compile Sources" phase from "fingerprint" target */ = {
-			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
-			buildPhase = 1D7ED29A2E9648EB003BA8A7 /* Sources */;
-			membershipExceptions = (
-				FileInfo.h,
-			);
-		};
-/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		1D7ED2A02E9648EB003BA8A7 /* fingerprint */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				1D1F23912ECBFF31009AD50C /* Exceptions for "fingerprint" folder in "Compile Sources" phase from "fingerprint" target */,
 				1DDD17102F7A0CAD00DB718A /* Exceptions for "fingerprint" folder in "gate" target */,
 			);
 			path = fingerprint;

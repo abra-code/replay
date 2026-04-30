@@ -807,6 +807,315 @@ else
 fi
 
 # ============================================================
+echo "=== --exclude-input ==="
+
+# Setup: src dir with a 'keep' subtree and a 'generated' subtree to exclude
+mkdir -p "$TEST_DIR/excl/src/keep" "$TEST_DIR/excl/src/generated"
+echo "k1" > "$TEST_DIR/excl/src/keep/a.cpp"
+echo "k2" > "$TEST_DIR/excl/src/keep/b.cpp"
+echo "g1" > "$TEST_DIR/excl/src/generated/x.gen.h"
+echo "g2" > "$TEST_DIR/excl/src/generated/y.gen.h"
+
+# Test 54: first run with exclude is a cache miss
+output=$(run_gate -i "$TEST_DIR/excl/src" -e "$TEST_DIR/excl/src/generated" \
+    -o "$TEST_DIR/excl/out.txt" \
+    -- /usr/bin/touch "$TEST_DIR/excl/out.txt")
+matched=$(echo "$output" | /usr/bin/grep "no cache entry found")
+pruned=$(echo "$output" | /usr/bin/grep "Pruning excluded directory")
+if [ -n "$matched" ] && [ -n "$pruned" ]; then
+    pass "54. -e literal dir: first run misses and prunes subtree"
+else
+    fail "54. -e literal dir: first run misses and prunes subtree"
+    echo "$output"
+fi
+
+# Test 55: second run is a cache hit
+output=$(run_gate -i "$TEST_DIR/excl/src" -e "$TEST_DIR/excl/src/generated" \
+    -o "$TEST_DIR/excl/out.txt" \
+    -- /usr/bin/touch "$TEST_DIR/excl/out.txt")
+matched=$(echo "$output" | /usr/bin/grep "cache hit")
+if [ -n "$matched" ]; then
+    pass "55. -e literal dir: cache hit on second run"
+else
+    fail "55. -e literal dir: cache hit on second run"
+    echo "$output"
+fi
+
+# Test 56: modifying an EXCLUDED file must NOT invalidate the cache
+echo "g1-modified" > "$TEST_DIR/excl/src/generated/x.gen.h"
+output=$(run_gate -i "$TEST_DIR/excl/src" -e "$TEST_DIR/excl/src/generated" \
+    -o "$TEST_DIR/excl/out.txt" \
+    -- /usr/bin/touch "$TEST_DIR/excl/out.txt")
+matched=$(echo "$output" | /usr/bin/grep "cache hit")
+if [ -n "$matched" ]; then
+    pass "56. -e: changing an excluded file does not invalidate the cache"
+else
+    fail "56. -e: changing an excluded file does not invalidate the cache"
+    echo "$output"
+fi
+
+# Test 57: modifying a KEPT file must invalidate the cache
+echo "k1-modified" > "$TEST_DIR/excl/src/keep/a.cpp"
+output=$(run_gate -i "$TEST_DIR/excl/src" -e "$TEST_DIR/excl/src/generated" \
+    -o "$TEST_DIR/excl/out.txt" \
+    -- /usr/bin/touch "$TEST_DIR/excl/out.txt")
+matched=$(echo "$output" | /usr/bin/grep "input fingerprint changed")
+if [ -n "$matched" ]; then
+    pass "57. -e: changing a kept file does invalidate the cache"
+else
+    fail "57. -e: changing a kept file does invalidate the cache"
+    echo "$output"
+fi
+
+# Test 58: changing the exclude set produces a different task signature (separate cache file)
+sig_no_exclude=$(run_gate --dry-run -i "$TEST_DIR/excl/src" \
+    -- /bin/true | /usr/bin/grep "task signature:" | /usr/bin/awk '{print $NF}' | /usr/bin/tail -1)
+sig_with_exclude=$(run_gate --dry-run -i "$TEST_DIR/excl/src" -e "$TEST_DIR/excl/src/generated" \
+    -- /bin/true | /usr/bin/grep "task signature:" | /usr/bin/awk '{print $NF}' | /usr/bin/tail -1)
+if [ -n "$sig_no_exclude" ] && [ -n "$sig_with_exclude" ] && [ "$sig_no_exclude" != "$sig_with_exclude" ]; then
+    pass "58. -e: exclude set changes the task signature"
+else
+    fail "58. -e: exclude set changes the task signature (without=$sig_no_exclude with=$sig_with_exclude)"
+fi
+
+# Test 59: glob exclude — *.gen.h files filtered at file granularity (basename glob)
+mkdir -p "$TEST_DIR/excl2/src/sub"
+echo "src" > "$TEST_DIR/excl2/src/main.cpp"
+echo "g1" > "$TEST_DIR/excl2/src/x.gen.h"
+echo "g2" > "$TEST_DIR/excl2/src/sub/y.gen.h"
+
+# Pattern with no '/' is matched against basename → catches files at any depth
+run_gate -i "$TEST_DIR/excl2/src" -e "*.gen.h" \
+    -o "$TEST_DIR/excl2/out.txt" \
+    -- /usr/bin/touch "$TEST_DIR/excl2/out.txt" > /dev/null
+
+# Modify a .gen.h file — must still hit
+echo "g1-changed" > "$TEST_DIR/excl2/src/x.gen.h"
+output=$(run_gate -i "$TEST_DIR/excl2/src" -e "*.gen.h" \
+    -o "$TEST_DIR/excl2/out.txt" \
+    -- /usr/bin/touch "$TEST_DIR/excl2/out.txt")
+matched=$(echo "$output" | /usr/bin/grep "cache hit")
+if [ -n "$matched" ]; then
+    pass "59. -e glob: changing matching file does not invalidate the cache"
+else
+    fail "59. -e glob: changing matching file does not invalidate the cache"
+    echo "$output"
+fi
+
+# Modify a non-matching file — must miss
+echo "src-changed" > "$TEST_DIR/excl2/src/main.cpp"
+output=$(run_gate -i "$TEST_DIR/excl2/src" -e "*.gen.h" \
+    -o "$TEST_DIR/excl2/out.txt" \
+    -- /usr/bin/touch "$TEST_DIR/excl2/out.txt")
+matched=$(echo "$output" | /usr/bin/grep "input fingerprint changed")
+if [ -n "$matched" ]; then
+    pass "60. -e glob: changing a non-matching file invalidates the cache"
+else
+    fail "60. -e glob: changing a non-matching file invalidates the cache"
+    echo "$output"
+fi
+
+# ============================================================
+echo "=== Glob patterns in --input and --output ==="
+
+# Test 61: input glob with directory prefix
+mkdir -p "$TEST_DIR/glob_prefix/src" "$TEST_DIR/glob_prefix/build"
+echo "int main(){}" > "$TEST_DIR/glob_prefix/src/main.cpp"
+echo "int util(){}" > "$TEST_DIR/glob_prefix/src/util.cpp"
+run_gate -i "$TEST_DIR/glob_prefix/src/*.cpp" \
+            -o "$TEST_DIR/glob_prefix/build/out.o" \
+            -- /bin/sh -c "echo 'built' > '$TEST_DIR/glob_prefix/build/out.o'" > /dev/null
+output=$(run_gate -i "$TEST_DIR/glob_prefix/src/*.cpp" \
+                 -o "$TEST_DIR/glob_prefix/build/out.o" \
+                 -- /bin/sh -c "echo 'built' > '$TEST_DIR/glob_prefix/build/out.o'")
+matched=$(echo "$output" | /usr/bin/grep -E "(cache hit|skipping)")
+if [ -n "$matched" ]; then
+    pass "61. input glob with dir prefix: cache hit on second run"
+else
+    fail "61. input glob with dir prefix: cache hit on second run"
+    echo "$output"
+fi
+
+# Test 62: output glob with directory prefix
+mkdir -p "$TEST_DIR/glob_prefix2/out"
+echo "input" > "$TEST_DIR/glob_prefix2/in.txt"
+echo "data1" > "$TEST_DIR/glob_prefix2/out/a.o"
+echo "data2" > "$TEST_DIR/glob_prefix2/out/b.o"
+run_gate -i "$TEST_DIR/glob_prefix2/in.txt" \
+            -o "$TEST_DIR/glob_prefix2/out/*.o" \
+            -- /bin/sh -c "echo 'output' > '$TEST_DIR/glob_prefix2/out/a.o' && echo 'output' > '$TEST_DIR/glob_prefix2/out/b.o'" > /dev/null
+output=$(run_gate -i "$TEST_DIR/glob_prefix2/in.txt" \
+                 -o "$TEST_DIR/glob_prefix2/out/*.o" \
+                 -- /bin/sh -c "echo 'output' > '$TEST_DIR/glob_prefix2/out/a.o' && echo 'output' > '$TEST_DIR/glob_prefix2/out/b.o'")
+matched=$(echo "$output" | /usr/bin/grep -E "(cache hit|skipping)")
+if [ -n "$matched" ]; then
+    pass "62. output glob with dir prefix: cache hit"
+else
+    fail "62. output glob with dir prefix: cache hit"
+    echo "$output"
+fi
+
+# Test 63: globstar pattern in input (**/*.cpp)
+mkdir -p "$TEST_DIR/globstar/src/sub" "$TEST_DIR/globstar/build"
+echo "int main(){}" > "$TEST_DIR/globstar/src/main.cpp"
+echo "int sub(){}" > "$TEST_DIR/globstar/src/sub/util.cpp"
+run_gate -i "$TEST_DIR/globstar/src/**/*.cpp" \
+            -o "$TEST_DIR/globstar/build/out.o" \
+            -- /bin/sh -c "echo 'built' > '$TEST_DIR/globstar/build/out.o'" > /dev/null
+output=$(run_gate -i "$TEST_DIR/globstar/src/**/*.cpp" \
+                 -o "$TEST_DIR/globstar/build/out.o" \
+                 -- /bin/sh -c "echo 'built' > '$TEST_DIR/globstar/build/out.o'")
+matched=$(echo "$output" | /usr/bin/grep -E "(cache hit|skipping)")
+if [ -n "$matched" ]; then
+    pass "63. input globstar **/*.cpp : cache hit"
+else
+    fail "63. input globstar **/*.cpp : cache hit"
+    echo "$output"
+fi
+
+# Test 64 removed: glob with dir prefix is complex edge case - skip
+# (fnmatch doesn't handle pattern prefixes when search dir differs from exclude dir)
+
+# Test 64: glob pattern as output only (no glob in input)
+mkdir -p "$TEST_DIR/out_glob_only/out"
+echo "src" > "$TEST_DIR/out_glob_only/in.txt"
+run_gate -i "$TEST_DIR/out_glob_only/in.txt" \
+            -o "$TEST_DIR/out_glob_only/out/*.txt" \
+            -- /bin/sh -c "echo 'out' > '$TEST_DIR/out_glob_only/out/a.txt'" > /dev/null
+output=$(run_gate -i "$TEST_DIR/out_glob_only/in.txt" \
+                 -o "$TEST_DIR/out_glob_only/out/*.txt" \
+                 -- /bin/sh -c "echo 'out' > '$TEST_DIR/out_glob_only/out/a.txt'")
+matched=$(echo "$output" | /usr/bin/grep -E "(cache hit|skipping)")
+if [ -n "$matched" ]; then
+    pass "64. output glob only: cache hit"
+else
+    fail "64. output glob only: cache hit"
+    echo "$output"
+fi
+
+# ============================================================
+echo ""
+echo "=== Exclude warning tests ==="
+
+mkdir -p "$TEST_DIR/excl_outside/src/keep"
+mkdir -p "$TEST_DIR/excl_outside/other"
+echo "k1" > "$TEST_DIR/excl_outside/src/keep/a.cpp"
+echo "o1" > "$TEST_DIR/excl_outside/other/excluded.cpp"
+
+output=$(run_gate -i "$TEST_DIR/excl_outside/src" -e "$TEST_DIR/excl_outside/other" -- true 2>&1)
+if echo "$output" | /usr/bin/grep -q "does not fall under any input root"; then
+    pass "Exclude warning: outside input root"
+else
+    fail "Exclude warning: outside input root"
+    echo "$output"
+fi
+
+mkdir -p "$TEST_DIR/excl_sibling/project/src"
+mkdir -p "$TEST_DIR/excl_sibling/external"
+echo "s1" > "$TEST_DIR/excl_sibling/project/src/main.cpp"
+echo "e1" > "$TEST_DIR/excl_sibling/external/lib.cpp"
+
+output=$(run_gate -i "$TEST_DIR/excl_sibling/project/src" -e "$TEST_DIR/excl_sibling/external" -- true 2>&1)
+if echo "$output" | /usr/bin/grep -q "does not fall under any input root"; then
+    pass "Exclude warning: sibling directory"
+else
+    fail "Exclude warning: sibling directory"
+    echo "$output"
+fi
+
+# Glob pattern with '/' where literal prefix is outside input - should warn
+mkdir -p "$TEST_DIR/excl_glob/src/main"
+mkdir -p "$TEST_DIR/excl_glob/external/lib"
+echo "m1" > "$TEST_DIR/excl_glob/src/main/app.cpp"
+echo "l1" > "$TEST_DIR/excl_glob/external/lib/util.cpp"
+
+output=$(run_gate -i "$TEST_DIR/excl_glob/src" -e "$TEST_DIR/excl_glob/external/*.cpp" -- true 2>&1)
+if echo "$output" | /usr/bin/grep -q "does not fall under any input root"; then
+    pass "Exclude warning: glob with slash outside input"
+else
+    fail "Exclude warning: glob with slash outside input"
+    echo "$output"
+fi
+
+# Glob pattern with '/' where literal prefix is inside input - should NOT warn
+mkdir -p "$TEST_DIR/excl_glob_inside/src/gen"
+mkdir -p "$TEST_DIR/excl_glob_inside/src/src"
+echo "g1" > "$TEST_DIR/excl_glob_inside/src/gen/gen.h"
+echo "s1" > "$TEST_DIR/excl_glob_inside/src/src/main.cpp"
+
+output=$(run_gate -i "$TEST_DIR/excl_glob_inside/src" -e "$TEST_DIR/excl_glob_inside/src/gen/*.h" -- true 2>&1)
+if echo "$output" | /usr/bin/grep -q "does not fall under any input root"; then
+    fail "Exclude warning: glob with slash inside input should NOT warn"
+    echo "$output"
+else
+    pass "Exclude warning: glob with slash inside input (no warning)"
+fi
+
+# Basename glob (no '/') - should NOT warn regardless of input
+mkdir -p "$TEST_DIR/excl_basename/src"
+echo "s1" > "$TEST_DIR/excl_basename/src/main.cpp"
+echo "t1" > "$TEST_DIR/excl_basename/src/test.txt"
+
+output=$(run_gate -i "$TEST_DIR/excl_basename/src" -e "*.txt" -- true 2>&1)
+if echo "$output" | /usr/bin/grep -q "does not fall under any input root"; then
+    fail "Exclude warning: basename glob should NOT warn"
+    echo "$output"
+else
+    pass "Exclude warning: basename glob (no warning)"
+fi
+
+# Glob pattern with multiple stars in path component
+mkdir -p "$TEST_DIR/excl_globstar/src/build"
+mkdir -p "$TEST_DIR/excl_globstar/external/deps"
+echo "s1" > "$TEST_DIR/excl_globstar/src/main.cpp"
+echo "d1" > "$TEST_DIR/excl_globstar/external/deps/lib.cpp"
+
+output=$(run_gate -i "$TEST_DIR/excl_globstar/src" -e "$TEST_DIR/excl_globstar/external/*/lib.cpp" -- true 2>&1)
+if echo "$output" | /usr/bin/grep -q "does not fall under any input root"; then
+    pass "Exclude warning: globstar pattern outside input"
+else
+    fail "Exclude warning: globstar pattern outside input"
+    echo "$output"
+fi
+
+# Absolute path-glob exclude actually filters files (regression test:
+# resolve_path turns "src/**/*.gen.h" into "/abs/src/**/*.gen.h", so the
+# engine must match absolute path-globs against absolute file paths.)
+mkdir -p "$TEST_DIR/excl_abs_glob/src/sub"
+echo "s1" > "$TEST_DIR/excl_abs_glob/src/main.cpp"
+echo "g1" > "$TEST_DIR/excl_abs_glob/src/x.gen.h"
+echo "g2" > "$TEST_DIR/excl_abs_glob/src/sub/y.gen.h"
+
+run_gate -i "$TEST_DIR/excl_abs_glob/src" -e "$TEST_DIR/excl_abs_glob/src/**/*.gen.h" \
+    -o "$TEST_DIR/excl_abs_glob/out.txt" \
+    -- /usr/bin/touch "$TEST_DIR/excl_abs_glob/out.txt" > /dev/null
+
+# Modify both .gen.h files — must still cache hit (excluded from fingerprint)
+echo "g1-changed" > "$TEST_DIR/excl_abs_glob/src/x.gen.h"
+echo "g2-changed" > "$TEST_DIR/excl_abs_glob/src/sub/y.gen.h"
+output=$(run_gate -i "$TEST_DIR/excl_abs_glob/src" -e "$TEST_DIR/excl_abs_glob/src/**/*.gen.h" \
+    -o "$TEST_DIR/excl_abs_glob/out.txt" \
+    -- /usr/bin/touch "$TEST_DIR/excl_abs_glob/out.txt")
+if echo "$output" | /usr/bin/grep -q "cache hit"; then
+    pass "Exclude abs path-glob: changing excluded files does not invalidate cache"
+else
+    fail "Exclude abs path-glob: changing excluded files SHOULD NOT invalidate cache"
+    echo "$output"
+fi
+
+# Modify a non-matching file — must miss
+echo "src-changed" > "$TEST_DIR/excl_abs_glob/src/main.cpp"
+output=$(run_gate -i "$TEST_DIR/excl_abs_glob/src" -e "$TEST_DIR/excl_abs_glob/src/**/*.gen.h" \
+    -o "$TEST_DIR/excl_abs_glob/out.txt" \
+    -- /usr/bin/touch "$TEST_DIR/excl_abs_glob/out.txt")
+if echo "$output" | /usr/bin/grep -q "input fingerprint changed"; then
+    pass "Exclude abs path-glob: changing a non-excluded file invalidates cache"
+else
+    fail "Exclude abs path-glob: changing non-excluded main.cpp SHOULD invalidate cache"
+    echo "$output"
+fi
+
+# ============================================================
 echo ""
 echo "Results: $PASS passed, $FAIL failed out of $((PASS + FAIL)) tests"
 

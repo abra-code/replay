@@ -94,6 +94,7 @@ static std::vector<std::string> cfarray_to_vector(CFArrayRef arr)
 
 std::string compute_task_signature(const std::vector<std::string>& inputs,
                                    const std::vector<std::string>& outputs,
+                                   const std::vector<std::string>& exclude_inputs,
                                    const std::string& command,
                                    const std::string& hash_algorithm,
                                    const std::vector<std::string>& signature_keys)
@@ -101,8 +102,10 @@ std::string compute_task_signature(const std::vector<std::string>& inputs,
     // Sort copies of paths for deterministic signature
     std::vector<std::string> sorted_inputs = inputs;
     std::vector<std::string> sorted_outputs = outputs;
+    std::vector<std::string> sorted_excludes = exclude_inputs;
     std::sort(sorted_inputs.begin(), sorted_inputs.end());
     std::sort(sorted_outputs.begin(), sorted_outputs.end());
+    std::sort(sorted_excludes.begin(), sorted_excludes.end());
 
     blake3_hasher hasher;
     blake3_hasher_init(&hasher);
@@ -113,6 +116,7 @@ std::string compute_task_signature(const std::vector<std::string>& inputs,
         std::cerr << "\tcommand: " << command << '\n';
         std::cerr << "\t" << inputs.size() << " input(s)\n";
         std::cerr << "\t" << outputs.size() << " output(s)\n";
+        std::cerr << "\t" << exclude_inputs.size() << " exclude(s)\n";
         std::cerr << "\thash algorithm: " << hash_algorithm << '\n';
         if (signature_keys.size() > 0)
         {
@@ -138,6 +142,11 @@ std::string compute_task_signature(const std::vector<std::string>& inputs,
     blake3_hasher_update(&hasher, "\x03", 1); // separator
 
     blake3_hasher_update(&hasher, hash_algorithm.data(), hash_algorithm.size());
+
+    blake3_hasher_update(&hasher, "\x06", 1); // separator before excludes
+
+    for (const auto& p : sorted_excludes)
+        blake3_hasher_update(&hasher, p.data(), p.size() + 1);
 
     // Signature keys are hashed in order (not sorted — order may be meaningful)
     for (const auto& key : signature_keys)
@@ -297,6 +306,7 @@ bool cache_lookup(const std::string& cache_dir,
     CFObj<CFStringRef> k_command(create_cfstring("command"));
     CFObj<CFStringRef> k_inputs(create_cfstring("inputs"));
     CFObj<CFStringRef> k_outputs(create_cfstring("outputs"));
+    CFObj<CFStringRef> k_exclude_inputs(create_cfstring("exclude_inputs"));
     CFObj<CFStringRef> k_input_fingerprint(create_cfstring("input_fingerprint"));
     CFObj<CFStringRef> k_output_fingerprint(create_cfstring("output_fingerprint"));
     CFObj<CFStringRef> k_hash_algo(create_cfstring("hash_algorithm"));
@@ -305,6 +315,7 @@ bool cache_lookup(const std::string& cache_dir,
     out_entry.command = cfstring_to_string((CFStringRef)CFDictionaryGetValue(dict, k_command.Get()));
     out_entry.inputs = cfarray_to_vector((CFArrayRef)CFDictionaryGetValue(dict, k_inputs.Get()));
     out_entry.outputs = cfarray_to_vector((CFArrayRef)CFDictionaryGetValue(dict, k_outputs.Get()));
+    out_entry.exclude_inputs = cfarray_to_vector((CFArrayRef)CFDictionaryGetValue(dict, k_exclude_inputs.Get()));
     out_entry.input_fingerprint = cfstring_to_hex64((CFStringRef)CFDictionaryGetValue(dict, k_input_fingerprint.Get()));
     out_entry.output_fingerprint = cfstring_to_hex64((CFStringRef)CFDictionaryGetValue(dict, k_output_fingerprint.Get()));
     out_entry.hash_algorithm = cfstring_to_string((CFStringRef)CFDictionaryGetValue(dict, k_hash_algo.Get()));
@@ -356,6 +367,10 @@ bool cache_store(const std::string& cache_dir,
     CFObj<CFStringRef> k_outputs(create_cfstring("outputs"));
     CFObj<CFArrayRef> v_outputs(create_cfarray(entry.outputs));
     CFDictionarySetValue(dict, k_outputs.Get(), v_outputs.Get());
+
+    CFObj<CFStringRef> k_exclude_inputs(create_cfstring("exclude_inputs"));
+    CFObj<CFArrayRef> v_exclude_inputs(create_cfarray(entry.exclude_inputs));
+    CFDictionarySetValue(dict, k_exclude_inputs.Get(), v_exclude_inputs.Get());
 
     CFObj<CFStringRef> k_input_fingerprint(create_cfstring("input_fingerprint"));
     CFObj<CFStringRef> v_input_fingerprint(hex64_to_cfstring(entry.input_fingerprint));

@@ -8,6 +8,7 @@ Calculate a combined hash (fingerprint) of files matching specified patterns.
 - **Multiple hash algorithms** - CRC32C (default, fast) or BLAKE3 (cryptographic)
 - **Glob pattern filtering** - Include files with patterns like `*.cpp`, `src/**/*.c`, `*.{h,cpp}`
 - **Regex filtering** - Extended regex patterns (ECMAScript syntax)
+- **Exclusion patterns** - Subtract specific paths or globs (`-e`) from broader inputs
 - **List output** - Display per-file hashes in `<hash>\t<path>` format
 - **Xattr caching** - Store fingerprints in extended attributes to avoid recomputation
 - **Environment variable expansion** - Support `${VAR}` and `$(VAR)` in file paths and .xcfilelist inputs
@@ -33,6 +34,9 @@ fingerprint --list -g '*.cpp' -g '*.h' /path/to/dir
 # Filter by regex
 fingerprint --list -r 'src/.*\.cpp$' /path/to/dir
 
+# Exclude a directory subtree (pruned during traversal) and a glob of generated files
+fingerprint -e src/generated/ -e 'src/**/*.gen.h' /path/to/src
+
 # Force hash recalculation on each run (on is default for cashing the hash in file's xattr)
 fingerprint --xattr=off /path/to/dir
 
@@ -53,6 +57,7 @@ fingerprint -c snapshot.json /path/to/dir
 |--------|-------------|
 | `-g, --glob` | Glob pattern (repeatable, case-insensitive) |
 | `-r, --regex` | Extended regex pattern (ECMAScript) |
+| `-e, --exclude` | Path or glob to exclude from fingerprinting (repeatable, supports `${VAR}`) |
 | `-H, --hash` | Hash algorithm: `crc32c` (default) or `blake3` |
 | `-F, --fingerprint-mode` | Path handling: `default`, `absolute`, or `relative` |
 | `-X, --xattr` | Caching: `on` (default), `off`, `refresh`, or `clear` |
@@ -68,6 +73,25 @@ fingerprint -c snapshot.json /path/to/dir
 - Patterns with `/` match relative file paths
 - Supports `**` for recursive matching (globstar)
 - Supports `?`, `*`, `[abc]`, `[!abc]`, and `{a,b}` brace expansion
+
+## Excluding paths
+
+`-e` / `--exclude` subtracts paths from the set being fingerprinted. Useful for narrow exceptions inside broad inputs (e.g. excluding generated files under a source directory).
+
+There are three accepted shapes. Relative paths resolve against the **currently searched directory**. Note: this is **different from "gate"** tool.
+
+| Shape | Example | Behavior |
+|-------|---------|----------|
+| Literal file or directory | `src/generated/`, `build/cache.bin` | Exact match for files; whole subtree pruned during traversal for directories. |
+| Glob containing `/` | `src/**/*.gen.h`, `vendor/*/internal/*` | Matched against the absolute file path. The literal directory prefix is resolved to absolute; the glob suffix is preserved. |
+| Glob without `/` | `*.gen.h`, `*.tmp` | Gitignore-style: matches the basename at any directory depth. |
+
+```sh
+# Mix all three: prune a subtree, exclude all *.gen.h anywhere, and exclude one file
+fingerprint -e src/generated/ -e '*.gen.h' -e build/cache.bin /path/to/src
+```
+
+Excludes are evaluated *after* `-g`/`-r` filters: a file matched by `--glob` but also by `--exclude` is dropped. Excludes are recorded in snapshot metadata so a snapshot saved with one exclude set is distinguishable from another.
 
 ## Xattr Caching
 

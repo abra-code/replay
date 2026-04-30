@@ -18,6 +18,7 @@ On first run, gate fingerprints inputs, executes the command, fingerprints outpu
 | `-o, --output=PATH` | Output file (repeatable) |
 | `-I, --input-list=FILE` | Read input paths from FILE, one per line (repeatable) |
 | `-O, --output-list=FILE` | Read output paths from FILE, one per line (repeatable) |
+| `-e, --exclude-input=PATH` | Path or glob to subtract from inputs (repeatable, CLI only) |
 | `-E, --env-list=FILE` | Fingerprint env vars listed in FILE (repeatable) |
 | `-S, --signature-key=KEY` | Additional string for task signature (repeatable) |
 | `-c, --cache-dir=DIR` | Cache directory (default: `.gate-cache`) |
@@ -128,6 +129,30 @@ gate -i src/config.yaml -i "src/**/*.cpp" -o "build/*.o" -- make build
 
 This feature significantly simplifies build rules that deal with many similar source or output files.
 
+## Excluding inputs
+
+`-e` / `--exclude-input` subtracts paths from the input set, so a broad input (e.g. a directory) can have narrow exceptions. Excludes are CLI-only — they are *not* read from `-I` input list files or from Xcode-provided `SCRIPT_INPUT_FILE_*` variables.
+
+```sh
+# Fingerprint everything under src/ except generated files
+gate -i src/ -e src/generated/ -o build/app -- make build
+
+# Mix literal subtree, anchored glob, and gitignore-style basename exclude
+gate -i src/ -e src/vendor/ -e "src/**/*.gen.h" -e '*.tmp' -o build/app -- make build
+```
+
+There are three accepted exclude shapes. Relative paths resolve against the **current working directory**. Note: this is **different from "fingerprint"** tool. Use absolute paths (e.g. with env var prefix) for inputs, outputs and input exclusions to remove ambiguity.
+
+| Shape | Example | Behavior |
+|-------|---------|----------|
+| Literal file or directory | `src/generated/`, `build/cache.bin` | Exact match for files; whole subtree pruned during traversal for directories. |
+| Glob containing `/` | `src/**/*.gen.h`, `vendor/*/internal/*` | Matched against the absolute file path. The literal directory prefix is resolved to absolute; the glob suffix is preserved verbatim, so the pattern only matches at the intended depth. |
+| Glob without `/` | `*.gen.h`, `*.tmp` | Gitignore-style: matches the basename at any directory depth. |
+
+If an exclude does not fall under any input root (typically a stale or mistyped path), gate prints a warning. Basename-style globs have no anchor and are skipped by this check.
+
+Excludes participate in the task signature, so changing the exclude set produces a new cache file rather than reusing a stale one.
+
 ## Environment Variable Expansion
 
 All path arguments (`-i`, `-o`, and paths inside `-I`/`-O` file lists) support environment variable expansion using both `${VAR}` and Xcode `$(VAR)` syntax:
@@ -198,6 +223,7 @@ Task signature includes:
 - Command string
 - Input paths (sorted)
 - Output paths (sorted)
+- Exclude-input paths (sorted)
 - Hash algorithm (`-H`)
 - Signature keys (`-S`)
 - Xcode build environment variables if present: CONFIGURATION, EFFECTIVE_PLATFORM_NAME, ARCHS

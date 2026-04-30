@@ -120,8 +120,16 @@ std::vector<Glob> compile_globs(const std::unordered_set<std::string>& glob_patt
             int flags = FNM_CASEFOLD;
             if ((glob_pattern.find('/') != std::string::npos) || (glob_pattern.find("**") != std::string::npos))
                 flags |= FNM_PATHNAME;
-            
+
+#if FINGERPRINT_USE_GLOB_CPP
+            // glob-cpp does not honor FNM_CASEFOLD; lowercase the pattern so it
+            // matches the lowercased haystack used by matches_any_glob().
+            std::string folded(glob_pattern);
+            std::transform(folded.begin(), folded.end(), folded.begin(), ::tolower);
+            compiled_globs.emplace_back(folded, flags);
+#else
             compiled_globs.emplace_back(glob_pattern, flags);
+#endif
         }
     }
 
@@ -236,6 +244,160 @@ static std::vector<std::string> split_path_components(const std::string& path) n
         components.emplace_back(path.substr(start));
     }
     return components;
+}
+
+// Compiled exclusion filter. Patterns are partitioned by shape so each match
+// happens against the right haystack. Leading '/' decides absolute vs relative.
+//
+//   literal_abs:        starts with '/' — exact match or child-of-prefix vs abs_path
+//                       e.g. "/proj/src/generated"
+//   literal_rel:        no leading '/' — same prefix logic but vs (abs_path - search_dir)
+//                       e.g. "src/generated"
+//   path_globs_abs:     glob pattern starting with '/' — matched vs abs_path
+//                       e.g. "/proj/src/**/*.gen.h"  (gate's resolve_path produces these)
+//   path_globs_rel:     glob pattern with '/' but no leading '/' — matched vs rel_path
+//                       e.g. "src/**/*.gen.h"  (fingerprint's relative-to-search-dir form)
+//   basename_globs:     glob pattern with no '/' — gitignore-style, matched vs basename
+//                       e.g. "*.gen.h"
+struct CompiledExcludes
+{
+    std::vector<std::string> literal_abs;
+    std::vector<std::string> literal_rel;
+    std::vector<Glob>        path_globs_abs;
+    std::vector<Glob>        path_globs_rel;
+    std::vector<Glob>        basename_globs;
+
+    bool empty() const noexcept
+    {
+        return literal_abs.empty() && literal_rel.empty()
+            && path_globs_abs.empty() && path_globs_rel.empty()
+            && basename_globs.empty();
+    }
+};
+
+static CompiledExcludes compile_excludes(const std::unordered_set<std::string>& exclude_patterns) noexcept
+{
+    CompiledExcludes ce;
+    if (exclude_patterns.empty()) return ce;
+
+    std::unordered_set<std::string> path_glob_abs_set;
+    std::unordered_set<std::string> path_glob_rel_set;
+    std::unordered_set<std::string> basename_glob_set;
+
+    for (const auto& p : exclude_patterns)
+    {
+        if (p.empty()) continue;
+
+        bool has_glob  = globoverlap::contains_glob_pattern_char(p);
+        bool has_slash = (p.find('/') != std::string::npos);
+        bool is_abs    = (p[0] == '/');
+
+        if (has_glob && !has_slash)
+        {
+            basename_glob_set.insert(p);
+        }
+        else if (has_glob)
+        {
+            (is_abs ? path_glob_abs_set : path_glob_rel_set).insert(p);
+        }
+        else
+        {
+            // Literal path. Strip trailing slashes for consistent prefix matching.
+            std::string lit = p;
+            if (is_abs)
+                lit = std::filesystem::path(p).lexically_normal().string();
+            while (lit.size() > 1 && lit.back() == '/') lit.pop_back();
+            (is_abs ? ce.literal_abs : ce.literal_rel).push_back(std::move(lit));
+        }
+    }
+
+    ce.path_globs_abs = compile_globs(path_glob_abs_set);
+    ce.path_globs_rel = compile_globs(path_glob_rel_set);
+    ce.basename_globs = compile_globs(basename_glob_set);
+    return ce;
+}
+
+// Prefix-match check: returns true if `path` equals `prefix` or is `prefix + "/..."`.
+static inline bool path_under_prefix(const char* path, size_t path_len,
+                                     const std::string& prefix) noexcept
+{
+    size_t plen = prefix.size();
+    if (path_len < plen) return false;
+    if (std::memcmp(path, prefix.data(), plen) != 0) return false;
+    if (path_len == plen) return true;
+    return path[plen] == '/';
+}
+
+// Check whether an absolute path matches any literal exclude (absolute prefix
+// against abs_path, or relative prefix against the path-relative-to-search_dir).
+// search_dir may be nullptr — relative literals are then never matched.
+static bool is_path_under_literal_exclude(const char* abs_path, size_t abs_len,
+                                          const CompiledExcludes& excludes,
+                                          const char* search_dir,
+                                          size_t search_dir_len) noexcept
+{
+    for (const auto& lit : excludes.literal_abs)
+    {
+        if (path_under_prefix(abs_path, abs_len, lit)) return true;
+    }
+    if (!excludes.literal_rel.empty() && search_dir != nullptr
+        && abs_len > search_dir_len
+        && std::memcmp(abs_path, search_dir, search_dir_len) == 0)
+    {
+        const char* rel = abs_path + search_dir_len;
+        if (*rel == '/') ++rel;
+        size_t rel_len = std::strlen(rel);
+        for (const auto& lit : excludes.literal_rel)
+        {
+            if (path_under_prefix(rel, rel_len, lit)) return true;
+        }
+    }
+    return false;
+}
+
+// Check exclusion of an absolute path. Each exclude category matches against
+// its appropriate haystack (abs_path, or rel-to-search_dir, or basename).
+// Caller must pass abs_path without a trailing '/' (matches_any_glob asserts).
+// search_dir may be nullptr — relative-shape excludes are then skipped, matching
+// only absolute literals/globs and basename globs.
+static bool is_path_excluded(const char* abs_path, const CompiledExcludes& excludes,
+                              const char* search_dir = nullptr) noexcept
+{
+    if (excludes.empty()) return false;
+
+    size_t path_len = std::strlen(abs_path);
+    if (path_len == 0) return false;
+
+    size_t search_dir_len = (search_dir != nullptr) ? std::strlen(search_dir) : 0;
+
+    if (is_path_under_literal_exclude(abs_path, path_len, excludes, search_dir, search_dir_len))
+        return true;
+
+    // Absolute path-globs always match against abs_path.
+    if (!excludes.path_globs_abs.empty()
+        && matches_any_glob(abs_path, excludes.path_globs_abs))
+        return true;
+
+    // Relative path-globs match only when abs_path is under search_dir.
+    if (!excludes.path_globs_rel.empty() && search_dir != nullptr
+        && path_len > search_dir_len
+        && std::memcmp(abs_path, search_dir, search_dir_len) == 0)
+    {
+        const char* rel_path = abs_path + search_dir_len;
+        if (*rel_path == '/') ++rel_path;
+        if (rel_path[0] != '\0' && matches_any_glob(rel_path, excludes.path_globs_rel))
+            return true;
+    }
+
+    if (!excludes.basename_globs.empty())
+    {
+        const char* basename = std::strrchr(abs_path, '/');
+        basename = (basename != nullptr) ? basename + 1 : abs_path;
+        if (basename[0] != '\0' && matches_any_glob(basename, excludes.basename_globs))
+            return true;
+    }
+
+    return false;
 }
 
 static inline __attribute__((always_inline))
@@ -625,14 +787,15 @@ bool is_path_under_directory(const std::string& start_dir, const std::string& pa
 int
 fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths,
                                     const std::unordered_set<std::string>& glob_patterns,
-                                    const std::unordered_set<std::string>& regex_patterns) noexcept
+                                    const std::unordered_set<std::string>& regex_patterns,
+                                    const std::unordered_set<std::string>& exclude_patterns) noexcept
 {
     dispatch_queue_t directory_traversal_queue = get_directory_traversal_queue();
     dispatch_group_t task_group = get_all_tasks_group();
 
     // Collect files with their FileInfo for batch processing
     std::vector<std::pair<std::string, FileInfo>> files;
-    
+
     // Get current directory once for all relative path resolution
     std::error_code ec;
     std::filesystem::path base = std::filesystem::current_path(ec);
@@ -642,13 +805,27 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
         s_result = EXIT_FAILURE;
         return s_result;
     }
-    
+
+    CompiledExcludes compiled_excludes = compile_excludes(exclude_patterns);
+
     // Resolve and normalize all paths
     for (const auto& input : paths)
     {
         std::filesystem::path p = input;
         std::filesystem::path abs_clean = p.is_absolute() ? p.lexically_normal() : (base / p).lexically_normal();
-        
+        std::string abs_str = abs_clean.string();
+        // lexically_normal can leave a trailing '/' (e.g. from "/path/." → "/path/");
+        // strip it so the string matches FTS-produced paths.
+        while (abs_str.size() > 1 && abs_str.back() == '/') abs_str.pop_back();
+
+        // Use abs_str as search_dir for relative exclude pattern matching
+        if (is_path_excluded(abs_str.c_str(), compiled_excludes, abs_str.c_str()))
+        {
+            if (g_verbose)
+                std::cerr << "Skipping excluded input: " << abs_str << '\n';
+            continue;
+        }
+
         // Now categorize the resolved path
         struct stat st;
         if (lstat(abs_clean.c_str(), &st) == 0)
@@ -656,24 +833,28 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
             if (S_ISDIR(st.st_mode))
             {
                 // Dispatch directory traversal immediately
-                std::string dir_path = abs_clean.string();
+                std::string dir_path = abs_str;
                 dispatch_group_async(task_group, directory_traversal_queue, ^{
                     if (is_exiting()) { return; }
-                    __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns);
+                    __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns, exclude_patterns);
                 });
             }
             else if (S_ISLNK(st.st_mode))
             {
                 // add symlink itself
                 FileInfo info(st);
-                files.emplace_back(abs_clean.string(), std::move(info));
-                
+                files.emplace_back(abs_str, std::move(info));
+
                 // resolve the entire symlink chain
                 auto chain = resolve_symlink_chain(abs_clean);
-                
+
                 // Process each entry in the chain
                 for (auto& [path, info] : chain)
                 {
+                    // Use abs_str (the original path) as search_dir for relative matching
+                    if (is_path_excluded(path.c_str(), compiled_excludes, abs_str.c_str()))
+                        continue;
+
                     if (info.is_directory())
                     {
                         // Found a directory in the chain - dispatch for traversal
@@ -684,7 +865,7 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
                         std::string dir_path = path;  // Copy the path for capture
                         dispatch_group_async(task_group, directory_traversal_queue, ^{
                             if (is_exiting()) { return; }
-                            __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns);
+                            __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns, exclude_patterns);
                         });
                     }
                     else
@@ -693,7 +874,7 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
                         files.emplace_back(path, std::move(info));
                     }
                 }
-                
+
                 if (g_verbose && chain.size() > 1)
                 {
                     std::cerr << "Resolved symlink chain of length " << chain.size()
@@ -704,7 +885,7 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
             {
                 // Regular file - construct FileInfo from stat structure
                 FileInfo info(st);
-                files.emplace_back(abs_clean.string(), std::move(info));
+                files.emplace_back(abs_str, std::move(info));
             }
             else
             {
@@ -721,7 +902,7 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
             }
             FileInfo info;
             info.mark_as_nonexistent();
-            files.emplace_back(abs_clean.string(), std::move(info));
+            files.emplace_back(abs_str, std::move(info));
         }
     }
     
@@ -739,7 +920,8 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
 
 
 int
-fingerprint::find_and_process_globbed_paths(const std::unordered_set<std::string>& paths) noexcept
+fingerprint::find_and_process_globbed_paths(const std::unordered_set<std::string>& paths,
+                                             const std::unordered_set<std::string>& exclude_patterns) noexcept
 {
     if (paths.empty())
         return EXIT_SUCCESS;
@@ -857,7 +1039,7 @@ fingerprint::find_and_process_globbed_paths(const std::unordered_set<std::string
     // Plain paths
     if (!plain_paths.empty())
     {
-        __unused int plain_result = find_and_process_paths(plain_paths, {}, {});
+        __unused int plain_result = find_and_process_paths(plain_paths, {}, {}, exclude_patterns);
     }
 
     // Glob paths
@@ -872,10 +1054,11 @@ fingerprint::find_and_process_globbed_paths(const std::unordered_set<std::string
 
             std::string search_dir = search_dir_ref;
             std::unordered_set<std::string> globs = globs_ref;
+            std::unordered_set<std::string> excludes = exclude_patterns;
 
             dispatch_group_async(task_group, directory_traversal_queue, ^{
                 if (is_exiting()) return;
-                __unused int find_result = find_files_internal(search_dir, globs, {});
+                __unused int find_result = find_files_internal(search_dir, globs, {}, excludes);
             });
         }
     }
@@ -892,10 +1075,11 @@ fingerprint::find_and_process_globbed_paths(const std::unordered_set<std::string
 int
 fingerprint::find_files_internal(std::string search_dir,
                                  const std::unordered_set<std::string>& glob_patterns,
-                                 const std::unordered_set<std::string>& regex_patterns) noexcept
+                                 const std::unordered_set<std::string>& regex_patterns,
+                                 const std::unordered_set<std::string>& exclude_patterns) noexcept
 {
     assert(search_dir.size() > 0);
-    
+
     if (is_exiting())
     {
         s_result = EXIT_FAILURE;
@@ -906,24 +1090,33 @@ fingerprint::find_files_internal(std::string search_dir,
     if (!search_dir.empty() && search_dir.back() == '/')
         search_dir.pop_back();
 
+    // Skip the entire walk if the search root itself is excluded
+    CompiledExcludes compiled_excludes = compile_excludes(exclude_patterns);
+    if (is_path_excluded(search_dir.c_str(), compiled_excludes, search_dir.c_str()))
+    {
+        if (g_verbose)
+            std::cerr << "Skipping excluded search dir: " << search_dir << '\n';
+        return EXIT_SUCCESS;
+    }
+
     dispatch_sync(get_shared_container_mutation_queue(), ^{
                 s_search_bases.emplace(std::move(search_dir));
             });
-    
+
     struct timeval time_start;
     struct timeval time_end;
     ::gettimeofday(&time_start, nullptr);
 
     std::vector<Glob> compiled_globs = compile_globs(glob_patterns);
     std::vector<Regex> compiled_regexes = compile_regexes(regex_patterns);
-    
+
     // FTS_LOGICAL has an undesired behavior of:
     // 1. listing files twice:
     //    - under path with symlinked dir
     //    - under path with resolved dir symlink
     // 2. Not returning FTS_SL and FTS_SLNONE entries
     // So we use FTS_PHYSICAL and resolve the links outside of search dir scope
-    
+
     char *paths[2] = {const_cast<char*>(search_dir.c_str()), nullptr};
     FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_XDEV | FTS_NOCHDIR, nullptr);
     if (fts == nullptr)
@@ -942,34 +1135,50 @@ fingerprint::find_files_internal(std::string search_dir,
         switch (ent->fts_info)
         {
             case FTS_D:  // pre-order directory
+                // Prune the entire subtree if this directory matches a literal
+                // exclude (cheap; avoids descending into excluded dirs).
+                // Glob excludes apply at file granularity below.
+                if ((!compiled_excludes.literal_abs.empty()
+                     || !compiled_excludes.literal_rel.empty())
+                    && is_path_under_literal_exclude(ent->fts_path, ent->fts_pathlen,
+                                                     compiled_excludes,
+                                                     search_dir.c_str(),
+                                                     search_dir.size()))
+                {
+                    if (g_verbose)
+                        std::cerr << "Pruning excluded directory: " << ent->fts_path << '\n';
+                    fts_set(fts, ent, FTS_SKIP);
+                }
                 break;
 
             case FTS_F:  // regular file
             case FTS_SL: // symbolic link
             case FTS_SLNONE: // symbolic link with non-existent target
             {
-                // No glob filtering
+                // Exclusion check uses absolute path; include filters use relative.
+                if (is_path_excluded(ent->fts_path, compiled_excludes, search_dir.c_str()))
+                    break;
+
                 if (compiled_globs.empty() && compiled_regexes.empty())
                 {
                     process_matched_file(ent->fts_path, ent->fts_statp);
                     break;
                 }
 
-                // Relative path starting right after the base directory
                 const char* relative_path = ent->fts_path + search_dir.length();
                 if (*relative_path == '/') ++relative_path;
-                
+
                 if (matches_any_glob(relative_path, compiled_globs) || matches_any_regex(relative_path, compiled_regexes))
                 {
                     process_matched_file(ent->fts_path, ent->fts_statp);
                 }
-                
+
                 // If it's a symlink, resolve chain
                 if (ent->fts_info == FTS_SL || ent->fts_info == FTS_SLNONE)
                 {
                     std::filesystem::path sym_path = ent->fts_path;
                     auto chain = resolve_symlink_chain(sym_path);
-                    
+
                     // Process each entry in the chain
                     for (auto& [path, info] : chain)
                     {
@@ -978,6 +1187,9 @@ fingerprint::find_files_internal(std::string search_dir,
                         // then current directory traversal is not covering it
                         if (!is_path_under_directory(search_dir, path))
                         {
+                            if (is_path_excluded(path.c_str(), compiled_excludes, search_dir.c_str()))
+                                continue;
+
                             if (info.is_directory())
                             {
                                 // Found a directory in the chain - dispatch for traversal
@@ -986,9 +1198,10 @@ fingerprint::find_files_internal(std::string search_dir,
                                     std::cerr << "Symlink chain leads to directory: " << path << '\n';
                                 }
                                 std::string dir_path = path;  // Copy the path for capture
+                                std::unordered_set<std::string> excludes_copy = exclude_patterns;
                                 dispatch_group_async(get_all_tasks_group(), get_directory_traversal_queue(), ^{
                                     if (is_exiting()) { return; }
-                                    __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns);
+                                    __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns, excludes_copy);
                                 });
                             }
                             else
@@ -1365,6 +1578,17 @@ static CFMutableDictionaryRef build_snapshot_dictionary(const SnapshotMetadata& 
         CFDictionarySetValue(params_dict, CFSTR("regex_patterns"), arr);
     }
 
+    {
+        CFObj<CFMutableArrayRef> arr(CFArrayCreateMutable(kCFAllocatorDefault, metadata.exclude_patterns.size(),
+            &kCFTypeArrayCallBacks));
+        for (const auto& p : metadata.exclude_patterns)
+        {
+            CFObj<CFStringRef> cfstr(CFStringCreateWithCString(kCFAllocatorDefault, p.c_str(), kCFStringEncodingUTF8));
+            CFArrayAppendValue(arr, cfstr);
+        }
+        CFDictionarySetValue(params_dict, CFSTR("exclude_patterns"), arr);
+    }
+
     CFStringRef hash_algo = (metadata.hash_algorithm == FileHashAlgorithm::CRC32C) ?
         CFSTR("crc32c") : CFSTR("blake3");
     CFDictionarySetValue(params_dict, CFSTR("hash_algorithm"), hash_algo);
@@ -1535,6 +1759,7 @@ SnapshotMetadata fingerprint::create_snapshot_metadata(
     const std::unordered_set<std::string>& input_paths,
     const std::unordered_set<std::string>& glob_patterns,
     const std::unordered_set<std::string>& regex_patterns,
+    const std::unordered_set<std::string>& exclude_patterns,
     FileHashAlgorithm hash_algorithm,
     FingerprintOptions fingerprint_mode,
     uint64_t fingerprint,
@@ -1544,9 +1769,11 @@ SnapshotMetadata fingerprint::create_snapshot_metadata(
     metadata.input_paths.assign(input_paths.begin(), input_paths.end());
     metadata.glob_patterns.assign(glob_patterns.begin(), glob_patterns.end());
     metadata.regex_patterns.assign(regex_patterns.begin(), regex_patterns.end());
+    metadata.exclude_patterns.assign(exclude_patterns.begin(), exclude_patterns.end());
     std::sort(metadata.input_paths.begin(), metadata.input_paths.end());
     std::sort(metadata.glob_patterns.begin(), metadata.glob_patterns.end());
     std::sort(metadata.regex_patterns.begin(), metadata.regex_patterns.end());
+    std::sort(metadata.exclude_patterns.begin(), metadata.exclude_patterns.end());
     metadata.hash_algorithm = hash_algorithm;
     metadata.fingerprint_mode = fingerprint_mode;
     metadata.fingerprint = fingerprint;

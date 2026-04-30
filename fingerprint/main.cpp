@@ -39,6 +39,11 @@ static void print_usage(std::ostream& stream)
     stream << "  -r, --regex=PATTERN Extended regex patterns (repeatable, case-insensitive)\n";
     stream << "        Uses ECMAScript syntax (also known as JavaScript regex)\n";
     stream << "        Pattern match is always applied to file paths relative to search directory\n";
+    stream << "  -e, --exclude=PATTERN  Exclude paths from fingerprinting (repeatable, supports ${VAR}/$(VAR))\n";
+    stream << "        Three accepted shapes (relative paths resolve against the current directory):\n";
+    stream << "          - literal file or directory  : excludes the file, or prunes the whole subtree\n";
+    stream << "          - glob with '/'              : matched against absolute file paths (e.g. 'src/**/*.gen.h')\n";
+    stream << "          - glob without '/'           : gitignore-style, matches basename at any depth (e.g. '*.gen.h')\n";
     stream << "  -H, --hash=ALGO     File content hash algorithm: crc32c (default) or blake3\n";
     stream << "  -F, --fingerprint-mode=MODE  Options to include paths in final fingerprint:\n";
     stream << "        default  : only file content hashes (rename-insensitive) - default if not specified\n";
@@ -92,6 +97,7 @@ int main(int argc, char * argv[])
     static const struct option long_options[] = {
         { "glob", required_argument,  nullptr, 'g' },
         { "regex", required_argument, nullptr, 'r' },
+        { "exclude", required_argument, nullptr, 'e' },
         { "hash", required_argument,  nullptr, 'H' },
         { "fingerprint-mode",required_argument, nullptr, 'F' },
         { "xattr", required_argument, nullptr, 'X' },
@@ -107,6 +113,7 @@ int main(int argc, char * argv[])
 
     std::unordered_set<std::string> glob_patterns;
     std::unordered_set<std::string> regex_patterns;
+    std::unordered_set<std::string> exclude_patterns;
     std::unordered_set<std::string> paths;
     std::string hash_type = "crc32c";
     std::string xattr = "on";
@@ -116,7 +123,7 @@ int main(int argc, char * argv[])
     FingerprintOptions fingerprint_mode = FingerprintOptions::Default;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "g:r:H:F:X:I:ls:c:hVv", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "g:r:e:H:F:X:I:ls:c:hVv", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -135,7 +142,13 @@ int main(int argc, char * argv[])
                 regex_patterns.insert(std::move(pattern));  // new container
             }
             break;
-            
+
+            case 'e':
+            {
+                exclude_patterns.insert(expand_env_variables(optarg));
+            }
+            break;
+
             case 'H':
             {
                 hash_type = optarg;
@@ -326,6 +339,17 @@ int main(int argc, char * argv[])
             std::cout << "\t<none>" << std::endl;
         }
 
+        std::cout << "exclude patterns: " << std::endl;
+        for (const auto& exclude_pattern : exclude_patterns)
+        {
+            std::cout << "\t" << exclude_pattern << std::endl;
+        }
+
+        if (exclude_patterns.empty())
+        {
+            std::cout << "\t<none>" << std::endl;
+        }
+
         std::cout << "hash algorithm: " << hash_type << std::endl;
         std::cout << "xattr cache: " << xattr << std::endl;
     }
@@ -338,7 +362,7 @@ int main(int argc, char * argv[])
     
     ::gettimeofday(&time_start, nullptr);
     
-    result = fingerprint::find_and_process_paths(paths, glob_patterns, regex_patterns);
+    result = fingerprint::find_and_process_paths(paths, glob_patterns, regex_patterns, exclude_patterns);
     fingerprint::wait_for_all_tasks();
 
     ::gettimeofday(&time_tasks_end, nullptr);
@@ -358,7 +382,7 @@ int main(int argc, char * argv[])
     if (!snapshot_path.empty())
     {
         SnapshotMetadata metadata = fingerprint::create_snapshot_metadata(
-            paths, glob_patterns, regex_patterns, g_hash, fingerprint_mode, fingerprint, time_end);
+            paths, glob_patterns, regex_patterns, exclude_patterns, g_hash, fingerprint_mode, fingerprint, time_end);
         
         int snap_result = fingerprint::save_snapshot(snapshot_path, metadata);
         if (snap_result != EXIT_SUCCESS)
@@ -383,7 +407,7 @@ int main(int argc, char * argv[])
             }
 
             SnapshotMetadata metadata = fingerprint::create_snapshot_metadata(
-                paths, glob_patterns, regex_patterns, g_hash, fingerprint_mode, fingerprint, time_end);
+                paths, glob_patterns, regex_patterns, exclude_patterns, g_hash, fingerprint_mode, fingerprint, time_end);
 
             int snap_result = fingerprint::save_snapshot(current_snapshot, metadata);
             if (snap_result != EXIT_SUCCESS)

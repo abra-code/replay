@@ -51,6 +51,13 @@ static void print_usage(std::ostream& stream)
     stream << "                         Supports Xcode .xcfilelist with ${VAR}/$(VAR)\n";
     stream << "  -O, --output-list=FILE Read output paths from FILE (repeatable)\n";
     stream << "                         Supports Xcode .xcfilelist with ${VAR}/$(VAR)\n";
+    stream << "  -e, --exclude-input=PATH  Exclude PATH from inputs (repeatable, CLI only, supports ${VAR}/$(VAR))\n";
+    stream << "                         Three accepted shapes (relative paths resolve against the current directory):\n";
+    stream << "                           - literal file or dir   : exact match or whole subtree pruned\n";
+    stream << "                           - glob with '/'         : matched against absolute file paths\n";
+    stream << "                           - glob without '/'      : gitignore-style, matches basename at any depth\n";
+    stream << "                         Excludes contribute to the task signature. A warning is printed if an\n";
+    stream << "                         exclude does not fall under any input root.\n";
     stream << "  -E, --env-list=FILE    Fingerprint env vars listed in FILE (repeatable)\n";
     stream << "                         Each line is expanded (${VAR}/$(VAR)) and the\n";
     stream << "                         result is included in the input fingerprint.\n";
@@ -123,13 +130,16 @@ static std::string current_timestamp()
 
 // Fingerprint a list of files using the fingerprint class infrastructure.
 // Handles find_and_process_globbed_paths -> wait -> sort_and_compute -> reset cycle.
-static uint64_t fingerprint_files(const std::vector<std::string>& paths)
+// Optional excludes filter out files/dirs matching literal absolute paths or globs.
+static uint64_t fingerprint_files(const std::vector<std::string>& paths,
+                                  const std::vector<std::string>& excludes = {})
 {
     if (paths.empty()) return 0;
 
     std::unordered_set<std::string> path_set(paths.begin(), paths.end());
+    std::unordered_set<std::string> exclude_set(excludes.begin(), excludes.end());
 
-    int result = fingerprint::find_and_process_globbed_paths(path_set);
+    int result = fingerprint::find_and_process_globbed_paths(path_set, exclude_set);
     if (result != EXIT_SUCCESS)
     {
         fingerprint::reset();
@@ -196,25 +206,27 @@ static std::string build_env_text(const std::vector<std::string>& env_list_files
 int main(int argc, char* argv[])
 {
     static const struct option long_options[] = {
-        { "input",         required_argument, nullptr, 'i' },
-        { "output",        required_argument, nullptr, 'o' },
-        { "input-list",    required_argument, nullptr, 'I' },
-        { "output-list",   required_argument, nullptr, 'O' },
-        { "env-list",      required_argument, nullptr, 'E' },
-        { "signature-key", required_argument, nullptr, 'S' },
-        { "cache-dir",     required_argument, nullptr, 'c' },
-        { "cache-format",  required_argument, nullptr, 'C' },
-        { "hash",          required_argument, nullptr, 'H' },
-        { "force",         no_argument,       nullptr, 'f' },
-        { "dry-run",       no_argument,       nullptr, 'd' },
-        { "verbose",       no_argument,       nullptr, 'v' },
-        { "help",          no_argument,       nullptr, 'h' },
-        { "version",       no_argument,       nullptr, 'V' },
+        { "input",          required_argument, nullptr, 'i' },
+        { "output",         required_argument, nullptr, 'o' },
+        { "input-list",     required_argument, nullptr, 'I' },
+        { "output-list",    required_argument, nullptr, 'O' },
+        { "exclude-input",  required_argument, nullptr, 'e' },
+        { "env-list",       required_argument, nullptr, 'E' },
+        { "signature-key",  required_argument, nullptr, 'S' },
+        { "cache-dir",      required_argument, nullptr, 'c' },
+        { "cache-format",   required_argument, nullptr, 'C' },
+        { "hash",           required_argument, nullptr, 'H' },
+        { "force",          no_argument,       nullptr, 'f' },
+        { "dry-run",        no_argument,       nullptr, 'd' },
+        { "verbose",        no_argument,       nullptr, 'v' },
+        { "help",           no_argument,       nullptr, 'h' },
+        { "version",        no_argument,       nullptr, 'V' },
         { nullptr, 0, nullptr, 0 }
     };
 
     std::vector<std::string> inputs;
     std::vector<std::string> outputs;
+    std::vector<std::string> exclude_inputs;
     std::vector<std::string> env_list_files;
     std::vector<std::string> signature_keys;
     std::string cache_dir = ".gate-cache";
@@ -224,7 +236,7 @@ int main(int argc, char* argv[])
     bool dry_run = false;
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "i:o:I:O:E:S:c:C:H:fvhV", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "i:o:I:O:e:E:S:c:C:H:fvhV", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -245,6 +257,7 @@ int main(int argc, char* argv[])
             }
             break;
 
+            case 'e': exclude_inputs.push_back(expand_env_variables(optarg)); break;
             case 'E': env_list_files.push_back(optarg); break;
             case 'S': signature_keys.push_back(optarg); break;
             case 'c': cache_dir = optarg; break;
@@ -349,17 +362,60 @@ int main(int argc, char* argv[])
     // Expand env list files into text (hashed in memory, no temp file)
     std::string env_text = build_env_text(env_list_files);
 
-    // Resolve all paths to absolute
-    for (auto& p : inputs) p = resolve_path(p);
-    for (auto& p : outputs) p = resolve_path(p);
+    // Resolve all paths to absolute. resolve_path() handles glob patterns by
+    // resolving only the literal directory prefix; basename-only patterns
+    // (no '/') are preserved as gitignore-style shortcuts.
+    std::vector<std::string> exclude_inputs_raw = exclude_inputs;
+    for (auto& p : inputs)         p = resolve_path(p);
+    for (auto& p : outputs)        p = resolve_path(p);
+    for (auto& p : exclude_inputs) p = resolve_path(p);
+
+    // Warn when an exclude can't possibly match any input root. Helps catch
+    // typos and stale excludes (e.g. left over after refactoring inputs).
+    // Basename-style excludes ("*.gen.h", no '/') match at any depth and are
+    // skipped — they have no anchor to compare against.
+    {
+        auto literal_prefix = [](const std::string& p) -> std::string {
+            size_t first_glob = p.find_first_of("*?[{");
+            if (first_glob == std::string::npos) return p;
+            size_t last_slash = p.find_last_of('/', first_glob);
+            return last_slash == std::string::npos ? std::string() : p.substr(0, last_slash);
+        };
+        auto is_under = [](const std::string& path, const std::string& root) {
+            if (root.empty()) return false;
+            if (path == root) return true;
+            return path.size() > root.size()
+                && std::memcmp(path.data(), root.data(), root.size()) == 0
+                && path[root.size()] == '/';
+        };
+        for (size_t i = 0; i < exclude_inputs.size(); ++i)
+        {
+            const std::string& e = exclude_inputs[i];
+            if (e.find('/') == std::string::npos) continue;  // basename shortcut
+            std::string e_prefix = literal_prefix(e);
+            if (e_prefix.empty()) continue;
+            bool covered = false;
+            for (const auto& in : inputs)
+            {
+                if (is_under(e_prefix, literal_prefix(in))) { covered = true; break; }
+            }
+            if (!covered)
+            {
+                std::cerr << "warning: -e '" << exclude_inputs_raw[i] << "'";
+                if (exclude_inputs_raw[i] != e)
+                    std::cerr << " (resolved: '" << e << "')";
+                std::cerr << " does not fall under any input root\n";
+            }
+        }
+    }
 
     // All existence / glob logic is now inside find_and_process_globbed_paths()
 
     std::string command_str = build_command_string(cmd_argv, cmd_argc);
-    std::string task_signature = compute_task_signature(inputs, outputs, command_str, hash_type, signature_keys);
+    std::string task_signature = compute_task_signature(inputs, outputs, exclude_inputs, command_str, hash_type, signature_keys);
 
     // Fingerprint inputs before execution (combined with env text)
-    uint64_t input_fingerprint = fingerprint_files(inputs);
+    uint64_t input_fingerprint = fingerprint_files(inputs, exclude_inputs);
     input_fingerprint = combine_with_env(input_fingerprint, env_text);
     if (!inputs.empty() && input_fingerprint == 0)
     {
@@ -440,6 +496,7 @@ int main(int argc, char* argv[])
     entry.command = command_str;
     entry.inputs = inputs;
     entry.outputs = outputs;
+    entry.exclude_inputs = exclude_inputs;
     entry.input_fingerprint = input_fingerprint;
     entry.output_fingerprint = output_fingerprint;
     entry.hash_algorithm = hash_type;

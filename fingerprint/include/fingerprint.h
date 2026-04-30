@@ -49,6 +49,7 @@ struct SnapshotMetadata
     std::vector<std::string> input_paths;
     std::vector<std::string> glob_patterns;
     std::vector<std::string> regex_patterns;
+    std::vector<std::string> exclude_patterns;
     FileHashAlgorithm hash_algorithm;
     FingerprintOptions fingerprint_mode;
     uint64_t fingerprint;
@@ -61,14 +62,19 @@ public:
     // main entry point. schedules async tasks and returns immediately
     // separates directories from files and dispatches appropriately
     // may be started from any thread, typically main
+    // exclude_patterns: optional set of absolute paths or glob patterns;
+    //                   files matching any are skipped (and matching
+    //                   literal directories are pruned from traversal)
     static int find_and_process_paths(const std::unordered_set<std::string>& paths,
                                       const std::unordered_set<std::string>& glob_patterns,
-                                      const std::unordered_set<std::string>& regex_patterns) noexcept;
+                                      const std::unordered_set<std::string>& regex_patterns,
+                                      const std::unordered_set<std::string>& exclude_patterns = {}) noexcept;
 
     // alternative main entry point - same general principles but
     // - the input paths may point to actual files or directories
     // - inpute paths may be direcoreis with GLOB patterns, e.g. /path/to/dir/**/.cpp
-    static int find_and_process_globbed_paths(const std::unordered_set<std::string>& input_paths) noexcept;
+    static int find_and_process_globbed_paths(const std::unordered_set<std::string>& input_paths,
+                                              const std::unordered_set<std::string>& exclude_patterns = {}) noexcept;
 
     // the client should wait for all background tasks to finish
     static void wait_for_all_tasks() noexcept;
@@ -95,20 +101,22 @@ public:
         const std::unordered_set<std::string>& input_paths,
         const std::unordered_set<std::string>& glob_patterns,
         const std::unordered_set<std::string>& regex_patterns,
+        const std::unordered_set<std::string>& exclude_patterns,
         FileHashAlgorithm hash_algorithm,
         FingerprintOptions fingerprint_mode,
         uint64_t fingerprint,
         const struct timeval& timestamp) noexcept;
 
 private:
-    
+
     // flag to stop all tasks. safe to call on any thread
     static void set_exiting() noexcept;
 
     // expected to be called on directory_traversal_queue
     static int find_files_internal(std::string search_dir,
                                    const std::unordered_set<std::string>& glob_patterns,
-                                   const std::unordered_set<std::string>& regex_patterns) noexcept;
+                                   const std::unordered_set<std::string>& regex_patterns,
+                                   const std::unordered_set<std::string>& exclude_patterns = {}) noexcept;
     
     // process individual files directly (globs ignored)
     // expected to be called on directory_traversal_queue
