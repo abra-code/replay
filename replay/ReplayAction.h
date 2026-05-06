@@ -51,8 +51,10 @@ bool MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContex
 bool HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext);
 bool SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContext *actionContext);
 bool CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionContext *actionContext);
+bool CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *context, ActionContext *actionContext);
 bool CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext);
 bool DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext);
+bool ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionContext);
 bool ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext);
 bool Echo(NSString *content, ReplayContext *context, ActionContext *actionContext);
 

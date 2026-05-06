@@ -266,8 +266,10 @@ DisplayHelp(void)
 		"   hardlink /from/item/path /to/item/path\n"
 		"   symlink /from/item/path /to/item/path\n"
 		"   create file /path/to/new/file \"New File Content\"\n"
+		"   create file /path/to/new/file blob <base64>\n"
 		"   create directory /path/to/new/dir\n"
 		"   delete /path/to/item1 /path/to/item2 /path/to/itemN\n"
+		"   read /path/to/item1 /path/to/item2 /path/to/itemN\n"
 		"   execute /path/to/tool param1 param2 paramN\n"
 		"   echo \"String to print\"\n"
 		"   wait\n"
@@ -478,9 +480,26 @@ int main(int argc, const char * argv[])
 						{
 							actionDescription[@"file"] = path;
 							if(currArgIndex < lastArgIndex)
-							{ //optional content
+							{ //optional content or blob
 								currArgIndex++;
-								actionDescription[@"content"] = @(argv[currArgIndex]);
+								NSString *nextArg = @(argv[currArgIndex]);
+								if([nextArg isEqualToString:@"blob"])
+								{ // create file blob /path <base64>
+									if(currArgIndex < lastArgIndex)
+									{
+										currArgIndex++;
+										actionDescription[@"blob"] = @(argv[currArgIndex]);
+									}
+									else
+									{
+										fprintf(stderr, "error: \"create file blob\" requires a base64 string after the path\n");
+										exit(EXIT_FAILURE);
+									}
+								}
+								else
+								{
+									actionDescription[@"content"] = nextArg;
+								}
 							}
 						}
 						else
@@ -508,6 +527,27 @@ int main(int argc, const char * argv[])
 					else
 					{
 						fprintf(stderr, "error: \"delete\" action requires at least one path\n");
+						exit(EXIT_FAILURE);
+					}
+				}
+				break;
+
+				case kFileActionRead:
+				{ // variable element input - all params are paths to read
+					if(currArgIndex < lastArgIndex)
+					{
+						NSMutableArray<NSString *> *paramArray = [NSMutableArray new];
+						while(currArgIndex < lastArgIndex)
+						{
+							currArgIndex++;
+							NSString *onePath = @(argv[currArgIndex]);
+							[paramArray addObject:onePath];
+						}
+						actionDescription[@"items"] = paramArray;
+					}
+					else
+					{
+						fprintf(stderr, "error: \"read\" action requires at least one path\n");
 						exit(EXIT_FAILURE);
 					}
 				}

@@ -256,8 +256,8 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 	}
 	else
 	{
-		if(action == kFileActionDelete)
-		{ // variable element input - all params are paths to delete
+		if(action == kFileActionDelete || action == kFileActionRead)
+		{ // variable element input - all params are paths
 			actionDescription[@"items"] = paramArray;
 		}
 		else if(action == kFileActionCreate)

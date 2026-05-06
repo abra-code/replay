@@ -272,6 +272,122 @@ else
 	/bin/rm "/tmp/execution-failure.err"
 fi
 
+WORK_DIR=$(/usr/bin/mktemp -d /tmp/dispatch_read_test.XXXXXX)
+TEXT_FILE="$WORK_DIR/hello.txt"
+BINARY_FILE="$WORK_DIR/data.bin"
+BLOB_OUT_FILE="$WORK_DIR/blob_out.bin"
+ROUNDTRIP_FILE="$WORK_DIR/roundtrip.bin"
+
+printf 'Hello from dispatch!\n' > "$TEXT_FILE"
+printf '\x89PNG\x0d\x0a\x1a\x0a' > "$BINARY_FILE"
+BINARY_B64="iVBORw0KGgo="
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Read text file via dispatch (output captured to file)"
+echo ""
+
+DISPATCH_READ_TEXT_OUT="/tmp/dispatch-read-text.out"
+echo "dispatch \"dispatch-read-text\" start --stdout \"$DISPATCH_READ_TEXT_OUT\""
+echo "dispatch \"dispatch-read-text\" read \"$TEXT_FILE\""
+echo "dispatch \"dispatch-read-text\" wait"
+
+"$DISPATCH" "dispatch-read-text" start --stdout "$DISPATCH_READ_TEXT_OUT"
+"$DISPATCH" "dispatch-read-text" read "$TEXT_FILE"
+"$DISPATCH" "dispatch-read-text" wait
+verify_succeeded "$?" "dispatch read text: wait failed"
+
+if test -f "$DISPATCH_READ_TEXT_OUT"; then
+	/usr/bin/grep -qF "[text:$TEXT_FILE]" "$DISPATCH_READ_TEXT_OUT"
+	verify_succeeded "$?" "dispatch read text: expected [text:...] header in output file"
+	/usr/bin/grep -qF "Hello from dispatch!" "$DISPATCH_READ_TEXT_OUT"
+	verify_succeeded "$?" "dispatch read text: expected file content in output file"
+	/bin/rm "$DISPATCH_READ_TEXT_OUT"
+else
+	verify_succeeded "1" "dispatch read text: output file was not created"
+fi
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Read binary file via dispatch (output captured to file)"
+echo ""
+
+DISPATCH_READ_BIN_OUT="/tmp/dispatch-read-binary.out"
+echo "dispatch \"dispatch-read-binary\" start --stdout \"$DISPATCH_READ_BIN_OUT\""
+echo "dispatch \"dispatch-read-binary\" read \"$BINARY_FILE\""
+echo "dispatch \"dispatch-read-binary\" wait"
+
+"$DISPATCH" "dispatch-read-binary" start --stdout "$DISPATCH_READ_BIN_OUT"
+"$DISPATCH" "dispatch-read-binary" read "$BINARY_FILE"
+"$DISPATCH" "dispatch-read-binary" wait
+verify_succeeded "$?" "dispatch read binary: wait failed"
+
+if test -f "$DISPATCH_READ_BIN_OUT"; then
+	/usr/bin/grep -qF "[blob:$BINARY_FILE]" "$DISPATCH_READ_BIN_OUT"
+	verify_succeeded "$?" "dispatch read binary: expected [blob:...] header in output file"
+	/usr/bin/grep -qF "$BINARY_B64" "$DISPATCH_READ_BIN_OUT"
+	verify_succeeded "$?" "dispatch read binary: expected base64 content in output file"
+	/bin/rm "$DISPATCH_READ_BIN_OUT"
+else
+	verify_succeeded "1" "dispatch read binary: output file was not created"
+fi
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Create binary file from blob via dispatch"
+echo ""
+
+echo "dispatch \"dispatch-create-blob\" create file \"$BLOB_OUT_FILE\" blob \"$BINARY_B64\""
+echo "dispatch \"dispatch-create-blob\" wait"
+
+"$DISPATCH" "dispatch-create-blob" create file "$BLOB_OUT_FILE" blob "$BINARY_B64"
+"$DISPATCH" "dispatch-create-blob" wait
+verify_succeeded "$?" "dispatch create blob: wait failed"
+
+test -f "$BLOB_OUT_FILE"
+verify_succeeded "$?" "dispatch create blob: output file was not created"
+
+written_b64=$(base64 < "$BLOB_OUT_FILE")
+test "$written_b64" = "$BINARY_B64"
+verify_succeeded "$?" "dispatch create blob: file content does not match (got: $written_b64)"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "Round-trip: create blob then read back via dispatch"
+echo ""
+
+DISPATCH_ROUNDTRIP_OUT="/tmp/dispatch-roundtrip.out"
+echo "dispatch \"dispatch-roundtrip\" start --serial --stdout \"$DISPATCH_ROUNDTRIP_OUT\""
+echo "dispatch \"dispatch-roundtrip\" create file \"$ROUNDTRIP_FILE\" blob \"$BINARY_B64\""
+echo "dispatch \"dispatch-roundtrip\" read \"$ROUNDTRIP_FILE\""
+echo "dispatch \"dispatch-roundtrip\" wait"
+
+"$DISPATCH" "dispatch-roundtrip" start --serial --stdout "$DISPATCH_ROUNDTRIP_OUT"
+"$DISPATCH" "dispatch-roundtrip" create file "$ROUNDTRIP_FILE" blob "$BINARY_B64"
+"$DISPATCH" "dispatch-roundtrip" read "$ROUNDTRIP_FILE"
+"$DISPATCH" "dispatch-roundtrip" wait
+verify_succeeded "$?" "dispatch round-trip: wait failed"
+
+if test -f "$DISPATCH_ROUNDTRIP_OUT"; then
+	/usr/bin/grep -qF "[blob:$ROUNDTRIP_FILE]" "$DISPATCH_ROUNDTRIP_OUT"
+	verify_succeeded "$?" "dispatch round-trip: expected [blob:...] header in output"
+	/usr/bin/grep -qF "$BINARY_B64" "$DISPATCH_ROUNDTRIP_OUT"
+	verify_succeeded "$?" "dispatch round-trip: expected base64 content in output"
+	/bin/rm "$DISPATCH_ROUNDTRIP_OUT"
+else
+	verify_succeeded "1" "dispatch round-trip: output file was not created"
+fi
+
+rm -rf "$WORK_DIR"
+
+
 # verify there is no orphaned "replay" server running
 # count the lines returned by ps for processes with "replay" in name
 # there is one system "replayd" we exclude by adding space after "replay"

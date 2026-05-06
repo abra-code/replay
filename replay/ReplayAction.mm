@@ -4,8 +4,11 @@
 #import "OutputSerializer.h"
 #import "ActionFromName.h"
 #include "GlobOverlap.h"
+#include "ABase64.h"
 #include <fts.h>
 #include <sys/stat.h>
+#include <cerrno>
+#include <fstream>
 #include <vector>
 #include <string>
 
@@ -499,11 +502,89 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				context->lastError.error = operationError;
 			}
 		}
+		else if(replayAction == kFileActionRead)
+		{
+			NSArray<NSString*> *itemPaths = stepDescription[@"items"];
+			if([itemPaths isKindOfClass:arrayClass])
+			{
+				for(NSString *onePath in itemPaths)
+				{
+					NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(onePath, context);
+					if(expandedPath != nil)
+					{
+						NSString *capturedPath = expandedPath;
+						NSInteger actionIndex = ++(context->actionCounter);
+						action = ^{ @autoreleasepool {
+							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+							__unused bool isOK = ReadFile([capturedPath UTF8String], context, &actionContext);
+						}};
+						// ReadFile prints two strings (verbose descriptor + content), reserve second slot
+						++(context->actionCounter);
+
+						if(context->concurrent)
+						{
+							NSURL *itemURL = [NSURL fileURLWithPath:expandedPath];
+							inputs = PathArrayFromFileURL(itemURL);
+						}
+						actionHandler(action, inputs, nil, nil);
+					}
+					else if(context->stopOnError)
+					{
+						break;
+					}
+				}
+			}
+			else
+			{
+				NSString *errStr = @"error: \"read\" action: \"items\" is expected to be an array of paths\n";
+				PrintToStdErr(context, errStr);
+				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unexpected items type" };
+				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				context->lastError.error = operationError;
+			}
+		}
 		else if(replayAction == kFileActionCreate)
 		{
 			NSString *filePath = stepDescription[@"file"];
 			if([filePath isKindOfClass:stringClass])
 			{
+				// blob (base64 binary) takes priority over text content
+				NSString *blobContent = nil;
+				id blobValue = stepDescription[@"blob"];
+				if([blobValue isKindOfClass:stringClass])
+				{
+					// JSON/plist format: "blob": "<base64>" key holds the data
+					blobContent = blobValue;
+				}
+				else if([blobValue isKindOfClass:[NSNumber class]] && [blobValue boolValue])
+				{
+					// streaming format: blob=true modifier, "content" holds the base64 data
+					id contentValue = stepDescription[@"content"];
+					if([contentValue isKindOfClass:stringClass])
+						blobContent = contentValue;
+				}
+
+				if(blobContent != nil)
+				{
+					NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(filePath, context);
+					if(expandedPath != nil)
+					{
+						NSURL *fileURL = [NSURL fileURLWithPath:expandedPath];
+						NSString *capturedBlob = blobContent;
+						NSInteger actionIndex = ++(context->actionCounter);
+						action = ^{ @autoreleasepool {
+							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+							__unused bool isOK = CreateFileFromBlob(fileURL, capturedBlob, context, &actionContext);
+						}};
+						if(context->concurrent)
+						{
+							outputs = PathArrayFromFileURL(fileURL);
+						}
+						actionHandler(action, nil, nil, outputs);
+					}
+				}
+				else
+				{
 				NSString *content = stepDescription[@"content"];
 				if(content == nil)
 					content = @""; //content is optional
@@ -513,7 +594,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					PrintToStdErr(context, errStr);
 					content = @"";
 				}
-				
+
 				bool expandContent = true;
 				id useRawText = stepDescription[@"raw"];
 				if([useRawText isKindOfClass:[NSNumber class]])
@@ -523,9 +604,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
 				if(expandContent)
 					content = StringByExpandingEnvironmentVariablesWithErrorCheck(content, context);
-				
+
 				NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(filePath, context);
-				
+
 				// content is nil only if string is malformed or missing environment variable
 				// otherwise the string may be empty but non-nil
 				if((content != nil) && (expandedPath != nil))
@@ -536,14 +617,15 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
 						__unused bool isOK = CreateFile(fileURL, content, context, &actionContext);
                     }};
-					
+
 					if(context->concurrent)
 					{
 						outputs = PathArrayFromFileURL(fileURL);
 					}
 					actionHandler(action, nil, nil, outputs);
 				}
-			}
+				} // end else (not blob)
+			} // end if(filePath)
 			else
 			{
 				NSString *dirPath = stepDescription[@"directory"];
@@ -1008,6 +1090,64 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 }
 
 bool
+CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *context, ActionContext *actionContext)
+{
+	if(context->stopOnError && (context->lastError.error != nil))
+		return false;
+
+	if(context->verbose || context->dryRun)
+	{
+		NSString *stdoutStr = [NSString stringWithFormat:@"[create file blob=true]\t%@\n", [itemURL path]];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
+	}
+
+	bool isSuccessful = context->dryRun;
+	if(!context->dryRun)
+	{
+		const char *encoded = [base64Content UTF8String];
+		unsigned long encodedLen = encoded ? strlen(encoded) : 0;
+		unsigned long maxDecoded = CalculateDecodedBufferMaxSize(encodedLen);
+		std::vector<unsigned char> decoded(maxDecoded > 0 ? maxDecoded : 1);
+		unsigned long decodedLen = encodedLen > 0
+			? DecodeBase64((const unsigned char *)encoded, encodedLen, decoded.data(), maxDecoded)
+			: 0;
+
+		const char *path = [[itemURL path] UTF8String];
+		auto tryWrite = [&](const char *p) -> bool {
+			std::ofstream f(p, std::ios::binary);
+			if(!f.is_open()) return false;
+			if(decodedLen > 0) f.write((const char *)decoded.data(), decodedLen);
+			return f.good();
+		};
+
+		isSuccessful = tryWrite(path);
+		if(!isSuccessful && context->force)
+		{
+			NSFileManager *fm = [NSFileManager defaultManager];
+			[fm removeItemAtURL:itemURL error:nil];
+			NSURL *parentDirURL = [itemURL URLByDeletingLastPathComponent];
+			[fm createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
+			isSuccessful = tryWrite(path);
+		}
+
+		if(!isSuccessful)
+		{
+			int err = errno;
+			NSString *errStr = [NSString stringWithFormat:@"error: failed to create file \"%@\". Error: %s\n",
+								[itemURL path], strerror(err)];
+			PrintToStdErr(context, errStr);
+			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		}
+	}
+	return isSuccessful;
+}
+
+bool
 CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.error != nil))
@@ -1090,6 +1230,99 @@ DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 		}
 	}
 	return isSuccessful;
+}
+
+static bool is_utf8_text(const uint8_t *data, size_t len) {
+	size_t i = 0;
+	while (i < len) {
+		uint8_t c = data[i];
+		if (c == 0) return false;
+		size_t seqLen;
+		if      ((c & 0x80) == 0x00) seqLen = 1;
+		else if ((c & 0xE0) == 0xC0) seqLen = 2;
+		else if ((c & 0xF0) == 0xE0) seqLen = 3;
+		else if ((c & 0xF8) == 0xF0) seqLen = 4;
+		else return false;
+		for (size_t j = 1; j < seqLen; j++) {
+			if (i + j >= len || (data[i + j] & 0xC0) != 0x80) return false;
+		}
+		i += seqLen;
+	}
+	return true;
+}
+
+bool
+ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionContext)
+{
+	if (context->stopOnError && context->lastError.error != nil)
+		return false;
+
+	if (context->verbose || context->dryRun)
+	{
+		NSString *stdoutStr = [NSString stringWithFormat:@"[read]\t%s\n", filePath];
+		PrintToStdOut(context, stdoutStr, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
+	}
+
+	actionContext->index++;
+
+	if (context->dryRun)
+	{
+		ActionWithNoOutput(context, actionContext->index);
+		return true;
+	}
+
+	std::ifstream f(filePath, std::ios::binary | std::ios::ate);
+	if (!f.is_open())
+	{
+		int err = errno;
+		NSString *errStr = [NSString stringWithFormat:@"error: failed to open \"%s\" for reading: %s\n", filePath, strerror(err)];
+		PrintToStdErr(context, errStr);
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		ActionWithNoOutput(context, actionContext->index);
+		return false;
+	}
+
+	std::streamoff fileSize = f.tellg();
+	f.seekg(0, std::ios::beg);
+
+	std::vector<uint8_t> data(static_cast<size_t>(fileSize));
+	if (fileSize > 0 && !f.read(reinterpret_cast<char *>(data.data()), fileSize))
+	{
+		NSString *errStr = [NSString stringWithFormat:@"error: failed to read \"%s\"\n", filePath];
+		PrintToStdErr(context, errStr);
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EIO userInfo:userInfo];
+		ActionWithNoOutput(context, actionContext->index);
+		return false;
+	}
+
+	if (is_utf8_text(data.data(), data.size()))
+	{
+		NSString *header = [NSString stringWithFormat:@"[text:%s]\n", filePath];
+		NSString *content = data.empty() ? @"" : [[NSString alloc] initWithBytes:data.data() length:data.size() encoding:NSUTF8StringEncoding];
+		if (content == nil) content = @"";
+		if (![content hasSuffix:@"\n"]) content = [content stringByAppendingString:@"\n"];
+		PrintToStdOut(context, [header stringByAppendingString:content], actionContext->index);
+	}
+	else
+	{
+		unsigned long encodedSize = CalculateEncodedBufferSize((unsigned long)data.size());
+		std::vector<unsigned char> encoded(encodedSize + 1, 0);
+		unsigned long written = EncodeBase64(data.data(), (unsigned long)data.size(), encoded.data(), encodedSize);
+		encoded[written] = '\0';
+
+		NSString *header = [NSString stringWithFormat:@"[blob:%s]\n", filePath];
+		NSString *encodedStr = [NSString stringWithUTF8String:(const char *)encoded.data()];
+		if (encodedStr == nil) encodedStr = @"";
+		PrintToStdOut(context, [[header stringByAppendingString:encodedStr] stringByAppendingString:@"\n"], actionContext->index);
+	}
+
+	return true;
 }
 
 bool
