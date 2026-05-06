@@ -57,6 +57,7 @@ bool DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 bool ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionContext);
 bool ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *actionContext);
 bool DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext);
+bool GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionContext);
 bool ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext);
 bool Echo(NSString *content, ReplayContext *context, ActionContext *actionContext);
 

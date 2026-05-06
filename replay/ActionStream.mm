@@ -265,6 +265,11 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 			if(paramCount > 0)
 				actionDescription[@"directory"] = paramArray[0];
 		}
+		else if(action == kFileActionInfo)
+		{ // single path
+			if(paramCount > 0)
+				actionDescription[@"path"] = paramArray[0];
+		}
 		else if(action == kFileActionCreate)
 		{
 			if([actionAndOptionsArray containsObject:@"directory"])

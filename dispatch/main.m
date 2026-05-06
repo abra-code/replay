@@ -272,6 +272,7 @@ DisplayHelp(void)
 		"   read /path/to/item1 /path/to/item2 /path/to/itemN\n"
 		"   list /path/to/directory\n"
 		"   tree /path/to/directory [depth]\n"
+		"   info /path/to/file/or/directory\n"
 		"   execute /path/to/tool param1 param2 paramN\n"
 		"   echo \"String to print\"\n"
 		"   wait\n"
@@ -593,6 +594,21 @@ int main(int argc, const char * argv[])
 							currArgIndex++;
 							actionDescription[@"depth"] = @(depth);
 						}
+					}
+				}
+				break;
+
+				case kFileActionInfo:
+				{ // single path (file or directory)
+					if(currArgIndex < lastArgIndex)
+					{
+						currArgIndex++;
+						actionDescription[@"path"] = @(argv[currArgIndex]);
+					}
+					else
+					{
+						fprintf(stderr, "error: \"info\" action requires a path\n");
+						exit(EXIT_FAILURE);
 					}
 				}
 				break;
