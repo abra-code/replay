@@ -260,6 +260,11 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 		{ // variable element input - all params are paths
 			actionDescription[@"items"] = paramArray;
 		}
+		else if(action == kFileActionList || action == kFileActionTree)
+		{ // first param is the directory path; depth modifier for tree is handled by AddOptionsToActionDescription
+			if(paramCount > 0)
+				actionDescription[@"directory"] = paramArray[0];
+		}
 		else if(action == kFileActionCreate)
 		{
 			if([actionAndOptionsArray containsObject:@"directory"])

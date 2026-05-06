@@ -16,6 +16,8 @@ typedef enum
 	kFileActionCreate,
 	kFileActionDelete,
 	kFileActionRead,
+	kFileActionList,
+	kFileActionTree,
 	kActionExecuteTool,
 	kActionEcho,
 	kActionStartServer, // the following are only valid for "dispatch" tool

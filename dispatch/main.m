@@ -270,6 +270,8 @@ DisplayHelp(void)
 		"   create directory /path/to/new/dir\n"
 		"   delete /path/to/item1 /path/to/item2 /path/to/itemN\n"
 		"   read /path/to/item1 /path/to/item2 /path/to/itemN\n"
+		"   list /path/to/directory\n"
+		"   tree /path/to/directory [depth]\n"
 		"   execute /path/to/tool param1 param2 paramN\n"
 		"   echo \"String to print\"\n"
 		"   wait\n"
@@ -552,7 +554,49 @@ int main(int argc, const char * argv[])
 					}
 				}
 				break;
-				
+
+				case kFileActionList:
+				{ // single directory path
+					if(currArgIndex < lastArgIndex)
+					{
+						currArgIndex++;
+						actionDescription[@"directory"] = @(argv[currArgIndex]);
+					}
+					else
+					{
+						fprintf(stderr, "error: \"list\" action requires a directory path\n");
+						exit(EXIT_FAILURE);
+					}
+				}
+				break;
+
+				case kFileActionTree:
+				{ // single directory path with optional depth
+					if(currArgIndex < lastArgIndex)
+					{
+						currArgIndex++;
+						actionDescription[@"directory"] = @(argv[currArgIndex]);
+					}
+					else
+					{
+						fprintf(stderr, "error: \"tree\" action requires a directory path\n");
+						exit(EXIT_FAILURE);
+					}
+					// optional depth argument
+					if(currArgIndex < lastArgIndex)
+					{
+						const char *maybeDepth = argv[currArgIndex + 1];
+						char *end = NULL;
+						long depth = strtol(maybeDepth, &end, 10);
+						if(end != maybeDepth && *end == '\0')
+						{
+							currArgIndex++;
+							actionDescription[@"depth"] = @(depth);
+						}
+					}
+				}
+				break;
+
 				case kActionExecuteTool:
 				{
 					if(currArgIndex < lastArgIndex)
