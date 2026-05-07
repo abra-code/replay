@@ -2,13 +2,13 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$SCRIPT_DIR/.."
-TOOL="$REPO_DIR/build/globoverlap"
+TOOL="${1:-$REPO_DIR/build/Release/globoverlap}"
 PASS=0
 FAIL=0
 
 if [ ! -x "$TOOL" ]; then
     echo "Building globoverlap..."
-    /bin/mkdir -p "$REPO_DIR/build"
+    /bin/mkdir -p "$REPO_DIR/build/Release"
     /usr/bin/clang++ -std=c++20 -O2 -I"$REPO_DIR/glob-overlap/include" -I"$REPO_DIR/glob-cpp/include" "$REPO_DIR/glob-overlap/globoverlap.cpp" -o "$TOOL"
     rc=$?
     if [ $rc -ne 0 ]; then

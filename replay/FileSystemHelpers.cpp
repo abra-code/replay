@@ -1,9 +1,15 @@
 #include "FileSystemHelpers.h"
+#include "GlobOverlap.h"
+#include "GlobSearch.h"
 #include <dirent.h>
 #include <fts.h>
 #include <sys/stat.h>
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
 
 static bool entry_is_directory(const char *parentPath, const char *name, unsigned char dtype)
 {
@@ -22,7 +28,7 @@ static bool entry_is_directory(const char *parentPath, const char *name, unsigne
 bool list_directory(const char *path, std::vector<DirEntry> &out_entries)
 {
 	DIR *dir = opendir(path);
-	if (!dir)
+	if (dir == nullptr)
 		return false;
 
 	struct dirent *ent;
@@ -59,12 +65,15 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 	struct stat st;
 	if (stat(path, &st) != 0)
 		return false;
-	if (!S_ISDIR(st.st_mode))
-	{ errno = ENOTDIR; return false; }
+	if (S_ISDIR(st.st_mode) == 0)
+	{
+		errno = ENOTDIR;
+		return false;
+	}
 
 	char *paths[2] = { const_cast<char *>(path), nullptr };
 	FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, fts_name_compar);
-	if (!fts)
+	if (fts == nullptr)
 		return false;
 
 	// Index by fts_level: levelToNode[L] owns entries whose fts_level == L+1.
@@ -87,20 +96,28 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 				if (lvl == 0)
 				{
 					// Root dir itself
-					if (maxDepth <= 0) { fts_set(fts, ent, FTS_SKIP); break; }
-					if ((int)levelToNode.size() < 1) levelToNode.resize(1);
+					if (maxDepth <= 0)
+					{
+						fts_set(fts, ent, FTS_SKIP);
+						break;
+					}
+					if ((int)levelToNode.size() < 1)
+						levelToNode.resize(1);
 					levelToNode[0] = &out_root;
 				}
 				else
 				{
 					// lvl >= 1: parent is levelToNode[lvl - 1]
-					if (lvl - 1 >= (int)levelToNode.size()) break;
+					if (lvl - 1 >= (int)levelToNode.size())
+						break;
 					TreeNode *parent = levelToNode[lvl - 1];
-					if (!parent) break;
+					if (parent == nullptr)
+						break;
 					parent->children.push_back({ent->fts_name, true, {}});
 					if (lvl < maxDepth)
 					{
-						if ((int)levelToNode.size() <= lvl) levelToNode.resize(lvl + 1);
+						if ((int)levelToNode.size() <= lvl)
+							levelToNode.resize(lvl + 1);
 						levelToNode[lvl] = &parent->children.back();
 					}
 					else
@@ -122,7 +139,8 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 				if (lvl - 1 >= 0 && lvl - 1 < (int)levelToNode.size())
 				{
 					TreeNode *parent = levelToNode[lvl - 1];
-					if (parent) parent->children.push_back({ent->fts_name, false, {}});
+					if (parent != nullptr)
+						parent->children.push_back({ent->fts_name, false, {}});
 				}
 				break;
 			}
@@ -137,4 +155,222 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 
 	fts_close(fts);
 	return true;
+}
+
+// ============================================================================
+// Glob expansion
+// ============================================================================
+
+static std::string concrete_prefix_of_glob(const std::string &pattern)
+{
+	size_t meta_pos = std::string::npos;
+	for (size_t i = 0; i < pattern.size(); i++) {
+		char c = pattern[i];
+		if (c == '*' || c == '?' || c == '[' || c == '{') {
+			meta_pos = i;
+			break;
+		}
+	}
+	if (meta_pos == std::string::npos)
+		return pattern;
+
+	size_t last_slash = pattern.rfind('/', meta_pos);
+	if (last_slash == std::string::npos)
+		return ".";
+	return pattern.substr(0, last_slash);
+}
+
+std::vector<std::string> expand_glob(const std::string &pattern)
+{
+	std::vector<std::string> results;
+
+	std::string base_dir = concrete_prefix_of_glob(pattern);
+	std::string glob_suffix = pattern.substr(base_dir.size());
+	if (!glob_suffix.empty() && glob_suffix[0] == '/')
+		glob_suffix = glob_suffix.substr(1);
+
+	if (glob_suffix.empty()) {
+		struct stat st;
+		if (stat(pattern.c_str(), &st) == 0)
+			results.push_back(pattern);
+		return results;
+	}
+
+	std::string lowercase_suffix = glob_suffix;
+	std::transform(lowercase_suffix.begin(), lowercase_suffix.end(),
+				   lowercase_suffix.begin(), ::tolower);
+	glob::glob compiled_glob(lowercase_suffix);
+
+	char *paths[2] = { const_cast<char *>(base_dir.c_str()), nullptr };
+	FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, nullptr);
+	if (fts == nullptr)
+		return results;
+
+	FTSENT *ent;
+	while ((ent = fts_read(fts)) != nullptr) {
+		switch (ent->fts_info) {
+			case FTS_F:
+			case FTS_SL:
+			case FTS_SLNONE: {
+				const char *rel = ent->fts_path + base_dir.size();
+				if (*rel == '/')
+					++rel;
+
+				std::string lowercase_rel(rel);
+				std::transform(lowercase_rel.begin(), lowercase_rel.end(),
+							   lowercase_rel.begin(), ::tolower);
+
+				if (glob_match(lowercase_rel, compiled_glob))
+					results.emplace_back(ent->fts_path);
+				break;
+			}
+			case FTS_ERR:
+			case FTS_DNR:
+				break;
+			default:
+				break;
+		}
+	}
+
+	fts_close(fts);
+	return results;
+}
+
+std::vector<std::string> search_files(
+	const std::vector<std::string> &patterns,
+	const std::vector<std::string> &exclude_patterns,
+	size_t max_results)
+{
+	// Group glob patterns by their concrete base directory so each directory
+	// is walked at most once, regardless of how many patterns share it.
+	std::unordered_map<std::string, std::unordered_set<std::string>> dir_to_globs;
+	std::vector<std::string> exact_paths;
+
+	for (const auto &pattern : patterns)
+	{
+		std::string base = concrete_prefix_of_glob(pattern);
+		std::string suffix = pattern.substr(base.size());
+		if (!suffix.empty() && suffix[0] == '/')
+			suffix = suffix.substr(1);
+
+		if (suffix.empty())
+		{
+			// No glob metacharacters — literal path. Record for direct existence check.
+			exact_paths.push_back(std::move(base));
+		}
+		else
+		{
+			dir_to_globs[std::move(base)].insert(std::move(suffix));
+		}
+	}
+
+	std::unordered_set<std::string> excl_set(exclude_patterns.begin(), exclude_patterns.end());
+	CompiledExcludes compiled_excl = compile_excludes(excl_set);
+
+	std::set<std::string> seen;
+
+	// Exact paths: existence check only, no filesystem walk needed.
+	for (const auto &path : exact_paths)
+	{
+		if (max_results > 0 && seen.size() >= max_results)
+			break;
+		if (is_path_excluded(path.c_str(), compiled_excl)) continue;
+		struct stat st;
+		if (stat(path.c_str(), &st) == 0 && !S_ISDIR(st.st_mode))
+			seen.insert(path);
+	}
+
+	// Glob patterns: one FTS walk per unique base directory.
+	std::set<std::string> *seen_ptr = &seen;
+	size_t max = max_results;
+
+	for (auto &[search_dir, suffix_set] : dir_to_globs)
+	{
+		if (max > 0 && seen.size() >= max)
+			break;
+
+		std::vector<Glob> compiled_globs = compile_globs(suffix_set);
+
+		FileMatchedBlock on_match = ^(const char *abs_path, struct stat *) {
+			if (max > 0 && seen_ptr->size() >= max)
+				return;
+			seen_ptr->insert(abs_path);
+		};
+
+		walk_directory(search_dir, compiled_globs, {}, compiled_excl, on_match);
+	}
+
+	return std::vector<std::string>(seen.begin(), seen.end());
+}
+
+// Recursive helper for glob_files_in_dir. Walks dir, collects matching files into
+// seen_ptr, then follows any symlinks that resolve outside root into new walk roots.
+// visited_dirs prevents re-walking the same external directory via multiple symlinks.
+static void
+glob_walk_one(const std::string &dir,
+              const std::string &root,
+              const std::vector<Glob> &compiled_globs,
+              const CompiledExcludes &compiled_excl,
+              size_t max,
+              std::set<std::string> *seen_ptr,
+              std::unordered_set<std::string> &visited_dirs)
+{
+	std::vector<std::string> symlinks;
+	FileMatchedBlock on_match = ^(const char *abs_path, struct stat *) {
+		if (max == 0 || seen_ptr->size() < max)
+			seen_ptr->insert(abs_path);
+	};
+	walk_directory(dir, compiled_globs, {}, compiled_excl, on_match, &symlinks);
+
+	for (const auto &sym : symlinks)
+	{
+		char *resolved = realpath(sym.c_str(), nullptr);
+		if (resolved == nullptr)
+			continue;
+		std::string target(resolved);
+		free(resolved);
+
+		// Symlinks pointing within root are reachable by regular traversal — skip
+		bool under_root = (target.size() >= root.size() &&
+		                   target.compare(0, root.size(), root) == 0 &&
+		                   (target.size() == root.size() || target[root.size()] == '/'));
+		if (under_root)
+			continue;
+
+		// Already visited — handles circular symlinks
+		if (!visited_dirs.insert(target).second)
+			continue;
+
+		struct stat st;
+		if (stat(target.c_str(), &st) != 0 || !S_ISDIR(st.st_mode))
+			continue;
+
+		glob_walk_one(target, root, compiled_globs, compiled_excl, max, seen_ptr, visited_dirs);
+	}
+}
+
+std::vector<std::string> glob_files_in_dir(
+	const std::string &root_dir,
+	const std::vector<std::string> &relative_glob_patterns,
+	const std::vector<std::string> &exclude_patterns,
+	size_t max_results)
+{
+	// Strip trailing slash for consistent prefix comparisons in glob_walk_one
+	std::string root = root_dir;
+	if (!root.empty() && root.back() == '/')
+		root.pop_back();
+
+	std::unordered_set<std::string> glob_set(relative_glob_patterns.begin(), relative_glob_patterns.end());
+	auto compiled_globs = compile_globs(glob_set);
+
+	std::unordered_set<std::string> excl_set(exclude_patterns.begin(), exclude_patterns.end());
+	auto compiled_excl = compile_excludes(excl_set);
+
+	std::set<std::string> seen;
+	std::unordered_set<std::string> visited_dirs;
+	visited_dirs.insert(root);
+
+	glob_walk_one(root, root, compiled_globs, compiled_excl, max_results, &seen, visited_dirs);
+
+	return std::vector<std::string>(seen.begin(), seen.end());
 }

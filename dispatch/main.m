@@ -273,6 +273,7 @@ DisplayHelp(void)
 		"   list /path/to/directory\n"
 		"   tree /path/to/directory [depth]\n"
 		"   info /path/to/file/or/directory\n"
+		"   glob /root/dir **/*.ext [more/**/*.ext ...] [!exclude/**]\n"
 		"   execute /path/to/tool param1 param2 paramN\n"
 		"   echo \"String to print\"\n"
 		"   wait\n"
@@ -610,6 +611,37 @@ int main(int argc, const char * argv[])
 						fprintf(stderr, "error: \"info\" action requires a path\n");
 						exit(EXIT_FAILURE);
 					}
+				}
+				break;
+
+				case kFileActionGlob:
+				{ // first arg is root dir; remaining non-'!'-prefixed args are relative glob patterns; '!'-prefixed are excludes
+					if(currArgIndex >= lastArgIndex)
+					{
+						fprintf(stderr, "error: \"glob\" action requires a root directory and at least one pattern\n");
+						exit(EXIT_FAILURE);
+					}
+					currArgIndex++;
+					actionDescription[@"root"] = @(argv[currArgIndex]);
+					NSMutableArray<NSString *> *globs = [NSMutableArray new];
+					NSMutableArray<NSString *> *excludes = [NSMutableArray new];
+					while(currArgIndex < lastArgIndex)
+					{
+						currArgIndex++;
+						NSString *arg = @(argv[currArgIndex]);
+						if([arg hasPrefix:@"!"])
+							[excludes addObject:[arg substringFromIndex:1]];
+						else
+							[globs addObject:arg];
+					}
+					if([globs count] == 0)
+					{
+						fprintf(stderr, "error: \"glob\" action requires at least one positive pattern\n");
+						exit(EXIT_FAILURE);
+					}
+					actionDescription[@"glob"] = globs;
+					if([excludes count] > 0)
+						actionDescription[@"exclude"] = excludes;
 				}
 				break;
 

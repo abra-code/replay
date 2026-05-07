@@ -7,19 +7,20 @@ echo "  These tests may take long! "
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
-REPLAY_TOOL=$1
-echo "REPLAY_TOOL = $REPLAY_TOOL"
-
-if test -z "$REPLAY_TOOL"; then
-	echo "Usage: ./stress_test.sh /path/to/built/replay"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$SCRIPT_DIR/.."
+REPLAY_TOOL="${1:-$REPO_DIR/build/Release/replay}"
+if [ ! -x "$REPLAY_TOOL" ]; then
+	echo "error: replay not found at $REPLAY_TOOL"
+	echo "usage: $0 [path/to/replay]"
 	exit 1
 fi
 
-REPLAY_PARENT_DIR=$(dirname "$REPLAY_TOOL")
+REPLAY_PARENT_DIR="$(dirname "$REPLAY_TOOL")"
 
 DISPATCH="$REPLAY_PARENT_DIR/dispatch"
-if test ! -f "$DISPATCH"; then
-	echo "Error: \"dispatch\" tool is expected to be in the same directory as \"dispatch\""
+if [ ! -x "$DISPATCH" ]; then
+	echo "error: dispatch not found at $DISPATCH"
 	exit 1
 fi
 

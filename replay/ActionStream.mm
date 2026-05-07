@@ -270,6 +270,25 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 			if(paramCount > 0)
 				actionDescription[@"path"] = paramArray[0];
 		}
+		else if(action == kFileActionGlob)
+		{ // first param is root dir; remaining non-'!'-prefixed params are relative glob patterns; '!'-prefixed are excludes
+			if(paramCount > 0)
+				actionDescription[@"root"] = paramArray[0];
+			NSMutableArray<NSString*> *globs = [NSMutableArray new];
+			NSMutableArray<NSString*> *excludes = [NSMutableArray new];
+			for(NSUInteger i = 1; i < paramCount; i++)
+			{
+				NSString *param = paramArray[i];
+				if([param hasPrefix:@"!"])
+					[excludes addObject:[param substringFromIndex:1]];
+				else
+					[globs addObject:param];
+			}
+			if([globs count] > 0)
+				actionDescription[@"glob"] = globs;
+			if([excludes count] > 0)
+				actionDescription[@"exclude"] = excludes;
+		}
 		else if(action == kFileActionCreate)
 		{
 			if([actionAndOptionsArray containsObject:@"directory"])

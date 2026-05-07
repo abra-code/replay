@@ -56,15 +56,16 @@ echo "   Testing list & tree        "
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
-REPLAY_TOOL=$1
-echo "REPLAY_TOOL = $REPLAY_TOOL"
-
-if test -z "$REPLAY_TOOL"; then
-	echo "Usage: $0 /path/to/built/replay"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$SCRIPT_DIR/.."
+REPLAY_TOOL="${1:-$REPO_DIR/build/Release/replay}"
+if [ ! -x "$REPLAY_TOOL" ]; then
+	echo "error: replay not found at $REPLAY_TOOL"
+	echo "usage: $0 [path/to/replay]"
 	exit 1
 fi
 
-REPLAY_PARENT_DIR=$(dirname "$REPLAY_TOOL")
+REPLAY_PARENT_DIR="$(dirname "$REPLAY_TOOL")"
 DISPATCH="$REPLAY_PARENT_DIR/dispatch"
 
 WORK_DIR=$(/usr/bin/mktemp -d /tmp/replay_list_tree_test.XXXXXX)
@@ -358,3 +359,5 @@ fi
 
 
 report_test_stats
+
+[ "$failure_counter" -eq 0 ]

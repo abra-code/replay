@@ -6,7 +6,6 @@
 #include "GlobOverlap.h"
 #include "ABase64.h"
 #include "FileSystemHelpers.h"
-#include <fts.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <cerrno>
@@ -142,91 +141,6 @@ NSArray<NSString*> *PathArrayFromFileURL(NSURL *inURL)
 	return nil;
 }
 
-// ============================================================================
-// Filesystem glob expansion
-//
-// Expands an absolute glob pattern (e.g. /Users/foo/build/**/*.o) into a list
-// of matching file paths by walking the filesystem with fts_read.
-// The pattern is split into a concrete directory prefix (longest path with no
-// metacharacters) and a glob suffix matched against relative paths from there.
-// ============================================================================
-
-static std::string concrete_prefix_of_glob(const std::string& pattern) {
-	// Find the last '/' before the first metacharacter
-	size_t meta_pos = std::string::npos;
-	for (size_t i = 0; i < pattern.size(); i++) {
-		char c = pattern[i];
-		if (c == '*' || c == '?' || c == '[' || c == '{') {
-			meta_pos = i;
-			break;
-		}
-	}
-	if (meta_pos == std::string::npos)
-		return pattern; // no metacharacters — entire path is concrete
-
-	size_t last_slash = pattern.rfind('/', meta_pos);
-	if (last_slash == std::string::npos)
-		return ".";
-	return pattern.substr(0, last_slash);
-}
-
-static std::vector<std::string> expand_glob_on_filesystem(const std::string& pattern) {
-	std::vector<std::string> results;
-
-	std::string base_dir = concrete_prefix_of_glob(pattern);
-	// The glob suffix is the pattern relative to base_dir
-	std::string glob_suffix = pattern.substr(base_dir.size());
-	if (!glob_suffix.empty() && glob_suffix[0] == '/')
-		glob_suffix = glob_suffix.substr(1);
-
-	if (glob_suffix.empty()) {
-		// No glob — pattern is a concrete path, just return it if it exists
-		struct stat st;
-		if (stat(pattern.c_str(), &st) == 0)
-			results.push_back(pattern);
-		return results;
-	}
-
-	// Compile the glob suffix for matching relative paths
-	// Lowercase both pattern and paths for case-insensitive matching (macOS APFS default)
-	std::string lowercase_suffix = glob_suffix;
-	std::transform(lowercase_suffix.begin(), lowercase_suffix.end(),
-				   lowercase_suffix.begin(), ::tolower);
-	glob::glob compiled_glob(lowercase_suffix);
-
-	char *paths[2] = { const_cast<char*>(base_dir.c_str()), nullptr };
-	FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, nullptr);
-	if (fts == nullptr)
-		return results;
-
-	FTSENT *ent;
-	while ((ent = fts_read(fts)) != nullptr) {
-		switch (ent->fts_info) {
-			case FTS_F:
-			case FTS_SL:
-			case FTS_SLNONE: {
-				const char *rel = ent->fts_path + base_dir.size();
-				if (*rel == '/') ++rel;
-
-				std::string lowercase_rel(rel);
-				std::transform(lowercase_rel.begin(), lowercase_rel.end(),
-							   lowercase_rel.begin(), ::tolower);
-
-				if (glob_match(lowercase_rel, compiled_glob))
-					results.emplace_back(ent->fts_path);
-				break;
-			}
-			case FTS_ERR:
-			case FTS_DNR:
-				break;
-			default:
-				break;
-		}
-	}
-
-	fts_close(fts);
-	return results;
-}
 
 // this function resolves each step and calls provided actionHandler
 // one or more times for each action in the step
@@ -275,7 +189,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
 				action = ^{ @autoreleasepool {
 					std::string pattern([globPattern UTF8String]);
-					auto matches = expand_glob_on_filesystem(pattern);
+					auto matches = expand_glob(pattern);
 					if(matches.empty())
 					{
 						NSString *errStr = [NSString stringWithFormat:
@@ -364,7 +278,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
 						action = ^{ @autoreleasepool {
 							std::string pattern([globPattern UTF8String]);
-							auto matches = expand_glob_on_filesystem(pattern);
+							auto matches = expand_glob(pattern);
 							if(matches.empty())
 							{
 								NSString *errStr = [NSString stringWithFormat:
@@ -445,7 +359,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
 							action = ^{ @autoreleasepool {
 								std::string pattern([globPattern UTF8String]);
-								auto matches = expand_glob_on_filesystem(pattern);
+								auto matches = expand_glob(pattern);
 								if(matches.empty())
 								{
 									NSString *errStr = [NSString stringWithFormat:
@@ -643,6 +557,65 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				NSString *errStr = @"error: \"info\" action: \"path\" is required\n";
 				PrintToStdErr(context, errStr);
 				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing path" };
+				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+			}
+		}
+		else if(replayAction == kFileActionGlob)
+		{
+			NSString *rawRoot = stepDescription[@"root"];
+			NSArray<NSString*> *rawGlobs = stepDescription[@"glob"];
+
+			if([rawRoot isKindOfClass:stringClass] && [rawGlobs isKindOfClass:arrayClass] && [rawGlobs count] > 0)
+			{
+				NSString *expandedRoot = StringByExpandingEnvironmentVariablesWithErrorCheck(rawRoot, context);
+				if(expandedRoot == nil)
+					expandedRoot = rawRoot;
+
+				NSMutableArray<NSString*> *expandedGlobs = [NSMutableArray new];
+				for(NSString *p in rawGlobs)
+				{
+					NSString *ep = StringByExpandingEnvironmentVariablesWithErrorCheck(p, context);
+					if(ep != nil) [expandedGlobs addObject:ep];
+				}
+
+				NSArray<NSString*> *rawExcludes = stepDescription[@"exclude"];
+				NSMutableArray<NSString*> *expandedExcludes = [NSMutableArray new];
+				if([rawExcludes isKindOfClass:arrayClass])
+				{
+					for(NSString *p in rawExcludes)
+					{
+						NSString *ep = StringByExpandingEnvironmentVariablesWithErrorCheck(p, context);
+						if(ep != nil) [expandedExcludes addObject:ep];
+					}
+				}
+
+				NSInteger maxResults = 1000;
+				id maxVal = stepDescription[@"max"];
+				if([maxVal isKindOfClass:[NSNumber class]])
+					maxResults = [maxVal integerValue];
+
+				NSString *capturedRoot = expandedRoot;
+				NSArray<NSString*> *capturedGlobs = [expandedGlobs copy];
+				NSArray<NSString*> *capturedExcludes = [expandedExcludes copy];
+				NSInteger capturedMax = maxResults;
+				NSInteger actionIndex = ++(context->actionCounter);
+				action = ^{ @autoreleasepool {
+					ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+					__unused bool isOK = GlobFiles(capturedRoot, capturedGlobs, capturedExcludes, capturedMax, context, &actionContext);
+				}};
+				++(context->actionCounter);
+
+				if(context->concurrent)
+				{
+					inputs = @[expandedRoot];
+				}
+				actionHandler(action, inputs, nil, nil);
+			}
+			else
+			{
+				NSString *errStr = @"error: \"glob\" action: \"root\" string and \"glob\" array are required\n";
+				PrintToStdErr(context, errStr);
+				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing root or glob patterns" };
 				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
 			}
 		}
@@ -1649,6 +1622,55 @@ DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, A
 		: @"{}";
 
 	NSString *output = [NSString stringWithFormat:@"[tree:%s]\n%@\n", dirPath, jsonStr];
+	PrintToStdOut(context, output, actionContext->index);
+	return true;
+}
+
+bool
+GlobFiles(NSString *rootDir, NSArray<NSString*> *globPatterns, NSArray<NSString*> *excludePatterns, NSInteger maxResults, ReplayContext *context, ActionContext *actionContext)
+{
+	if(context->stopOnError && context->lastError.error != nil)
+		return false;
+
+	if(context->verbose || context->dryRun)
+	{
+		NSMutableString *desc = [NSMutableString stringWithFormat:@"[glob]\t%@", rootDir];
+		for(NSString *p in globPatterns)
+			[desc appendFormat:@"\t%@", p];
+		for(NSString *p in excludePatterns)
+			[desc appendFormat:@"\t!%@", p];
+		[desc appendString:@"\n"];
+		PrintToStdOut(context, desc, actionContext->index);
+	}
+	else
+	{
+		ActionWithNoOutput(context, actionContext->index);
+	}
+
+	actionContext->index++;
+
+	if(context->dryRun)
+	{
+		ActionWithNoOutput(context, actionContext->index);
+		return true;
+	}
+
+	std::string cRoot([rootDir UTF8String]);
+
+	std::vector<std::string> cGlobs;
+	for(NSString *p in globPatterns)
+		if(p != nil) cGlobs.push_back(std::string([p UTF8String]));
+
+	std::vector<std::string> cExcludes;
+	for(NSString *p in excludePatterns)
+		if(p != nil) cExcludes.push_back(std::string([p UTF8String]));
+
+	size_t maxR = (maxResults > 0) ? (size_t)maxResults : 1000;
+	auto matches = glob_files_in_dir(cRoot, cGlobs, cExcludes, maxR);
+
+	NSMutableString *output = [NSMutableString stringWithString:@"[glob]\n"];
+	for(const auto &m : matches)
+		[output appendFormat:@"%s\n", m.c_str()];
 	PrintToStdOut(context, output, actionContext->index);
 	return true;
 }

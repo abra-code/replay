@@ -9,9 +9,13 @@ set -uo pipefail
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Default to finding fingerprint relative to script location
-# Can be overridden by setting FINGERPRINT_BIN environment variable
-FINGERPRINT_BIN="${FINGERPRINT_BIN:-${SCRIPT_DIR}/../build/Release/fingerprint}"
+# First positional arg (if not a flag) is the binary path; env var FINGERPRINT_BIN also works.
+if [ $# -gt 0 ] && [ "${1:0:1}" != "-" ]; then
+    FINGERPRINT_BIN="$1"
+    shift
+else
+    FINGERPRINT_BIN="${FINGERPRINT_BIN:-${SCRIPT_DIR}/../build/Release/fingerprint}"
+fi
 
 TEST_DIR=$(/usr/bin/mktemp -d -t fingerprint_tests)
 FAILED_TESTS=0
@@ -260,7 +264,11 @@ echo "========================================"
 echo "Test Results"
 echo "========================================"
 echo -e "${GREEN}Passed: $PASSED_TESTS${NC}"
-echo -e "${RED}Failed: $FAILED_TESTS${NC}"
+if [ $FAILED_TESTS -gt 0 ]; then
+    echo -e "${RED}Failed: $FAILED_TESTS${NC}"
+else
+    echo "Failed: $FAILED_TESTS"
+fi
 echo ""
 
 if [ $FAILED_TESTS -eq 0 ]; then

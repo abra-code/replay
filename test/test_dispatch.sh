@@ -58,20 +58,21 @@ echo "    Testing dispatch tool      "
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
-REPLAY=$1
-echo "REPLAY = $REPLAY"
-
-if test -z "$REPLAY"; then
-	echo "Usage: ./test.sh /path/to/built/replay"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$SCRIPT_DIR/.."
+REPLAY="${1:-$REPO_DIR/build/Release/replay}"
+if [ ! -x "$REPLAY" ]; then
+	echo "error: replay not found at $REPLAY"
+	echo "usage: $0 [path/to/replay]"
 	exit 1
 fi
 
-REPLAY_PARENT_DIR=$(dirname "$REPLAY")
-REPLAY_TEST_DIR_PATH=$(dirname "$0")
+REPLAY_PARENT_DIR="$(dirname "$REPLAY")"
+REPLAY_TEST_DIR_PATH="$SCRIPT_DIR"
 
 DISPATCH="$REPLAY_PARENT_DIR/dispatch"
-if test ! -f "$DISPATCH"; then
-	echo "Error: \"dispatch\" tool is expected to be in the same directory as \"dispatch\""
+if [ ! -x "$DISPATCH" ]; then
+	echo "error: dispatch not found at $DISPATCH"
 	exit 1
 fi
 
@@ -401,3 +402,5 @@ fi
 
 report_test_stats
 
+
+[ "$failure_counter" -eq 0 ]

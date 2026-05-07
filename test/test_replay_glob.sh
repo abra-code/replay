@@ -56,15 +56,16 @@ echo " Testing glob dependencies   "
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
 
-REPLAY_TOOL=$1
-echo "REPLAY_TOOL = $REPLAY_TOOL"
-
-if test -z "$REPLAY_TOOL"; then
-	echo "Usage: ./glob_test.sh /path/to/built/replay"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$SCRIPT_DIR/.."
+REPLAY_TOOL="${1:-$REPO_DIR/build/Release/replay}"
+if [ ! -x "$REPLAY_TOOL" ]; then
+	echo "error: replay not found at $REPLAY_TOOL"
+	echo "usage: $0 [path/to/replay]"
 	exit 1
 fi
 
-REPLAY_TEST_DIR_PATH=$(/usr/bin/dirname "$0")
+REPLAY_TEST_DIR_PATH="$SCRIPT_DIR"
 PLAYLIST="$REPLAY_TEST_DIR_PATH/glob_dependencies.json"
 
 echo "PLAYLIST = $PLAYLIST"
@@ -133,3 +134,5 @@ verify_succeeded "$?" "glob only task with no producers still executes failed"
 echo ""
 
 report_test_stats
+
+[ "$failure_counter" -eq 0 ]

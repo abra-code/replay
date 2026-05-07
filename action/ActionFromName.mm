@@ -64,6 +64,11 @@ ActionFromName(NSString *actionName, bool *isSrcDestActionPtr)
 		replayAction = kFileActionInfo;
 		isSrcDestAction = false;
 	}
+	else if([actionName isEqualToString:@"glob"])
+	{
+		replayAction = kFileActionGlob;
+		isSrcDestAction = false;
+	}
 	else if([actionName isEqualToString:@"execute"])
 	{
 		replayAction = kActionExecuteTool;

@@ -72,7 +72,7 @@ public:
 
     // alternative main entry point - same general principles but
     // - the input paths may point to actual files or directories
-    // - inpute paths may be direcoreis with GLOB patterns, e.g. /path/to/dir/**/.cpp
+    // - input paths may be direcoreis with GLOB patterns, e.g. /path/to/dir/**/.cpp
     static int find_and_process_globbed_paths(const std::unordered_set<std::string>& input_paths,
                                               const std::unordered_set<std::string>& exclude_patterns = {}) noexcept;
 
