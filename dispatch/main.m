@@ -274,6 +274,8 @@ DisplayHelp(void)
 		"   tree /path/to/directory [depth]\n"
 		"   info /path/to/file/or/directory\n"
 		"   glob /root/dir **/*.ext [more/**/*.ext ...] [!exclude/**]\n"
+		"   edit /path/to/file.txt <oldText> <newText> [regex=true] [limit=N] [case-insensitive=true]\n"
+		"   edit /path/to/src/*.cpp <oldText> <newText>   (glob: all matches edited by one task)\n"
 		"   execute /path/to/tool param1 param2 paramN\n"
 		"   echo \"String to print\"\n"
 		"   wait\n"
@@ -642,6 +644,35 @@ int main(int argc, const char * argv[])
 					actionDescription[@"glob"] = globs;
 					if([excludes count] > 0)
 						actionDescription[@"exclude"] = excludes;
+				}
+				break;
+
+				case kFileActionEdit:
+				{ // file oldText newText [regex=true] [limit=N] [case-insensitive=true]
+					if(currArgIndex + 2 >= lastArgIndex)
+					{
+						fprintf(stderr, "error: \"edit\" action requires a file path, oldText, and newText (use \"\" to delete)\n");
+						exit(EXIT_FAILURE);
+					}
+					currArgIndex++;
+					actionDescription[@"items"] = @[@(argv[currArgIndex])];
+					currArgIndex++;
+					actionDescription[@"oldText"] = @(argv[currArgIndex]);
+					currArgIndex++;
+					actionDescription[@"newText"] = @(argv[currArgIndex]);
+					while(currArgIndex < lastArgIndex)
+					{
+						currArgIndex++;
+						NSString *opt = @(argv[currArgIndex]);
+						if([opt hasPrefix:@"regex="])
+							actionDescription[@"regex"] = @([[opt substringFromIndex:6] isEqualToString:@"true"]);
+						else if([opt hasPrefix:@"limit="])
+							actionDescription[@"limit"] = @([[opt substringFromIndex:6] integerValue]);
+						else if([opt hasPrefix:@"case-insensitive="])
+							actionDescription[@"case-insensitive"] = @([[opt substringFromIndex:17] isEqualToString:@"true"]);
+						else
+							fprintf(stderr, "warning: unknown \"edit\" option ignored: %s\n", argv[currArgIndex]);
+					}
 				}
 				break;
 

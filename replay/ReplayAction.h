@@ -40,6 +40,7 @@ typedef struct
 
 typedef void (^action_handler_t)(__nullable dispatch_block_t action,
 								NSArray<NSString*> * __nullable inputs,
+								NSArray<NSString*> * __nullable mutatingInputs,
 								NSArray<NSString*> * __nullable exclusiveInputs,
 								NSArray<NSString*> * __nullable outputs);
 
@@ -59,6 +60,9 @@ bool ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *a
 bool DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext);
 bool GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionContext);
 bool GlobFiles(NSString *rootDir, NSArray<NSString*> *globPatterns, NSArray<NSString*> *excludePatterns, NSInteger maxResults, ReplayContext *context, ActionContext *actionContext);
+// edits: array of dicts with keys: oldText (required), newText, limit (default 1, 0=unlimited), regex, case-insensitive
+// actionDryRun: show plan without writing (overrides nothing; stacks with context->dryRun)
+bool EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun, ReplayContext *context, ActionContext *actionContext);
 bool ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext);
 bool Echo(NSString *content, ReplayContext *context, ActionContext *actionContext);
 

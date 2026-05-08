@@ -1,60 +1,16 @@
 #import <Foundation/Foundation.h>
 #import "ReplayAction.h"
+#import "ReplayActionPrivate.h"
 #import "StringAndPath.h"
-#import "OutputSerializer.h"
 #import "ActionFromName.h"
 #include "GlobOverlap.h"
-#include "ABase64.h"
 #include "FileSystemHelpers.h"
-#include <sys/stat.h>
-#include <time.h>
-#include <cerrno>
-#include <fstream>
-#include <vector>
 #include <string>
 
 //a helper class to ensure atomic access to shared NSError from multiple threads
 @implementation AtomicError
 
 @end
-
-static inline void PrintToStdOut(ReplayContext *context, NSString *string, NSInteger actionIndex)
-{
-	if(context->orderedOutput)
-	{
-		assert(context->outputSerializer != nil);
-		assert(actionIndex >=0);
-	}
-
-	PrintSerializedString(context->outputSerializer, string, context->orderedOutput ? actionIndex : -1);
-}
-
-static inline void PrintToStdErr(ReplayContext *context, NSString *string)
-{
-	PrintSerializedErrorString(context->outputSerializer, string);
-}
-
-static inline void PrintStringsToStdOut(ReplayContext *context, NSArray<NSString *> *array, NSInteger actionIndex)
-{
-	if(context->orderedOutput)
-	{
-		assert(context->outputSerializer != nil);
-		assert(actionIndex >=0);
-	}
-
-	PrintSerializedStrings(context->outputSerializer, array, context->orderedOutput ? actionIndex : -1);
-}
-
-
-static inline void ActionWithNoOutput(ReplayContext *context, NSInteger actionIndex)
-{
-	if(context->orderedOutput)
-	{
-		assert(context->outputSerializer != nil);
-		assert(actionIndex >=0);
-		PrintSerializedString(context->outputSerializer, nil, actionIndex);
-	}
-}
 
 static inline dispatch_block_t
 CreateSourceDestinationAction(Action replayAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context, NSDictionary *actionSettings, NSInteger actionIndex)
@@ -82,7 +38,7 @@ CreateSourceDestinationAction(Action replayAction, NSURL *sourceURL, NSURL *dest
             }};
 		}
 		break;
-		
+
 		case kFileActionHardlink:
 		{
             action = ^{ @autoreleasepool {
@@ -100,7 +56,7 @@ CreateSourceDestinationAction(Action replayAction, NSURL *sourceURL, NSURL *dest
             }};
 		}
 		break;
-		
+
 		default:
 		{
 		}
@@ -157,12 +113,13 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
 	if(replayAction == kActionInvalid)
 		return;
-	
+
 	Class stringClass = [NSString class];
 	Class arrayClass = [NSArray class];
 
 	dispatch_block_t action = NULL;
 	NSArray<NSString*> *inputs = nil;
+	NSArray<NSString*> *mutatingInputs = nil;
 	NSArray<NSString*> *exclusiveInputs = nil;
 	NSArray<NSString*> *outputs = nil;
 
@@ -176,7 +133,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			destinationPath = StringByExpandingEnvironmentVariablesWithErrorCheck(destinationPath, context);
 			if(sourcePath == nil || destinationPath == nil)
 			{
-				actionHandler(nil, nil, nil, nil);
+				actionHandler(nil, nil, nil, nil, nil);
 			}
 			else if(globoverlap::is_glob_pattern(std::string([sourcePath UTF8String])))
 			{
@@ -226,7 +183,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						inputs = @[globPattern];
 					outputs = PathArrayFromFileURL(destinationDirURL);
 				}
-				actionHandler(action, inputs, exclusiveInputs, outputs);
+				actionHandler(action, inputs, nil, exclusiveInputs, outputs);
 			}
 			else
 			{
@@ -245,7 +202,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						inputs = PathArrayFromFileURL(sourceURL);
 					outputs = PathArrayFromFileURL(destinationURL);
 				}
-				actionHandler(action, inputs, exclusiveInputs, outputs);
+				actionHandler(action, inputs, nil, exclusiveInputs, outputs);
 			}
 		}
 		else
@@ -314,7 +271,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 								inputs = @[globPattern];
 							outputs = PathArrayFromFileURL(destinationDirectoryURL);
 						}
-						actionHandler(action, inputs, exclusiveInputs, outputs);
+						actionHandler(action, inputs, nil, exclusiveInputs, outputs);
 					}
 					else
 					{
@@ -333,7 +290,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 								inputs = PathArrayFromFileURL(srcItemURL);
 							outputs = PathArrayFromFileURL(destinationURL);
 						}
-						actionHandler(action, inputs, exclusiveInputs, outputs);
+						actionHandler(action, inputs, nil, exclusiveInputs, outputs);
 					}
 				}
 			}
@@ -384,7 +341,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 							{
 								exclusiveInputs = @[globPattern];
 							}
-							actionHandler(action, nil, exclusiveInputs, nil);
+							actionHandler(action, nil, nil, exclusiveInputs, nil);
 						}
 						else
 						{
@@ -400,7 +357,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 							{
 								exclusiveInputs = PathArrayFromFileURL(oneURL);
 							}
-							actionHandler(action, nil, exclusiveInputs, nil);
+							actionHandler(action, nil, nil, exclusiveInputs, nil);
 						}
 					}
 					else if(context->stopOnError)
@@ -442,7 +399,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 							NSURL *itemURL = [NSURL fileURLWithPath:expandedPath];
 							inputs = PathArrayFromFileURL(itemURL);
 						}
-						actionHandler(action, inputs, nil, nil);
+						actionHandler(action, inputs, nil, nil, nil);
 					}
 					else if(context->stopOnError)
 					{
@@ -480,7 +437,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						NSURL *dirURL = [NSURL fileURLWithPath:expandedPath];
 						inputs = PathArrayFromFileURL(dirURL);
 					}
-					actionHandler(action, inputs, nil, nil);
+					actionHandler(action, inputs, nil, nil, nil);
 				}
 			}
 			else
@@ -517,7 +474,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						NSURL *dirURL = [NSURL fileURLWithPath:expandedPath];
 						inputs = PathArrayFromFileURL(dirURL);
 					}
-					actionHandler(action, inputs, nil, nil);
+					actionHandler(action, inputs, nil, nil, nil);
 				}
 			}
 			else
@@ -549,7 +506,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						NSURL *itemURL = [NSURL fileURLWithPath:expandedPath];
 						inputs = PathArrayFromFileURL(itemURL);
 					}
-					actionHandler(action, inputs, nil, nil);
+					actionHandler(action, inputs, nil, nil, nil);
 				}
 			}
 			else
@@ -609,7 +566,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				{
 					inputs = @[expandedRoot];
 				}
-				actionHandler(action, inputs, nil, nil);
+				actionHandler(action, inputs, nil, nil, nil);
 			}
 			else
 			{
@@ -617,6 +574,124 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				PrintToStdErr(context, errStr);
 				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing root or glob patterns" };
 				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+			}
+		}
+		else if(replayAction == kFileActionEdit)
+		{
+			// Resolve edits specification (shared across all items)
+			NSArray<NSDictionary*> *editsArray = stepDescription[@"edits"];
+			if(![editsArray isKindOfClass:arrayClass] || [editsArray count] == 0)
+			{
+				// Simple streaming form: oldText/newText at top level
+				NSString *oldText = stepDescription[@"oldText"];
+				if([oldText isKindOfClass:stringClass])
+				{
+					NSMutableDictionary *singleEdit = [NSMutableDictionary dictionary];
+					singleEdit[@"oldText"] = oldText;
+					id newTextVal = stepDescription[@"newText"];
+					singleEdit[@"newText"] = [newTextVal isKindOfClass:stringClass] ? newTextVal : @"";
+					for(NSString *key in @[@"limit", @"regex", @"case-insensitive"])
+					{
+						id val = stepDescription[key];
+						if(val != nil) singleEdit[key] = val;
+					}
+					editsArray = @[singleEdit];
+				}
+				else
+				{
+					NSString *errStr = @"error: \"edit\" action: \"edits\" array or \"oldText\" string is required\n";
+					PrintToStdErr(context, errStr);
+					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing edits for edit action" };
+					context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+					editsArray = nil;
+				}
+			}
+
+			if(editsArray != nil)
+			{
+				bool actionDryRun = false;
+				id dryRunVal = stepDescription[@"dry-run"];
+				if([dryRunVal isKindOfClass:[NSNumber class]])
+					actionDryRun = [dryRunVal boolValue];
+
+				NSArray<NSString*> *itemPaths = stepDescription[@"items"];
+				if(![itemPaths isKindOfClass:arrayClass] || [itemPaths count] == 0)
+				{
+					NSString *errStr = @"error: \"edit\" action: \"items\" array of paths is required\n";
+					PrintToStdErr(context, errStr);
+					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing items for edit action" };
+					context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+					itemPaths = nil;
+				}
+
+				for(NSString *onePath in itemPaths)
+				{
+					if(context->stopOnError && (context->lastError.error != nil))
+						break;
+
+					NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(onePath, context);
+					if(expandedPath == nil)
+					{
+						if(context->stopOnError) break;
+						continue;
+					}
+
+					if(globoverlap::is_glob_pattern(std::string([expandedPath UTF8String])))
+					{
+						// Glob item: one task expands at runtime and edits each match
+						NSString *globPattern = expandedPath;
+						NSArray<NSDictionary*> *capturedEdits = editsArray;
+						bool capturedDryRun = actionDryRun;
+						NSInteger actionIndex = ++(context->actionCounter);
+						action = ^{ @autoreleasepool {
+							std::string pattern([globPattern UTF8String]);
+							auto matches = expand_glob(pattern);
+							if(matches.empty())
+							{
+								NSString *errStr = [NSString stringWithFormat:
+									@"error: glob pattern \"%@\" matched no files\n", globPattern];
+								PrintToStdErr(context, errStr);
+								NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+								context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+								return;
+							}
+							for(const auto& match : matches)
+							{
+								if(context->stopOnError && (context->lastError.error != nil))
+									break;
+								ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+								__unused bool isOK = EditFile(match.c_str(), capturedEdits, capturedDryRun, context, &actionContext);
+							}
+						}};
+						++(context->actionCounter);
+
+						if(context->concurrent)
+							mutatingInputs = @[globPattern];
+						actionHandler(action, nil, mutatingInputs, nil, nil);
+						mutatingInputs = nil;
+					}
+					else
+					{
+						// Concrete path: one task per file (tasks are independent, can run in parallel)
+						NSString *capturedPath = expandedPath;
+						NSArray<NSDictionary*> *capturedEdits = editsArray;
+						bool capturedDryRun = actionDryRun;
+						NSInteger actionIndex = ++(context->actionCounter);
+						action = ^{ @autoreleasepool {
+							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+							__unused bool isOK = EditFile([capturedPath UTF8String], capturedEdits, capturedDryRun, context, &actionContext);
+						}};
+						++(context->actionCounter);
+
+						if(context->concurrent)
+						{
+							NSURL *fileURL = [NSURL fileURLWithPath:expandedPath];
+							mutatingInputs = PathArrayFromFileURL(fileURL);
+						}
+						actionHandler(action, nil, mutatingInputs, nil, nil);
+						mutatingInputs = nil;
+					}
+				}
 			}
 		}
 		else if(replayAction == kFileActionCreate)
@@ -656,7 +731,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						{
 							outputs = PathArrayFromFileURL(fileURL);
 						}
-						actionHandler(action, nil, nil, outputs);
+						actionHandler(action, nil, nil, nil, outputs);
 					}
 				}
 				else
@@ -698,7 +773,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					{
 						outputs = PathArrayFromFileURL(fileURL);
 					}
-					actionHandler(action, nil, nil, outputs);
+					actionHandler(action, nil, nil, nil, outputs);
 				}
 				} // end else (not blob)
 			} // end if(filePath)
@@ -716,12 +791,12 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
 							__unused bool isOK = CreateDirectory(dirURL, context, &actionContext);
                         }};
-						
+
 						if(context->concurrent)
 						{
 							outputs = PathArrayFromFileURL(dirURL);
 						}
-						actionHandler(action, nil, nil, outputs);
+						actionHandler(action, nil, nil, nil, outputs);
 					}
 				}
 				else
@@ -776,7 +851,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
                                     ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
                                     __unused bool isOK = ExcecuteTool(expandedToolPath, expandedArgs, context, &actionContext);
                             }};
-							
+
 							// [execute] action is expected to print two strings:
 							// - verbose action description (or null string if not verbose)
 							// - stdout from child tool (or null string if stdout is suppressed)
@@ -790,7 +865,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 								outputs = GetExpandedPathsFromRawPaths(stepDescription[@"outputs"], context);
 							}
 
-							actionHandler(action, inputs, exclusiveInputs, outputs);
+							actionHandler(action, inputs, nil, exclusiveInputs, outputs);
 						}
 					}
 				}
@@ -817,7 +892,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				PrintToStdErr(context, errStr);
 				text = @"";
 			}
-			
+
 			bool expandText = true;
 			id useRawText = stepDescription[@"raw"];
 			if([useRawText isKindOfClass:[NSNumber class]])
@@ -837,14 +912,14 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
 					__unused bool isOK = Echo(text, context, &actionContext);
 				}};
-				
+
 				// [echo] action is expected to print two strings:
 				// - verbose action description (or null string if not verbose)
 				// - actual text printed to stdout
 				// so we need to increase the counter second time
 				++(context->actionCounter);
 
-				actionHandler(action, nil, nil, outputs);
+				actionHandler(action, nil, nil, nil, outputs);
 			}
 		}
 		else if((replayAction == kActionWait) || (replayAction == kActionStartServer))
@@ -855,982 +930,3 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 	}
  } //autoreleasepool
 }
-
-
-bool
-CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[clone]	%@	%@\n", [fromURL path], [toURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL toURL:(NSURL *)toURL error:&operationError];
-
-		if(!isSuccessful && context->force)
-		{
-			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
-			// we could test first if any of these are true or we can just blindly try brute-force both
-			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
-			if(!removalOK)
-			{//could not remove the destination item - maybe the parent dir does not exist?
-				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
-			}
-
-			isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL toURL:(NSURL *)toURL error:&operationError];
-		}
-
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to clone from \"%@\" to \"%@\". Error: %@\n",
-														[fromURL path],
-														[toURL path],
-														errorDesc];
-			PrintToStdErr(context, errStr);
-		}
-	}
-	return isSuccessful;
-}
-
-bool
-MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[move]	%@	%@\n", [fromURL path], [toURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager moveItemAtURL:fromURL toURL:toURL error:&operationError];
-
-		if(!isSuccessful && context->force)
-		{
-			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
-			// we could test first if any of these are true or we can just blindly try brute-force both
-			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
-			if(!removalOK)
-			{//could not remove the destination item - maybe the parent dir does not exist?
-				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
-			}
-
-			isSuccessful = (bool)[fileManager moveItemAtURL:fromURL toURL:toURL error:&operationError];
-		}
-
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to move from \"%@\" to \"%@\". Error: %@\n",
-														[fromURL path],
-														[toURL path],
-														errorDesc];
-			PrintToStdErr(context, errStr);
-		}
-	}
-	return isSuccessful;
-}
-
-bool
-HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[hardlink]	%@	%@\n", [fromURL path], [toURL path] ];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager linkItemAtURL:fromURL toURL:toURL error:&operationError];
-
-		if(!isSuccessful && context->force)
-		{
-			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
-			// we could test first if any of these are true or we can just blindly try brute-force both
-			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
-			if(!removalOK)
-			{//could not remove the destination item - maybe the parent dir does not exist?
-				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
-			}
-
-			isSuccessful = (bool)[fileManager linkItemAtURL:fromURL toURL:toURL error:&operationError];
-		}
-
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to create a hardlink from \"%@\" to \"%@\". Error: %@\n",
-														[fromURL path],
-														[toURL path],
-														errorDesc];
-			PrintToStdErr(context, errStr);
-		}
-	}
-	return isSuccessful;
-}
-
-bool
-SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	NSNumber *validateSource = actionContext->settings[@"validate"];
-	bool validateSymlinkSource = true;
-	if([validateSource isKindOfClass:[NSNumber class]])
-	{
-		validateSymlinkSource = [validateSource boolValue];
-	}
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *settingsStr = @"";
-		if(validateSource != nil) //explicitly set
-		{
-			settingsStr = validateSymlinkSource ? @" validate=true" : @" validate=false";
-		}
-		
-		NSString *stdoutStr = [NSString stringWithFormat:@"[symlink%@]	%@	%@\n", settingsStr, [fromURL path], [linkURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-	
-	bool force = context->force;
-	bool isSuccessful = context->dryRun;
-
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-
-		if(validateSymlinkSource && ![fileManager fileExistsAtPath:[fromURL path]])
-		{
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Strict validation: attempt to create a symlink to nonexistent item" };
-			operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-			isSuccessful = false;
-			force = false;
-		}
-		else
-		{
-			isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
-		}
-
-		if(!isSuccessful && force)
-		{
-			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
-			// we could test first if any of these are true or we can just blindly try brute-force both
-			bool removalOK = [fileManager removeItemAtURL:linkURL error:nil];
-			if(!removalOK)
-			{//could not remove the destination item - maybe the parent dir does not exist?
-				NSURL *parentDirURL = [linkURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
-			}
-			isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
-		}
-
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to create a symlink at \"%@\" referring to \"%@\". Error: %@\n",
-														[linkURL path],
-														[fromURL path],
-														errorDesc];
-			PrintToStdErr(context, errStr);
-		}
-	}
-	return isSuccessful;
-}
-
-bool
-CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		id useRawText = actionContext->settings[@"raw"];
-		NSString *settingsStr = @"";
-		if([useRawText isKindOfClass:[NSNumber class]])
-		{
-			bool rawContent = [useRawText boolValue];
-			settingsStr = rawContent ? @" raw=true" : @" raw=false";
-		}
-
-		//TODO: escape newlines for multiline text so it will be displayed in one line
-		NSString *stdoutStr = [NSString stringWithFormat:@"[create file%@]	%@	%@\n", settingsStr, [itemURL path], content];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSError *operationError = nil;
-		isSuccessful = [content writeToURL:itemURL atomically:NO encoding:NSUTF8StringEncoding error:&operationError];
-		
-		if(!isSuccessful && context->force)
-		{
-			// there are actually 2 reasons why it may fail: destination file existing or parent dir not existing
-			// we could test first if any of these are true or we can just blindly try brute-force both
-			NSFileManager *fileManager = [NSFileManager defaultManager];
-			bool removalOK = [fileManager removeItemAtURL:itemURL error:nil];
-			if(!removalOK)
-			{//could not remove the destination item - maybe the parent dir does not exist?
-				NSURL *parentDirURL = [itemURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil]; // ignore the result, just retry
-			}
-
-			isSuccessful = [content writeToURL:itemURL atomically:NO encoding:NSUTF8StringEncoding error:&operationError];
-		}
-
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to create file \"%@\". Error: %@\n",
-														[itemURL path],
-														errorDesc];
-			PrintToStdErr(context, errStr);
-		}
-	}
-	return isSuccessful;
-}
-
-bool
-CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[create file blob=true]\t%@\n", [itemURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		const char *encoded = [base64Content UTF8String];
-		unsigned long encodedLen = encoded ? strlen(encoded) : 0;
-		unsigned long maxDecoded = CalculateDecodedBufferMaxSize(encodedLen);
-		std::vector<unsigned char> decoded(maxDecoded > 0 ? maxDecoded : 1);
-		unsigned long decodedLen = encodedLen > 0
-			? DecodeBase64((const unsigned char *)encoded, encodedLen, decoded.data(), maxDecoded)
-			: 0;
-
-		const char *path = [[itemURL path] UTF8String];
-		auto tryWrite = [&](const char *p) -> bool {
-			std::ofstream f(p, std::ios::binary);
-			if(!f.is_open()) return false;
-			if(decodedLen > 0) f.write((const char *)decoded.data(), decodedLen);
-			return f.good();
-		};
-
-		isSuccessful = tryWrite(path);
-		if(!isSuccessful && context->force)
-		{
-			NSFileManager *fm = [NSFileManager defaultManager];
-			[fm removeItemAtURL:itemURL error:nil];
-			NSURL *parentDirURL = [itemURL URLByDeletingLastPathComponent];
-			[fm createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
-			isSuccessful = tryWrite(path);
-		}
-
-		if(!isSuccessful)
-		{
-			int err = errno;
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to create file \"%@\". Error: %s\n",
-								[itemURL path], strerror(err)];
-			PrintToStdErr(context, errStr);
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
-			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
-		}
-	}
-	return isSuccessful;
-}
-
-bool
-CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[create directory]	%@\n", [itemURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = [fileManager createDirectoryAtURL:itemURL withIntermediateDirectories:YES attributes:nil error:&operationError];
-
-		// this call is not supposed to fail for existing directories if you use withIntermediateDirectories:YES
-		// so the behavior should be the same as mkdir -p
-		
-		if(!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to create directory \"%@\". Error: %@\n",
-														[itemURL path],
-														errorDesc];
-			PrintToStdErr(context, errStr);
-		}
-	}
-	return isSuccessful;
-}
-
-bool
-DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[delete]	%@\n", [itemURL path] ];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager removeItemAtURL:itemURL error:&operationError];
-		if(!isSuccessful)
-		{
-			if(![fileManager fileExistsAtPath:[itemURL path]])
-				return true; //do not treat it as an error if the object we tried to delete does not exist
-		
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to delete \"%@\". Error: %@\n",
-														[itemURL path],
-														errorDesc];
-			PrintToStdErr(context, errStr);
-		}
-	}
-	return isSuccessful;
-}
-
-static bool is_utf8_text(const uint8_t *data, size_t len) {
-	size_t i = 0;
-	while (i < len) {
-		uint8_t c = data[i];
-		if (c == 0) return false;
-		size_t seqLen;
-		if      ((c & 0x80) == 0x00) seqLen = 1;
-		else if ((c & 0xE0) == 0xC0) seqLen = 2;
-		else if ((c & 0xF0) == 0xE0) seqLen = 3;
-		else if ((c & 0xF8) == 0xF0) seqLen = 4;
-		else return false;
-		for (size_t j = 1; j < seqLen; j++) {
-			if (i + j >= len || (data[i + j] & 0xC0) != 0x80) return false;
-		}
-		i += seqLen;
-	}
-	return true;
-}
-
-bool
-ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionContext)
-{
-	if (context->stopOnError && context->lastError.error != nil)
-		return false;
-
-	if (context->verbose || context->dryRun)
-	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[read]\t%s\n", filePath];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	actionContext->index++;
-
-	if (context->dryRun)
-	{
-		ActionWithNoOutput(context, actionContext->index);
-		return true;
-	}
-
-	std::ifstream f(filePath, std::ios::binary | std::ios::ate);
-	if (!f.is_open())
-	{
-		int err = errno;
-		NSString *errStr = [NSString stringWithFormat:@"error: failed to open \"%s\" for reading: %s\n", filePath, strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
-		ActionWithNoOutput(context, actionContext->index);
-		return false;
-	}
-
-	std::streamoff fileSize = f.tellg();
-	f.seekg(0, std::ios::beg);
-
-	std::vector<uint8_t> data(static_cast<size_t>(fileSize));
-	if (fileSize > 0 && !f.read(reinterpret_cast<char *>(data.data()), fileSize))
-	{
-		NSString *errStr = [NSString stringWithFormat:@"error: failed to read \"%s\"\n", filePath];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EIO userInfo:userInfo];
-		ActionWithNoOutput(context, actionContext->index);
-		return false;
-	}
-
-	if (is_utf8_text(data.data(), data.size()))
-	{
-		NSString *header = [NSString stringWithFormat:@"[text:%s]\n", filePath];
-		NSString *content = data.empty() ? @"" : [[NSString alloc] initWithBytes:data.data() length:data.size() encoding:NSUTF8StringEncoding];
-		if (content == nil) content = @"";
-		if (![content hasSuffix:@"\n"]) content = [content stringByAppendingString:@"\n"];
-		PrintToStdOut(context, [header stringByAppendingString:content], actionContext->index);
-	}
-	else
-	{
-		unsigned long encodedSize = CalculateEncodedBufferSize((unsigned long)data.size());
-		std::vector<unsigned char> encoded(encodedSize + 1, 0);
-		unsigned long written = EncodeBase64(data.data(), (unsigned long)data.size(), encoded.data(), encodedSize);
-		encoded[written] = '\0';
-
-		NSString *header = [NSString stringWithFormat:@"[blob:%s]\n", filePath];
-		NSString *encodedStr = [NSString stringWithUTF8String:(const char *)encoded.data()];
-		if (encodedStr == nil) encodedStr = @"";
-		PrintToStdOut(context, [[header stringByAppendingString:encodedStr] stringByAppendingString:@"\n"], actionContext->index);
-	}
-
-	return true;
-}
-
-bool
-ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	NSNumber *useStdOutNum = actionContext->settings[@"stdout"];
-	bool useStdOut = true;
-	if([useStdOutNum isKindOfClass:[NSNumber class]])
-		useStdOut = [useStdOutNum boolValue];
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *settingsStr = @"";
-		if(useStdOutNum != nil) //if the setting was explicitly specified
-		{
-			settingsStr = useStdOut ? @" stdout=true" : @" stdout=false";
-		}
-		NSString *allArgsStr = [arguments componentsJoinedByString:@"\t"];
-		NSString *stdoutStr = [NSString stringWithFormat:@"[execute%@]	%@	%@\n", settingsStr, toolPath, allArgsStr];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-	
-	// tool execution is expected to print two strings to stdout
-	// track if the second print happened, else inform output serializer of no output
-	actionContext->index++;
-	bool secondStringPrinted = false;
-	
-	bool isSuccessful = context->dryRun;
-	if(!context->dryRun)
-	{
-		NSTask *task = [[NSTask alloc] init];
-		[task setLaunchPath:toolPath];
-		[task setArguments:arguments];
-
-		NSPipe *stdErrPipe = [NSPipe pipe];
-		[task setStandardError:stdErrPipe];
-
-		[task setTerminationHandler: ^(NSTask *task) {
-			int toolStatus = [task terminationStatus];
-			if(toolStatus != EXIT_SUCCESS)
-			{
-				NSError *dataError = nil;
-				NSFileHandle *stdOutFileHandle = [stdErrPipe fileHandleForReading];
-				NSData *stdErrData = [stdOutFileHandle readDataToEndOfFileAndReturnError:&dataError];
-				if((stdErrData != nil) && (stdErrData.length > 0))
-				{
-					NSString *stdErrStr = [[NSString alloc] initWithData:stdErrData encoding:NSUTF8StringEncoding];
-					PrintToStdErr(context, stdErrStr);
-				}
-				
-				NSString *toolErrorDescription = [NSString stringWithFormat:@"%@ returned error %d", toolPath, toolStatus];
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: toolErrorDescription };
-				NSError *taskError = [NSError errorWithDomain:NSPOSIXErrorDomain code:toolStatus userInfo:userInfo];
-				context->lastError.error = taskError;
-				NSString *errStr = [NSString stringWithFormat:@"error: failed to execute \"%@\". Error: %d\n", toolPath, toolStatus];
-				PrintToStdErr(context, errStr);
-			}
-		}];
-
-		NSPipe *stdOutPipe = [NSPipe pipe];
-		[task setStandardOutput:stdOutPipe];
-
-		NSPipe *stdInPipe = [NSPipe pipe];
-		[task setStandardInput:stdInPipe];
-
-		NSError *operationError = nil;
-		isSuccessful = (bool)[task launchAndReturnError:&operationError];
-		if(isSuccessful)
-		{
-			NSFileHandle *stdOutFileHandle = [stdOutPipe fileHandleForReading];
-			NSData *stdOutData = [stdOutFileHandle readDataToEndOfFileAndReturnError:&operationError];
-			if(stdOutData != nil)
-			{
-				if(useStdOut)
-				{
-					//since we captured stdout and waited on it, now replay it to stdout
-					//because it was synchronous, all output will be printed at once after the tool finished
-					NSString *stdOutStr = [[NSString alloc] initWithData:stdOutData encoding:NSUTF8StringEncoding];
-					PrintToStdOut(context, stdOutStr, actionContext->index);
-					secondStringPrinted = true;
-				}
-			}
-			else
-			{
-				isSuccessful = false;
-			}
-		}
-		
-		if (!isSuccessful)
-		{
-			context->lastError.error = operationError;
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-			{
-				errorDesc = [operationError localizedFailureReason];
-			}
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to execute \"%@\". Error: %@\n", toolPath, errorDesc];
-			PrintToStdErr(context, errStr);
-		}
-	}
-	
-	if(!secondStringPrinted)
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-	
-	return isSuccessful;
-}
-
-
-
-bool
-ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[list]\t%s\n", dirPath];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	actionContext->index++;
-
-	if(context->dryRun)
-	{
-		ActionWithNoOutput(context, actionContext->index);
-		return true;
-	}
-
-	std::vector<DirEntry> entries;
-	if(!list_directory(dirPath, entries))
-	{
-		int err = errno;
-		NSString *errStr = [NSString stringWithFormat:@"error: failed to list \"%s\": %s\n", dirPath, strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
-		ActionWithNoOutput(context, actionContext->index);
-		return false;
-	}
-
-	NSMutableString *output = [NSMutableString stringWithFormat:@"[list:%s]\n", dirPath];
-	for(const auto &entry : entries)
-	{
-		[output appendFormat:@"[%s] %s\n", entry.isDirectory ? "DIR" : "FILE", entry.name.c_str()];
-	}
-	PrintToStdOut(context, output, actionContext->index);
-	return true;
-}
-
-static id TreeNodeToObject(const TreeNode &node)
-{
-	NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithCapacity:3];
-	dict[@"name"] = @(node.name.c_str());
-	dict[@"type"] = node.isDirectory ? @"directory" : @"file";
-	if(node.isDirectory)
-	{
-		NSMutableArray *children = [NSMutableArray arrayWithCapacity:node.children.size()];
-		for(const auto &child : node.children)
-			[children addObject:TreeNodeToObject(child)];
-		dict[@"children"] = children;
-	}
-	return dict;
-}
-
-bool
-DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[tree]\t%s\n", dirPath];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	actionContext->index++;
-
-	if(context->dryRun)
-	{
-		ActionWithNoOutput(context, actionContext->index);
-		return true;
-	}
-
-	TreeNode root;
-	if(!build_directory_tree(dirPath, root, (int)maxDepth))
-	{
-		int err = errno;
-		NSString *errStr = [NSString stringWithFormat:@"error: failed to read directory \"%s\": %s\n", dirPath, strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
-		ActionWithNoOutput(context, actionContext->index);
-		return false;
-	}
-
-	NSError *jsonError = nil;
-	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:TreeNodeToObject(root)
-	                                                   options:0
-	                                                     error:&jsonError];
-	NSString *jsonStr = jsonData
-		? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding]
-		: @"{}";
-
-	NSString *output = [NSString stringWithFormat:@"[tree:%s]\n%@\n", dirPath, jsonStr];
-	PrintToStdOut(context, output, actionContext->index);
-	return true;
-}
-
-bool
-GlobFiles(NSString *rootDir, NSArray<NSString*> *globPatterns, NSArray<NSString*> *excludePatterns, NSInteger maxResults, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && context->lastError.error != nil)
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSMutableString *desc = [NSMutableString stringWithFormat:@"[glob]\t%@", rootDir];
-		for(NSString *p in globPatterns)
-			[desc appendFormat:@"\t%@", p];
-		for(NSString *p in excludePatterns)
-			[desc appendFormat:@"\t!%@", p];
-		[desc appendString:@"\n"];
-		PrintToStdOut(context, desc, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	actionContext->index++;
-
-	if(context->dryRun)
-	{
-		ActionWithNoOutput(context, actionContext->index);
-		return true;
-	}
-
-	std::string cRoot([rootDir UTF8String]);
-
-	std::vector<std::string> cGlobs;
-	for(NSString *p in globPatterns)
-		if(p != nil) cGlobs.push_back(std::string([p UTF8String]));
-
-	std::vector<std::string> cExcludes;
-	for(NSString *p in excludePatterns)
-		if(p != nil) cExcludes.push_back(std::string([p UTF8String]));
-
-	size_t maxR = (maxResults > 0) ? (size_t)maxResults : 1000;
-	auto matches = glob_files_in_dir(cRoot, cGlobs, cExcludes, maxR);
-
-	NSMutableString *output = [NSMutableString stringWithString:@"[glob]\n"];
-	for(const auto &m : matches)
-		[output appendFormat:@"%s\n", m.c_str()];
-	PrintToStdOut(context, output, actionContext->index);
-	return true;
-}
-
-static void format_permissions(mode_t mode, char out[11])
-{
-	if      (S_ISREG(mode))  out[0] = '-';
-	else if (S_ISDIR(mode))  out[0] = 'd';
-	else if (S_ISLNK(mode))  out[0] = 'l';
-	else if (S_ISCHR(mode))  out[0] = 'c';
-	else if (S_ISBLK(mode))  out[0] = 'b';
-	else if (S_ISFIFO(mode)) out[0] = 'p';
-	else if (S_ISSOCK(mode)) out[0] = 's';
-	else                     out[0] = '?';
-	out[1] = (mode & S_IRUSR) ? 'r' : '-';
-	out[2] = (mode & S_IWUSR) ? 'w' : '-';
-	out[3] = (mode & S_IXUSR) ? ((mode & S_ISUID) ? 's' : 'x') : ((mode & S_ISUID) ? 'S' : '-');
-	out[4] = (mode & S_IRGRP) ? 'r' : '-';
-	out[5] = (mode & S_IWGRP) ? 'w' : '-';
-	out[6] = (mode & S_IXGRP) ? ((mode & S_ISGID) ? 's' : 'x') : ((mode & S_ISGID) ? 'S' : '-');
-	out[7] = (mode & S_IROTH) ? 'r' : '-';
-	out[8] = (mode & S_IWOTH) ? 'w' : '-';
-	out[9] = (mode & S_IXOTH) ? ((mode & S_ISVTX) ? 't' : 'x') : ((mode & S_ISVTX) ? 'T' : '-');
-	out[10] = '\0';
-}
-
-static void format_iso8601(time_t t, char out[21])
-{
-	struct tm tm_utc;
-	gmtime_r(&t, &tm_utc);
-	strftime(out, 21, "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
-}
-
-bool
-GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && context->lastError.error != nil)
-		return false;
-
-	if(context->verbose || context->dryRun)
-	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[info]\t%s\n", path];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	actionContext->index++;
-
-	if(context->dryRun)
-	{
-		ActionWithNoOutput(context, actionContext->index);
-		return true;
-	}
-
-	struct stat st;
-	if(lstat(path, &st) != 0)
-	{
-		int err = errno;
-		NSString *errStr = [NSString stringWithFormat:@"error: failed to stat \"%s\": %s\n", path, strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
-		ActionWithNoOutput(context, actionContext->index);
-		return false;
-	}
-
-	char perms[11];
-	format_permissions(st.st_mode, perms);
-
-	char created[21];
-	time_t birthtime = st.st_birthtimespec.tv_sec;
-	if(birthtime == 0)
-		birthtime = st.st_ctimespec.tv_sec;
-	format_iso8601(birthtime, created);
-
-	char modified[21];
-	format_iso8601(st.st_mtimespec.tv_sec, modified);
-
-	const char *typeStr;
-	if      (S_ISREG(st.st_mode))  typeStr = "file";
-	else if (S_ISDIR(st.st_mode))  typeStr = "directory";
-	else if (S_ISLNK(st.st_mode))  typeStr = "symlink";
-	else                            typeStr = "other";
-
-	NSString *output = [NSString stringWithFormat:
-		@"[info:%s]\nsize: %lld\ncreated: %s\nmodified: %s\ntype: %s\npermissions: %s\n",
-		path,
-		(long long)st.st_size,
-		created,
-		modified,
-		typeStr,
-		perms];
-	PrintToStdOut(context, output, actionContext->index);
-	return true;
-}
-
-bool
-Echo(NSString *text, ReplayContext *context, ActionContext *actionContext)
-{
-	if(context->stopOnError && (context->lastError.error != nil))
-		return false;
-
-	bool addNewline = true;
-	id newlineVal = actionContext->settings[@"newline"];
-	if([newlineVal isKindOfClass:[NSNumber class]])
-	{
-		addNewline = [newlineVal boolValue];
-	}
-
-	if(text == nil)
-		text = @"";
-
-	if(context->verbose || context->dryRun)
-	{
-		id useRawText = actionContext->settings[@"raw"];
-		NSString *rawSetting = @"";
-		if([useRawText isKindOfClass:[NSNumber class]])
-		{
-			bool rawContent = [useRawText boolValue];
-			rawSetting = rawContent ? @" raw=true" : @" raw=false";
-		}
-
-		NSString *newlineSetting = @"";
-		if(newlineVal != nil) // only if explicitly set
-		{
-			newlineSetting = addNewline ? @" newline=true" : @" newline=false";
-		}
-
-		//TODO: escape newlines for multiline text so it will be displayed in one line
-		NSString *stdoutStr = [NSString stringWithFormat:@"[echo%@%@]	%@\n", rawSetting, newlineSetting, text];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	// echo is expected to print two strings to stdout (verbose status and actual string)
-	actionContext->index++;
-
-	if(!context->dryRun)
-	{
-		if(addNewline)
-		{
-			NSArray <NSString *> *array = @[text, @"\n"];
-			PrintStringsToStdOut(context, array, actionContext->index);
-		}
-		else
-		{
-			PrintToStdOut(context, text, actionContext->index);
-		}
-	}
-	else
-	{
-		ActionWithNoOutput(context, actionContext->index);
-	}
-
-	return true;
-}
-

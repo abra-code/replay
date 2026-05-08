@@ -15,6 +15,8 @@
 @interface TaskProxy() {
 	std::vector<std::string> _globInputs;
 	std::vector<std::string> _globExclusiveInputs;
+	std::vector<std::string> _globMutatingInputs;
+	std::vector<std::string> _concreteMutatingPaths;
 	std::vector<std::string> _globOutputs;
 }
 	@property(nonatomic, strong, direct) NSMutableSet<TaskProxy*> *nextTasks;
@@ -219,6 +221,12 @@
 
 - (const std::vector<std::string>&)globExclusiveInputs { return _globExclusiveInputs; }
 - (void)setGlobExclusiveInputs:(std::vector<std::string>)inputs { _globExclusiveInputs = std::move(inputs); }
+
+- (const std::vector<std::string>&)globMutatingInputs { return _globMutatingInputs; }
+- (void)setGlobMutatingInputs:(std::vector<std::string>)inputs { _globMutatingInputs = std::move(inputs); }
+
+- (const std::vector<std::string>&)concreteMutatingPaths { return _concreteMutatingPaths; }
+- (void)setConcreteMutatingPaths:(std::vector<std::string>)paths { _concreteMutatingPaths = std::move(paths); }
 
 - (const std::vector<std::string>&)globOutputs { return _globOutputs; }
 - (void)setGlobOutputs:(std::vector<std::string>)outputs { _globOutputs = std::move(outputs); }

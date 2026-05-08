@@ -58,6 +58,7 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 	HandleActionStep(replayStep, context,
 		^( __nullable dispatch_block_t action,
 			NSArray<NSString*> * __nullable inputs,
+			NSArray<NSString*> * __nullable mutatingInputs,
 			NSArray<NSString*> * __nullable exclusiveInputs,
 			NSArray<NSString*> * __nullable outputs)
 		{
@@ -74,6 +75,8 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 
 			std::vector<std::string> globInputList;
 			std::vector<std::string> globExclusiveInputList;
+			std::vector<std::string> globMutatingInputList;
+			std::vector<std::string> concreteMutatingPathList;
 
 			NSUInteger regularInputCount = 0;
 			if(inputs != nil)
@@ -126,6 +129,58 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 				}
 			}
 
+			if(mutatingInputs != nil)
+			{
+				for(NSString *oneInput in mutatingInputs)
+				{
+					std::string path([oneInput UTF8String]);
+					if(globoverlap::is_glob_pattern(path))
+					{
+						globMutatingInputList.push_back(std::move(path));
+						continue;
+					}
+
+					// Concrete mutating path. ConnectGlobDependencies handles producer
+					// and consumer chaining uniformly via concreteMutatingPaths and
+					// playlist-order Pass B; the FileNode is inserted here for the
+					// exclusive-input collision check, the parent-walk in
+					// ConnectImplicitProducers (which links a parent dir's producer
+					// to the mutator), and to chain a prior playlist producer that
+					// only exists as a tree-walk ancestor (e.g. clone of an enclosing
+					// directory whose contents have no per-file producer task).
+					NSString *lowercasePath = [oneInput lowercaseString];
+					const char *posixPath = [lowercasePath fileSystemRepresentation];
+					FileNode *node = FindOrInsertFileNodeForPath(context->fileTreeRoot, posixPath);
+
+					if(node->isExclusiveInput != 0)
+					{
+						posixPath = [oneInput fileSystemRepresentation];
+						fprintf(gLogErr, "error: invalid playlist for concurrent execution.\n"
+							"The path: \"%s\"\n"
+							"is specified as a mutating input (e.g. edit) but another action has marked it\n"
+							"as an exclusive input (delete or move). These cannot apply to the same path.\n"
+							"See \"replay --help\" for more information.\n", posixPath);
+						safe_exit(EXIT_FAILURE);
+					}
+
+					// Conditional FileTree producer-replacement: only when no prior
+					// consumer has registered this path. Without prior consumers the
+					// FileTree edge mutator → next-consumer is the right direction;
+					// with prior consumers, that edge would conflict with Pass B's
+					// pre-mutation reader edge (consumer → mutator), creating a
+					// cycle. Skipping the replacement in that case lets Pass B
+					// handle ordering on both sides per playlist position.
+					if(node->hasConsumer == 0)
+					{
+						node->producer = (__bridge void *)oneTask;
+					}
+
+					// Lowercase posix path so concrete-vs-concrete and concrete-vs-glob
+					// comparisons in ConnectGlobDependencies match GetPathForNode output.
+					concreteMutatingPathList.push_back(std::string([lowercasePath UTF8String]));
+				}
+			}
+
 			if(concreteInputIndex > 0)
 			{
 				oneTask.inputCount = concreteInputIndex;
@@ -138,6 +193,8 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 
 			[oneTask setGlobInputs:std::move(globInputList)];
 			[oneTask setGlobExclusiveInputs:std::move(globExclusiveInputList)];
+			[oneTask setGlobMutatingInputs:std::move(globMutatingInputList)];
+			[oneTask setConcreteMutatingPaths:std::move(concreteMutatingPathList)];
 
 			std::vector<std::string> globOutputList;
 

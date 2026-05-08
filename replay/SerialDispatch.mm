@@ -36,6 +36,7 @@ DispatchTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 			HandleActionStep((NSDictionary *)oneStep, context,
 				^(dispatch_block_t action,
 				__unused NSArray<NSString*> *inputs,
+				__unused NSArray<NSString*> *mutatingInputs,
 				__unused NSArray<NSString*> *exclusiveInputs,
 				__unused NSArray<NSString*> *outputs)
 				{
@@ -67,6 +68,7 @@ DispatchTaskSerially(NSDictionary *stepDescription, ReplayContext *context)
 	HandleActionStep(stepDescription, context,
 		^(dispatch_block_t action,
 		__unused NSArray<NSString*> *inputs,
+		__unused NSArray<NSString*> *mutatingInputs,
 		__unused NSArray<NSString*> *exclusiveInputs,
 		__unused NSArray<NSString*> *outputs)
 		{

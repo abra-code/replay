@@ -32,6 +32,7 @@ DispatchTasksConcurrentlyWithNoDependency(NSArray<NSDictionary*> *playlist, Repl
 			HandleActionStep((NSDictionary *)oneStep, context,
 				^(dispatch_block_t action,
 				__unused NSArray<NSString*> *inputs,
+				__unused NSArray<NSString*> *mutatingInputs,
 				__unused NSArray<NSString*> *exclusiveInputs,
 				__unused NSArray<NSString*> *outputs)
 				{
@@ -60,6 +61,7 @@ DispatchTaskConcurrentlyWithNoDependency(NSDictionary *stepDescription, ReplayCo
 	HandleActionStep(stepDescription, context,
 		^(dispatch_block_t action,
 		__unused NSArray<NSString*> *inputs,
+		__unused NSArray<NSString*> *mutatingInputs,
 		__unused NSArray<NSString*> *exclusiveInputs,
 		__unused NSArray<NSString*> *outputs)
 		{

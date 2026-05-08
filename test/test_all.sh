@@ -41,6 +41,8 @@ run_suite "$SCRIPT_DIR/test_replay_glob_action.sh" "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_info.sh"        "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_list_tree.sh"   "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_read.sh"        "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_replay_edit.sh"        "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_replay_concurrency_stress.sh" "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_dispatch.sh"           "$BUILD_DIR/replay"
 
 printf '\n'

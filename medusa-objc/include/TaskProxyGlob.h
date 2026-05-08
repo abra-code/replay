@@ -23,6 +23,15 @@
 - (const std::vector<std::string>&)globExclusiveInputs;
 - (void)setGlobExclusiveInputs:(std::vector<std::string>)inputs;
 
+- (const std::vector<std::string>&)globMutatingInputs;
+- (void)setGlobMutatingInputs:(std::vector<std::string>)inputs;
+
+// Concrete (non-glob) paths used as mutating inputs by this task.
+// Stored as lowercase POSIX paths to match GetPathForNode output for
+// pattern_overlap / concrete_matches_glob comparisons in the scheduler.
+- (const std::vector<std::string>&)concreteMutatingPaths;
+- (void)setConcreteMutatingPaths:(std::vector<std::string>)paths;
+
 - (const std::vector<std::string>&)globOutputs;
 - (void)setGlobOutputs:(std::vector<std::string>)outputs;
 

@@ -270,6 +270,15 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 			if(paramCount > 0)
 				actionDescription[@"path"] = paramArray[0];
 		}
+		else if(action == kFileActionEdit)
+		{ // [edit]	path	oldText	newText  — modifiers: limit=N regex=true case-insensitive=true
+			if(paramCount > 0)
+				actionDescription[@"items"] = @[paramArray[0]];
+			if(paramCount > 1)
+				actionDescription[@"oldText"] = paramArray[1];
+			if(paramCount > 2)
+				actionDescription[@"newText"] = paramArray[2];
+		}
 		else if(action == kFileActionGlob)
 		{ // first param is root dir; remaining non-'!'-prefixed params are relative glob patterns; '!'-prefixed are excludes
 			if(paramCount > 0)

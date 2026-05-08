@@ -225,7 +225,7 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 			continue;
 
 		// Check both regular and exclusive glob inputs against all producers.
-		// The exclusive vs regular distinction doesn't matter for producer→consumer linking.
+		// The exclusive vs regular distinction doesn't matter for producer -> consumer linking.
 		const std::vector<std::string>* inputSets[] = { &globInputs, &globExclusiveInputs };
 		for(const auto* inputSet : inputSets)
 		{
@@ -300,6 +300,178 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 				}
 
 				next_consumer:;
+			}
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Mutating input dependency passes.
+	//
+	// A mutating pattern M on task T (glob or concrete) means T reads AND writes
+	// files matching M. Three invariants to enforce:
+	//   Pass A: any task whose outputs overlap M must run before T (producer
+	//           must materialize the file). Order-independent: a producer is
+	//           always a prerequisite of a mutator regardless of playlist order.
+	//   Pass B: a consumer (task with inputs overlapping M) must run on the
+	//           correct side of T per playlist order:
+	//             • consumer earlier in playlist: runs BEFORE T
+	//             • consumer later in playlist:   runs AFTER T
+	//           This preserves the user's intent that earlier-listed reads see
+	//           pre-mutation content and later-listed reads see post-mutation.
+	//   Pass C: two mutating tasks with overlapping patterns are chained by
+	//           playlist order (earlier → later) to avoid the bidirectional
+	//           circular links that Pass A+B would otherwise create. Pass A/B
+	//           are skipped between the pair only when Pass C actually fires
+	//           (overlap found); unrelated mutator pairs still run A/B.
+	//
+	// Concrete and glob mutating patterns are handled uniformly: concrete paths
+	// are stored lowercased (matching GetPathForNode), and patterns_overlap /
+	// concrete_matches_glob both work correctly with literal patterns.
+	// -------------------------------------------------------------------------
+
+	auto lowercase_copy = [](const std::string& s) {
+		std::string r = s;
+		for(auto& c : r) c = (char)tolower((unsigned char)c);
+		return r;
+	};
+
+	NSUInteger taskCount = [allTasks count];
+	for(NSUInteger mutatorIndex = 0; mutatorIndex < taskCount; mutatorIndex++)
+	{
+		__unsafe_unretained TaskProxy *mutatingTask = allTasks[mutatorIndex];
+
+		// Combined view of this task's mutating patterns (glob + concrete).
+		// Concrete entries are already lowercase; glob entries may not be.
+		std::vector<std::string> mutatingPatterns;
+		{
+			const auto& glob = [mutatingTask globMutatingInputs];
+			const auto& concrete = [mutatingTask concreteMutatingPaths];
+			mutatingPatterns.reserve(glob.size() + concrete.size());
+			for(const auto& p : glob) mutatingPatterns.push_back(lowercase_copy(p));
+			for(const auto& p : concrete) mutatingPatterns.push_back(p);
+		}
+		if(mutatingPatterns.empty())
+			continue;
+
+		for(const auto& mutPat : mutatingPatterns)
+		{
+			for(NSUInteger otherIndex = 0; otherIndex < taskCount; otherIndex++)
+			{
+				if(otherIndex == mutatorIndex)
+					continue;
+
+				__unsafe_unretained TaskProxy *otherTask = allTasks[otherIndex];
+
+				// Pass C: both tasks are mutators — if their patterns overlap,
+				// chain by playlist order and skip Pass A/B for this pair.
+				bool otherIsMutator = (![otherTask globMutatingInputs].empty()
+				                    || ![otherTask concreteMutatingPaths].empty());
+				if(otherIsMutator)
+				{
+					bool overlapping = false;
+					for(const auto& rawOtherPat : [otherTask globMutatingInputs])
+					{
+						std::string otherPat = lowercase_copy(rawOtherPat);
+						if(globoverlap::patterns_overlap(otherPat, mutPat))
+						{
+							overlapping = true;
+							break;
+						}
+					}
+					if(!overlapping)
+					{
+						for(const auto& otherPat : [otherTask concreteMutatingPaths])
+						{
+							if(globoverlap::patterns_overlap(otherPat, mutPat))
+							{
+								overlapping = true;
+								break;
+							}
+						}
+					}
+					if(overlapping)
+					{
+						if(otherIndex < mutatorIndex)
+							[otherTask linkNextTask:mutatingTask];
+						// otherIndex > mutatorIndex: link will be created when
+						// the outer loop reaches that other task as the mutator
+						continue; // skip Pass A/B for this overlapping mutator pair
+					}
+					// non-overlapping mutator pair: fall through to Pass A/B
+				}
+
+				// Pass A: otherTask produces files matching mutPat → run before mutatingTask
+				bool linked = false;
+				for(const auto& rawOutPat : [otherTask globOutputs])
+				{
+					if(globoverlap::patterns_overlap(lowercase_copy(rawOutPat), mutPat))
+					{
+						[otherTask linkNextTask:mutatingTask];
+						linked = true;
+						break;
+					}
+				}
+				if(!linked)
+				{
+					NSUInteger outputCount = otherTask.outputCount;
+					FileNode** outputs = otherTask.outputs;
+					for(NSUInteger i = 0; i < outputCount; i++)
+					{
+						char path[2048];
+						GetPathForNode(outputs[i], path, sizeof(path));
+						if(concrete_matches_glob(path, mutPat))
+						{
+							[otherTask linkNextTask:mutatingTask];
+							break;
+						}
+					}
+				}
+
+				// Pass B: otherTask consumes files matching mutPat — direction
+				// depends on playlist order so prior consumers see pre-mutation
+				// content and later consumers see post-mutation content.
+				bool consumed = false;
+				for(const auto& rawInPat : [otherTask globInputs])
+				{
+					if(globoverlap::patterns_overlap(mutPat, lowercase_copy(rawInPat)))
+					{
+						consumed = true;
+						break;
+					}
+				}
+				if(!consumed)
+				{
+					for(const auto& rawInPat : [otherTask globExclusiveInputs])
+					{
+						if(globoverlap::patterns_overlap(mutPat, lowercase_copy(rawInPat)))
+						{
+							consumed = true;
+							break;
+						}
+					}
+				}
+				if(!consumed)
+				{
+					NSUInteger inputCount = otherTask.inputCount;
+					FileNode** inputs = otherTask.inputs;
+					for(NSUInteger i = 0; i < inputCount; i++)
+					{
+						char path[2048];
+						GetPathForNode(inputs[i], path, sizeof(path));
+						if(concrete_matches_glob(path, mutPat))
+						{
+							consumed = true;
+							break;
+						}
+					}
+				}
+				if(consumed)
+				{
+					if(otherIndex > mutatorIndex)
+						[mutatingTask linkNextTask:otherTask]; // post-mutation reader
+					else
+						[otherTask linkNextTask:mutatingTask]; // pre-mutation reader
+				}
 			}
 		}
 	}

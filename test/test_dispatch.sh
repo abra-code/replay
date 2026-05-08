@@ -389,6 +389,106 @@ fi
 rm -rf "$WORK_DIR"
 
 
+EDIT_WORK_DIR=$(/usr/bin/mktemp -d /tmp/dispatch_edit_test.XXXXXX)
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "dispatch edit: literal replace (default limit=1)"
+echo ""
+
+EDIT_FILE="$EDIT_WORK_DIR/literal.txt"
+printf 'hello world\nhello again\n' > "$EDIT_FILE"
+
+"$DISPATCH" "dispatch-edit-literal" edit "$EDIT_FILE" "hello" "goodbye"
+"$DISPATCH" "dispatch-edit-literal" wait
+verify_succeeded "$?" "dispatch edit literal: wait failed"
+/usr/bin/grep -qF "goodbye world" "$EDIT_FILE"
+verify_succeeded "$?" "dispatch edit literal: first occurrence replaced"
+/usr/bin/grep -qF "hello again" "$EDIT_FILE"
+verify_succeeded "$?" "dispatch edit literal: second occurrence unchanged (limit=1 default)"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "dispatch edit: delete (empty newText)"
+echo ""
+
+EDIT_FILE="$EDIT_WORK_DIR/delete.txt"
+printf 'remove this text\n' > "$EDIT_FILE"
+
+"$DISPATCH" "dispatch-edit-delete" edit "$EDIT_FILE" " this" ""
+"$DISPATCH" "dispatch-edit-delete" wait
+verify_succeeded "$?" "dispatch edit delete: wait failed"
+/usr/bin/grep -qF "remove text" "$EDIT_FILE"
+verify_succeeded "$?" "dispatch edit delete: substring removed"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "dispatch edit: limit=0 replaces all occurrences"
+echo ""
+
+EDIT_FILE="$EDIT_WORK_DIR/limit.txt"
+printf 'foo\nfoo\nfoo\n' > "$EDIT_FILE"
+
+"$DISPATCH" "dispatch-edit-limit" edit "$EDIT_FILE" "foo" "bar" limit=0
+"$DISPATCH" "dispatch-edit-limit" wait
+verify_succeeded "$?" "dispatch edit limit=0: wait failed"
+count=$(/usr/bin/grep -c "bar" "$EDIT_FILE")
+test "$count" = "3"
+verify_succeeded "$?" "dispatch edit limit=0: all 3 occurrences replaced (got $count)"
+/usr/bin/grep -qF "foo" "$EDIT_FILE" && verify_succeeded "1" "dispatch edit limit=0: 'foo' still present"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "dispatch edit: regex with back-reference swap"
+echo ""
+
+EDIT_FILE="$EDIT_WORK_DIR/regex.txt"
+printf 'John Smith\n' > "$EDIT_FILE"
+
+"$DISPATCH" "dispatch-edit-regex" edit "$EDIT_FILE" "([A-Za-z]+) ([A-Za-z]+)" '\2, \1' regex=true
+"$DISPATCH" "dispatch-edit-regex" wait
+verify_succeeded "$?" "dispatch edit regex: wait failed"
+/usr/bin/grep -qF "Smith, John" "$EDIT_FILE"
+verify_succeeded "$?" "dispatch edit regex: back-reference swap produced 'Smith, John'"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "dispatch edit: case-insensitive=true"
+echo ""
+
+EDIT_FILE="$EDIT_WORK_DIR/case.txt"
+printf 'Hello World\n' > "$EDIT_FILE"
+
+"$DISPATCH" "dispatch-edit-case" edit "$EDIT_FILE" "hello" "goodbye" case-insensitive=true
+"$DISPATCH" "dispatch-edit-case" wait
+verify_succeeded "$?" "dispatch edit case-insensitive: wait failed"
+/usr/bin/grep -qF "goodbye World" "$EDIT_FILE"
+verify_succeeded "$?" "dispatch edit case-insensitive: matched 'Hello' with pattern 'hello'"
+
+
+echo ""
+echo "------------------------------"
+echo ""
+echo "dispatch edit: missing newText exits with error"
+echo ""
+
+"$DISPATCH" "dispatch-edit-err" edit "$EDIT_WORK_DIR/literal.txt" "foo" 2>/dev/null
+verify_failed "$?" "dispatch edit missing newText: should have exited with error"
+"$DISPATCH" "dispatch-edit-err" wait 2>/dev/null
+
+
+rm -rf "$EDIT_WORK_DIR"
+
+
 # verify there is no orphaned "replay" server running
 # count the lines returned by ps for processes with "replay" in name
 # there is one system "replayd" we exclude by adding space after "replay"
