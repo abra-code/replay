@@ -2,8 +2,8 @@
 'replay' repository contains 4 tools:
 - replay: execute a list of declared actions
 - dispatch: companion tool for 'replay'
-- fingerprint: calculate deep directory hash - [readme](fingerprint/README.md)  
-- gate: cached task execution tool - [readme](gate/README.md)  
+- fingerprint: calculate deep directory hash - [readme](fingerprint/README.md)
+- gate: cached task execution tool - [readme](gate/README.md)
 
 To install all 4 tools locally in ~/.local/bin run the installer in terminal:
 ```
@@ -11,9 +11,11 @@ source <(/usr/bin/curl -fsSL 'https://raw.githubusercontent.com/abra-code/replay
 ```
 
 # replay
-A macOS tool to execute a list of declared actions. Currently supported actions are:
-- file operations like clone, move, create, delete,
-- execution of a child tool,
+A macOS tool to execute a list of declared actions. Supported actions include:
+- file operations like clone, move, create, delete, hardlink, symlink
+- filesystem inspection: read, list, tree, info, glob
+- text editing: edit (search-and-replace with regex support)
+- execution of child tools
 - text operations like echo
 
 Key features:
@@ -24,6 +26,8 @@ Key features:
 - self contained code - not calling external tools to perform file operations
 - supports cloning on APFS so duplicates don't take unnecessary space on disk
 - companion "dispatch" tool helps with ad hoc task distribution without the need to create a playlist
+- hard sandboxing via macOS Seatbelt (kernel-enforced filesystem and network restrictions) - shared by `replay` and `gate` - [readme](sandbox/README.md)
+
 
 The documentation is in both tools' help as below. Example usage in test scripts accompanying this code.
 \
@@ -70,6 +74,20 @@ Options:
                      but it is possible if needed.
   -l, --stdout PATH  log standard output to provided file path.
   -m, --stderr PATH  log standard error to provided file path.
+  --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay
+                     auto-discovers declared paths from the playlist and adds them to the policy.
+                     Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.
+                     Tool paths in "execute" actions must be absolute (e.g. /usr/bin/python3),
+                     not bare names — $PATH lookup happens after the sandbox is active.
+                     Violations return EPERM to the caller;
+                     To discover path requirements, use sandbox/sandbox-discover.py
+                     To stream violations in real time run:
+                       log stream --style compact --predicate 'subsystem == "com.apple.sandbox" || sender == "Sandbox"'
+  --sandbox-profile FILE  JSON file with full sandbox spec; merged with --allow-read/--allow-write.
+                     Implicitly enables --sandbox.
+  --allow-read PATH    Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.
+  --allow-write PATH   Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.
+  --deny-network       With sandbox active, deny outbound network (allowed by default).
   -V, --version      Display version.
   -h, --help         Display this help.
 
@@ -149,11 +167,53 @@ Actions and parameters:
     raw       Bool value to indicate whether environment variables should be expanded or not in content text.
               Default value is "false", meaning that environment variables are expanded.
               Pass "true" if you want to write a script with some ${VARIABLE} usage
+    blob      Base64-encoded binary content. Mutually exclusive with "content".
+              When present, the decoded bytes are written as-is (no environment variable expansion).
     directory   New directory path. All directories leading to the deepest one are created if they don't exist.
   delete      Delete a file or directory (with its content).
               CAUTION: There is no warning or user confirmation requested before deletion.
     items     Array of item paths to delete (files or directories with their content).
               Item path(s) are invalidated by "delete" so they are marked as exclusive in concurrent execution.
+  read        Read one or more files and print their contents to stdout.
+    items     Array of file paths to read.
+              Valid UTF-8 files are printed as:    [text:path]<newline><content><newline>
+              Binary (non-UTF-8) files are printed as: [blob:path]<newline><base64><newline>
+  list        List the immediate children of a directory.
+    directory   Path to the directory to list.
+              Output format: [list:path]<newline> followed by one entry per line:
+              [FILE] name  or  [DIR] name, sorted alphabetically.
+  tree        Recursively list directory contents as JSON.
+    directory   Path to the root directory.
+    depth     Maximum recursion depth (default 5). Set to 0 to get only the root node.
+              Output format: [tree:path]<newline><json><newline>
+              JSON schema: {"name": str, "type": "directory"|"file",
+                            "children": [...]}  (children present only for directories)
+  info        Return metadata for a file or directory path.
+    path      Path to query.
+              Output format: [info:path]<newline><json><newline>
+              JSON schema: {"path": str, "type": "file"|"directory"|"symlink",
+                            "size": int, "modified": float (unix timestamp)}
+  glob        Search for files matching glob patterns under a root directory.
+    root      Root directory to search from.
+    glob      Array of glob patterns relative to root (e.g. "**/*.swift").
+              Patterns starting with "!" are exclusions and remove matches from the result.
+    exclude   Array of paths or patterns to exclude from traversal (optional).
+    max       Maximum number of results to return (optional, default unlimited).
+              Output format: one absolute file path per line, preceded by [glob] header.
+  edit        Search-and-replace text or regex patterns in one or more files. Written atomically.
+    items     Array of file paths and/or glob patterns (required). Each entry is independent:
+              concrete paths each produce their own task (may run in parallel);
+              glob patterns each produce one task that expands and edits all matches at runtime.
+              Error if a glob pattern matches no files.
+    edits     Array of edit operations applied in order, each a dict with:
+      oldText   Text or pattern to search for (required).
+      newText   Replacement text. In regex mode \\1..\\9 are back-references. Default "" (delete).
+      limit     Max replacements per operation. Default 1. Set to 0 for unlimited.
+      regex     Bool. Treat oldText as a POSIX ERE regex pattern. Default false.
+      case-insensitive   Bool. Case-insensitive matching for literal and regex modes. Default false.
+    dry-run   Bool. Show the edit plan without writing the file. Default false.
+              In dry-run mode output is: [edit-dry-run:path]<newline> followed by one line per
+              operation: "oldText" -> "newText" (limit=N [regex])
   execute     Run an executable as a child process.
     tool      Full path to a tool to execute.
     arguments   Array of arguments to pass to the tool (optional).
@@ -187,25 +247,47 @@ The format of streamed/piped actions is one action per line (not plist or json!)
 - variable length parameters are following, separated by the same field separator, specific to given action
 Param interpretation per action
 (examples use "tab" as a separator)
-1. [clone], [move], [hardlink], [symlink] allows only simple from-to specification,
-with first param interpretted as "from" and second as "to" e.g.:
+- [clone], [move], [hardlink], [symlink] allow only simple from-to specification,
+  with first param interpretted as "from" and second as "to" e.g.:
 [clone]	/path/to/src/file.txt	/path/to/dest/file.txt
 [symlink validate=false]	/path/to/src/file.txt	/path/to/symlink/file.txt
-2. [delete] is followed by one or many paths to items, e.g.:
+- [delete] is followed by one or many paths to items, e.g.:
 [delete]	/path/to/delete/file1.txt	/path/to/delete/file2.txt
-3. [create] has 2 variants: [create file] and [create directory].
-If "file" or "directory" option is not specified, it falls back to "file"
-A. [create file] requires path followed by optional content, e.g.:
+- [read] is followed by one or many file paths to read, e.g.:
+[read]	/path/to/read/file1.txt	/path/to/read/file2.bin
+- [list] lists immediate children of a directory:
+[list]	/path/to/directory
+- [tree] recursively lists a directory as JSON (optional depth modifier, default 5):
+[tree]	/path/to/directory
+[tree depth=3]	/path/to/directory
+- [info] requires a single path to query file metadata:
+[info]	/path/to/file.txt
+- [glob] requires root directory and one or more glob patterns (comma-separated):
+[glob]	/path/to/search	*.swift
+- [create] has 2 variants: [create file] and [create directory].
+  If "file" or "directory" option is not specified, it falls back to "file"
+  A. [create file] requires path followed by optional content, e.g.:
 [create file]	/path/to/create/file.txt	Created by replay!
 [create file raw=true]	/path/to/file.txt	Do not expand environment variables like ${HOME}
-B. [create directory] requires just a single path, e.g.:
+     [create file blob=true] writes binary content supplied as base64, e.g.:
+[create file blob=true]	/path/to/create/file.bin	iVBORw0KGgo=
+  B. [create directory] requires just a single path, e.g.:
 [create directory]	/path/to/create/directory
-4. [execute] requires tool path and may have optional parameters separated with the same delimiter (not space delimited!), e.g.:
+- [edit] requires a file path (or glob pattern), oldText, and optional newText as tab-separated fields.
+  When a glob pattern is used as the file path it is expanded at runtime; all matches are edited.
+  For multiple independent paths or patterns, send one [edit] line per path.
+  Modifiers: limit=N (default 1, 0=unlimited), regex=true, case-insensitive=true, dry-run=true
+[edit]	/path/to/file.txt	old text	new text
+[edit]	/path/to/file.txt	old text
+[edit regex=true limit=0]	/path/to/file.txt	([a-z]+)_v1	\1_v2
+[edit case-insensitive=true]	/path/to/file.txt	TODO	DONE
+[edit]	/path/to/src/*.cpp	OLD_API	NEW_API
+- [execute] requires tool path and may have optional parameters separated with the same delimiter (not space delimited!), e.g.:
 [execute]	/bin/echo	Hello from replay!
 [execute stdout=false]	/bin/echo	This will not be printed
-The following example uses a different separator: "+" to explicitly show delimited parameters:
+  The following example uses a different separator: "+" to explicitly show delimited parameters:
 [execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep ".txt"
-5. [echo] requires one string after separator. Supported modifiers are raw=true and newline=false
+- [echo] requires one string after separator. Supported modifiers are raw=true and newline=false
 
 Example JSON playlist:
 
@@ -290,6 +372,25 @@ Example execution:
 
 In the above example playlist some output files are inputs to later actions.
 The dependency analysis will create an execution graph to run dependent actions after the required outputs are produced.
+
+Sandbox profile JSON schema (--sandbox-profile FILE):
+
+  All fields are optional. Defaults shown.
+
+  {
+    "import_baseline": true,        // include bsd.sb (covers dyld, /tmp reads, Mach IPC)
+    "read_only":  ["/path", ...],   // recursive file-read* access
+    "read_write": ["/path", ...],   // recursive file-read* + file-write* access
+    "allow_network": true,           // set false to deny all network connections
+    "allow_exec":    true,           // set false to deny process-exec*
+    "allow_fork":    true,           // set false to deny process-fork
+    "extra_rules": ["(allow ...)"]  // raw SBPL rules appended verbatim
+  }
+
+  System binaries (/bin, /usr/bin) do not need an explicit read_only entry;
+  process-exec* covers launching them and bsd.sb covers their system dylibs.
+  Third-party tools (Homebrew, Python frameworks) need their prefix in read_only
+  because dyld must open their framework or library files at startup.
 
 See also:
 
@@ -448,6 +549,13 @@ OPTIONS:
                          Supports Xcode .xcfilelist with ${VAR}/$(VAR)
   -O, --output-list=FILE Read output paths from FILE (repeatable)
                          Supports Xcode .xcfilelist with ${VAR}/$(VAR)
+  -e, --exclude-input=PATH  Exclude PATH from inputs (repeatable, CLI only, supports ${VAR}/$(VAR))
+                         Three accepted shapes (relative paths resolve against the current directory):
+                           - literal file or dir   : exact match or whole subtree pruned
+                           - glob with '/'         : matched against absolute file paths
+                           - glob without '/'      : gitignore-style, matches basename at any depth
+                         Excludes contribute to the task signature. A warning is printed if an
+                         exclude does not fall under any input root.
   -E, --env-list=FILE    Fingerprint env vars listed in FILE (repeatable)
                          Each line is expanded (${VAR}/$(VAR)) and the
                          result is included in the input fingerprint.
@@ -459,6 +567,18 @@ OPTIONS:
   -H, --hash=ALGO       Hash algorithm: crc32c (default) or blake3
   -f, --force            Force execution, ignore cache (still update cache after)
   --dry-run              Report hit/miss without executing
+  --sandbox             Enable hard sandbox. Use --allow-read, --allow-write, --sandbox-profile
+                         for additional paths. The wrapped command (after --) must use an
+                         absolute path (e.g. /usr/bin/clang), not a bare name — $PATH lookup
+                         happens after the sandbox is active. Violations return EPERM to
+                         the caller; to discover path requirements, use
+                         sandbox/sandbox-discover.py. To stream violations in real time run:
+                           log stream --style compact --predicate 'subsystem == "com.apple.sandbox" || sender == "Sandbox"'
+  --sandbox-profile=FILE  JSON sandbox spec; merged with --allow-read/--allow-write.
+                         Implicitly enables --sandbox.
+  --allow-read=PATH      Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.
+  --allow-write=PATH     Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.
+  --deny-network         With sandbox active, deny outbound network (allowed by default).
   -v, --verbose          Verbose output
   -h, --help             Print this help message
   -V, --version          Display version
@@ -467,5 +587,24 @@ Exit codes:
   0        Cache hit (skipped) or command succeeded
   non-zero Command's exit code on failure
   2        Gate error (bad arguments, missing inputs, etc.)
+
+Sandbox profile JSON schema (--sandbox-profile=FILE):
+
+  All fields are optional. Defaults shown.
+
+  {
+    "import_baseline": true,        // include bsd.sb (covers dyld, /tmp reads, Mach IPC)
+    "read_only":  ["/path", ...],   // recursive file-read* access
+    "read_write": ["/path", ...],   // recursive file-read* + file-write* access
+    "allow_network": true,           // set false to deny all network connections
+    "allow_exec":    true,           // set false to deny process-exec*
+    "allow_fork":    true,           // set false to deny process-fork
+    "extra_rules": ["(allow ...)"]  // raw SBPL rules appended verbatim
+  }
+
+  System binaries (/bin, /usr/bin) do not need an explicit read_only entry;
+  process-exec* covers launching them and bsd.sb covers their system dylibs.
+  Third-party tools (Homebrew, Python frameworks) need their prefix in read_only
+  because dyld must open their framework or library files at startup.
 
 ```

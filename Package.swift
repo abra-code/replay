@@ -29,8 +29,26 @@ let package = Package(
         ),
 
         .target(
+            name: "FileHelpers",
+            dependencies: ["GlobOverlap"],
+            path: "file-helpers",
+            cxxSettings: [
+                .unsafeFlags(["-std=c++20"]),
+            ]
+        ),
+
+        .target(
             name: "Common",
             path: "common",
+        ),
+
+        .target(
+            name: "Sandbox",
+            dependencies: ["Common", "FileHelpers"],
+            path: "sandbox",
+            cxxSettings: [
+                .unsafeFlags(["-std=c++20"]),
+            ]
         ),
 
         .target(
@@ -93,7 +111,7 @@ let package = Package(
 
         .executableTarget(
             name: "ReplayTool",
-            dependencies: ["Common", "Action", "ReplayServer", "FileTree", "MedusaObjc", "GlobCpp", "GlobOverlap"],
+            dependencies: ["Common", "Action", "ReplayServer", "FileTree", "MedusaObjc", "GlobCpp", "GlobOverlap", "Sandbox"],
             path: "replay",
             cxxSettings: [
                 .unsafeFlags(["-std=c++20"]),
@@ -128,7 +146,7 @@ let package = Package(
 
         .executableTarget(
             name: "GateTool",
-            dependencies: ["Common", "FingerprintLib"],
+            dependencies: ["Common", "FingerprintLib", "Sandbox", "FileHelpers"],
             path: "gate",
             linkerSettings: [
                 .linkedFramework("Foundation"),

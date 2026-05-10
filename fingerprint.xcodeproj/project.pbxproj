@@ -159,6 +159,16 @@
 			path = "glob-cpp";
 			sourceTree = "<group>";
 		};
+		1DDC250E2FAD6437004B4724 /* sandbox */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = sandbox;
+			sourceTree = "<group>";
+		};
+		1DDC25792FB05A75004B4724 /* file-helpers */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "file-helpers";
+			sourceTree = "<group>";
+		};
 		1DDD17142F7A0D6000DB718A /* gate */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = gate;
@@ -236,9 +246,11 @@
 				1DFF72612ECF2D7900860A62 /* fast-crc32 */,
 				1DFF724C2ECF2BD800860A62 /* blake3 */,
 				1DBF0C372EE49E9800CB10C9 /* glob-cpp */,
+				1DDC25792FB05A75004B4724 /* file-helpers */,
 				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
 				1DDD17142F7A0D6000DB718A /* gate */,
 				1DDD179B2F7B47F400DB718A /* glob-overlap */,
+				1DDC250E2FAD6437004B4724 /* sandbox */,
 				1DFF72532ECF2BF100860A62 /* Frameworks */,
 				1DEA53F62ED46C4500554E45 /* xcconfigs */,
 				1D7ED29F2E9648EB003BA8A7 /* Products */,
@@ -341,6 +353,8 @@
 			fileSystemSynchronizedGroups = (
 				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
 				1DB17C212F7E4A6200E67624 /* common */,
+				1DDC250E2FAD6437004B4724 /* sandbox */,
+				1DDC25792FB05A75004B4724 /* file-helpers */,
 				1DDD17142F7A0D6000DB718A /* gate */,
 				1DDD179B2F7B47F400DB718A /* glob-overlap */,
 			);

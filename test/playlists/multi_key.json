@@ -1,0 +1,8 @@
+{
+  "read tests": [
+    { "action": "read", "items": ["${REPLAY_TEST_SRCFILE}"] }
+  ],
+  "write tests": [
+    { "action": "create", "file": "${REPLAY_TEST_OUTDIR}/write_test.txt", "content": "write test" }
+  ]
+}

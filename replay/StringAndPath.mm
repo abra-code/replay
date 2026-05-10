@@ -4,7 +4,7 @@
 // in both cases we treat this as a hard error and not allow executing an action with such string
 // becuase it may lead to file operations in unexpected locations
 
-static NSString *
+NSString *
 StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSString *,NSString *> *environment)
 {
 	unichar stackBuffer[PATH_MAX];

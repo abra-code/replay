@@ -1,0 +1,3 @@
+[
+  { "action": "glob", "root": "${REPLAY_TEST_OUTDIR}", "glob": ["**/*.txt"] }
+]

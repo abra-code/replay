@@ -19,7 +19,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include "json_serialization.h"
 #include "CFObj.h"
-#include "path_helpers.h"
+#include "FileHelpers.h"
 
 #include "blake3.h"
 
@@ -396,7 +396,7 @@ bool cache_store(const std::string& cache_dir,
         rename(tmp_path.c_str(), path.c_str());
         if (g_verbose)
         {
-            std::string absolute_path = resolve_path(path);
+            std::string absolute_path = file_helpers::resolve_path(path);
             std::cerr << "gate: task cache stored in: " << absolute_path << '\n';
             std::cerr << "\tnew input fingerprint:  " << std::hex << entry.input_fingerprint << '\n'
                       << "\tnew output fingerprint: " << entry.output_fingerprint << std::dec << '\n';

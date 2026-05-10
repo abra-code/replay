@@ -25,9 +25,11 @@
 #include "fingerprint.h"
 #include "env_var_expand.h"
 #include "gate_cache.h"
-#include "path_helpers.h"
+#include "FileHelpers.h"
+#include "GlobOverlap.h"
 #include "blake3.h"
 #include "replay_version.h"
+#include "SandboxProfile.h"
 
 
 // Globals required by fingerprint.cpp (declared extern there)
@@ -69,6 +71,18 @@ static void print_usage(std::ostream& stream)
     stream << "  -H, --hash=ALGO       Hash algorithm: crc32c (default) or blake3\n";
     stream << "  -f, --force            Force execution, ignore cache (still update cache after)\n";
     stream << "  --dry-run              Report hit/miss without executing\n";
+    stream << "  --sandbox             Enable hard sandbox. Use --allow-read, --allow-write, --sandbox-profile\n";
+    stream << "                         for additional paths. The wrapped command (after --) must use an\n";
+    stream << "                         absolute path (e.g. /usr/bin/clang), not a bare name — $PATH lookup\n";
+    stream << "                         happens after the sandbox is active. Violations return EPERM to\n";
+    stream << "                         the caller; to discover path requirements, use\n";
+    stream << "                         sandbox/sandbox-discover.py. To stream violations in real time run:\n";
+    stream << "                           log stream --style compact --predicate 'subsystem == \"com.apple.sandbox\" || sender == \"Sandbox\"'\n";
+    stream << "  --sandbox-profile=FILE  JSON sandbox spec; merged with --allow-read/--allow-write.\n";
+    stream << "                         Implicitly enables --sandbox.\n";
+    stream << "  --allow-read=PATH      Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.\n";
+    stream << "  --allow-write=PATH     Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.\n";
+    stream << "  --deny-network         With sandbox active, deny outbound network (allowed by default).\n";
     stream << "  -v, --verbose          Verbose output\n";
     stream << "  -h, --help             Print this help message\n";
     stream << "  -V, --version          Display version\n";
@@ -77,6 +91,25 @@ static void print_usage(std::ostream& stream)
     stream << "  0        Cache hit (skipped) or command succeeded\n";
     stream << "  non-zero Command's exit code on failure\n";
     stream << "  2        Gate error (bad arguments, missing inputs, etc.)\n";
+    stream << "\n";
+    stream << "Sandbox profile JSON schema (--sandbox-profile=FILE):\n";
+    stream << "\n";
+    stream << "  All fields are optional. Defaults shown.\n";
+    stream << "\n";
+    stream << "  {\n";
+    stream << "    \"import_baseline\": true,        // include bsd.sb (covers dyld, /tmp reads, Mach IPC)\n";
+    stream << "    \"read_only\":  [\"/path\", ...],   // recursive file-read* access\n";
+    stream << "    \"read_write\": [\"/path\", ...],   // recursive file-read* + file-write* access\n";
+    stream << "    \"allow_network\": true,           // set false to deny all network connections\n";
+    stream << "    \"allow_exec\":    true,           // set false to deny process-exec*\n";
+    stream << "    \"allow_fork\":    true,           // set false to deny process-fork\n";
+    stream << "    \"extra_rules\": [\"(allow ...)\"]  // raw SBPL rules appended verbatim\n";
+    stream << "  }\n";
+    stream << "\n";
+    stream << "  System binaries (/bin, /usr/bin) do not need an explicit read_only entry;\n";
+    stream << "  process-exec* covers launching them and bsd.sb covers their system dylibs.\n";
+    stream << "  Third-party tools (Homebrew, Python frameworks) need their prefix in read_only\n";
+    stream << "  because dyld must open their framework or library files at startup.\n";
     stream << "\n";
 }
 
@@ -205,6 +238,16 @@ static std::string build_env_text(const std::vector<std::string>& env_list_files
 
 int main(int argc, char* argv[])
 {
+    // Long-only sandbox option codes; pick values >= 256 to avoid collision
+    // with the short option letters.
+    enum {
+        kOptSandbox = 256,
+        kOptSandboxProfile,
+        kOptAllowRead,
+        kOptAllowWrite,
+        kOptDenyNetwork,
+    };
+
     static const struct option long_options[] = {
         { "input",          required_argument, nullptr, 'i' },
         { "output",         required_argument, nullptr, 'o' },
@@ -218,6 +261,11 @@ int main(int argc, char* argv[])
         { "hash",           required_argument, nullptr, 'H' },
         { "force",          no_argument,       nullptr, 'f' },
         { "dry-run",        no_argument,       nullptr, 'd' },
+        { "sandbox",                no_argument,       nullptr, kOptSandbox },
+        { "sandbox-profile",        required_argument, nullptr, kOptSandboxProfile },
+        { "allow-read",             required_argument, nullptr, kOptAllowRead },
+        { "allow-write",            required_argument, nullptr, kOptAllowWrite },
+        { "deny-network",           no_argument,       nullptr, kOptDenyNetwork },
         { "verbose",        no_argument,       nullptr, 'v' },
         { "help",           no_argument,       nullptr, 'h' },
         { "version",        no_argument,       nullptr, 'V' },
@@ -234,6 +282,12 @@ int main(int argc, char* argv[])
     std::string hash_type = "crc32c";
     bool force = false;
     bool dry_run = false;
+
+    bool sandbox_requested = false;
+    std::string sandbox_profile_path;
+    std::vector<std::string> sandbox_allow_read;
+    std::vector<std::string> sandbox_allow_write;
+    bool sandbox_deny_network = false;
 
     int opt;
     while ((opt = getopt_long(argc, argv, "i:o:I:O:e:E:S:c:C:H:fvhV", long_options, nullptr)) != -1)
@@ -266,6 +320,26 @@ int main(int argc, char* argv[])
             case 'f': force = true; break;
             case 'd': dry_run = true; break;
             case 'v': g_verbose = true; break;
+
+            case kOptSandbox:
+                sandbox_requested = true;
+                break;
+            case kOptAllowRead:
+                sandbox_requested = true;
+                sandbox_allow_read.emplace_back(expand_env_variables(optarg));
+                break;
+            case kOptAllowWrite:
+                sandbox_requested = true;
+                sandbox_allow_write.emplace_back(expand_env_variables(optarg));
+                break;
+            case kOptSandboxProfile:
+                sandbox_requested = true;
+                sandbox_profile_path = expand_env_variables(optarg);
+                break;
+            case kOptDenyNetwork:
+                sandbox_requested = true;
+                sandbox_deny_network = true;
+                break;
 
             case 'h':
                 print_usage(std::cout);
@@ -359,16 +433,81 @@ int main(int argc, char* argv[])
         return 2;
     }
 
-    // Expand env list files into text (hashed in memory, no temp file)
+    // Resolve all paths to absolute before sandbox is applied.
+// file_helpers::resolve_path() handles glob patterns by resolving only the literal directory prefix.
+
+    std::string cache_dir_abs = file_helpers::resolve_path(cache_dir);
+
+    for (auto& p : inputs)         p = file_helpers::resolve_path(p);
+
+    for (auto& p : outputs)        p = file_helpers::resolve_path(p);
+
+    for (auto& p : exclude_inputs) p = file_helpers::resolve_path(p);
+
+    // Expand env list files into text (hashed in memory, no temp file).
+    // Read env files BEFORE sandbox init so gate can access them without restrictions.
     std::string env_text = build_env_text(env_list_files);
 
-    // Resolve all paths to absolute. resolve_path() handles glob patterns by
-    // resolving only the literal directory prefix; basename-only patterns
-    // (no '/') are preserved as gitignore-style shortcuts.
-    std::vector<std::string> exclude_inputs_raw = exclude_inputs;
-    for (auto& p : inputs)         p = resolve_path(p);
-    for (auto& p : outputs)        p = resolve_path(p);
-    for (auto& p : exclude_inputs) p = resolve_path(p);
+    // Build command string for display and caching purposes.
+    std::string command_str = build_command_string(cmd_argv, cmd_argc);
+
+    // Apply sandbox before any I/O-heavy work. Once applied, the policy is
+    // kernel-enforced on this process and inherited by the spawned command.
+    if (sandbox_requested)
+    {
+        // Add current working directory for getcwd() and path resolution
+        char cwd[PATH_MAX];
+        if (getcwd(cwd, sizeof(cwd)) != nullptr)
+            sandbox_allow_read.push_back(cwd);
+
+        // Auto-discover paths: inputs are read, outputs and cache are read-write
+        if (!cache_dir_abs.empty())
+            sandbox_allow_write.push_back(cache_dir_abs);
+
+        for (const auto& p : inputs)
+        {
+            if (p.empty()) continue;
+            std::string sp = globoverlap::glob_concrete_prefix(p);
+            if (!sp.empty())
+                sandbox_allow_read.push_back(sp);
+        }
+        for (const auto& p : outputs)
+        {
+            if (p.empty()) continue;
+            std::string sp = globoverlap::glob_concrete_prefix(p);
+            if (!sp.empty())
+                sandbox_allow_write.push_back(sp);
+        }
+        // Excludes are paths the user marked as excluded from input fingerprinting.
+        // The typical case is generated artifacts that live inside an input tree
+        // and must be writable so the wrapped command can rebuild them — hence
+        // read-write rather than read-only. (Pure "ignore-me" excludes get the
+        // same access; harmless because the command will not touch them.)
+        for (const auto& p : exclude_inputs)
+        {
+            if (p.empty()) continue;
+            std::string sp = globoverlap::glob_concrete_prefix(p);
+            if (!sp.empty())
+                sandbox_allow_write.push_back(sp);
+        }
+
+        // Allow read access to the child tool being executed.
+        // Tool path must be absolute when --sandbox is used: $PATH lookup happens
+        // inside posix_spawn after the sandbox is active, so a bare name like
+        // "clang" cannot be turned into a real allowlist entry here. Bare names
+        // still happen to work for /bin and /usr/bin tools because bsd.sb covers
+        // those, but anything else (Homebrew, Python venvs, custom installs)
+        // requires the absolute path.
+        if (cmd_argc > 0 && cmd_argv[0] != nullptr)
+        {
+            std::string tool_path = file_helpers::resolve_path(cmd_argv[0]);
+            if (!tool_path.empty())
+                sandbox_allow_read.push_back(tool_path);
+        }
+
+        if (!sandbox::InitializeSandbox(sandbox_profile_path, sandbox_allow_read, sandbox_allow_write, !sandbox_deny_network, g_verbose))
+            return 2;
+    }
 
     // Warn when an exclude can't possibly match any input root. Helps catch
     // typos and stale excludes (e.g. left over after refactoring inputs).
@@ -376,10 +515,7 @@ int main(int argc, char* argv[])
     // skipped — they have no anchor to compare against.
     {
         auto literal_prefix = [](const std::string& p) -> std::string {
-            size_t first_glob = p.find_first_of("*?[{");
-            if (first_glob == std::string::npos) return p;
-            size_t last_slash = p.find_last_of('/', first_glob);
-            return last_slash == std::string::npos ? std::string() : p.substr(0, last_slash);
+            return globoverlap::glob_concrete_prefix(p);
         };
         auto is_under = [](const std::string& path, const std::string& root) {
             if (root.empty()) return false;
@@ -401,17 +537,13 @@ int main(int argc, char* argv[])
             }
             if (!covered)
             {
-                std::cerr << "warning: -e '" << exclude_inputs_raw[i] << "'";
-                if (exclude_inputs_raw[i] != e)
-                    std::cerr << " (resolved: '" << e << "')";
-                std::cerr << " does not fall under any input root\n";
+                std::cerr << "warning: -e '" << e << "' does not fall under any input root\n";
             }
         }
     }
 
     // All existence / glob logic is now inside find_and_process_globbed_paths()
 
-    std::string command_str = build_command_string(cmd_argv, cmd_argc);
     std::string task_signature = compute_task_signature(inputs, outputs, exclude_inputs, command_str, hash_type, signature_keys);
 
     // Fingerprint inputs before execution (combined with env text)

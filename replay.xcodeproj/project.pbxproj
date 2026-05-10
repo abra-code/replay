@@ -66,6 +66,8 @@
 		1DA1C91F2F7C4097000F2E31 /* replay */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = replay; sourceTree = "<group>"; };
 		1DB179DD2F7DF9C500E67624 /* action */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = action; sourceTree = "<group>"; };
 		1DB17ACC2F7E002F00E67624 /* replay-server */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "replay-server"; sourceTree = "<group>"; };
+		1DDC25132FAD644F004B4724 /* sandbox */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = sandbox; sourceTree = "<group>"; };
+		1DDC257B2FB05AA1004B4724 /* file-helpers */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "file-helpers"; sourceTree = "<group>"; };
 		1DDD17A62F7B4E7800DB718A /* glob-overlap */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1C8FF2F7C3DF5000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "glob-overlap"; sourceTree = "<group>"; };
 		1DDD17AF2F7B4EBA00DB718A /* glob-cpp */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "glob-cpp"; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -90,10 +92,12 @@
 				1DB17ACC2F7E002F00E67624 /* replay-server */,
 				1DA1C9072F7C3E4B000F2E31 /* scheduler */,
 				1DA1C8FA2F7C3DE9000F2E31 /* medusa-objc */,
+				1DDC257B2FB05AA1004B4724 /* file-helpers */,
 				1DA1C8EE2F7C3DBB000F2E31 /* file-tree */,
 				1DA1C8E72F7C3D9D000F2E31 /* common */,
 				1DDD17AF2F7B4EBA00DB718A /* glob-cpp */,
 				1DDD17A62F7B4E7800DB718A /* glob-overlap */,
+				1DDC25132FAD644F004B4724 /* sandbox */,
 				1DA1151F25B5A35700C0C6A5 /* xcconfigs */,
 				1D19043524DE9EE900276D83 /* Products */,
 			);
@@ -141,6 +145,8 @@
 				1DA1C91F2F7C4097000F2E31 /* replay */,
 				1DB179DD2F7DF9C500E67624 /* action */,
 				1DB17ACC2F7E002F00E67624 /* replay-server */,
+				1DDC25132FAD644F004B4724 /* sandbox */,
+				1DDC257B2FB05AA1004B4724 /* file-helpers */,
 				1DDD17A62F7B4E7800DB718A /* glob-overlap */,
 				1DDD17AF2F7B4EBA00DB718A /* glob-cpp */,
 			);

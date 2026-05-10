@@ -1,0 +1,7 @@
+[
+  { "action": "read", "items": ["${WORK_DIR}/src/main.cpp", "${WORK_DIR}/src/utils/helper.cpp", "${WORK_DIR}/include/header.h"] },
+  { "action": "create", "file": "${WORK_DIR}/build/output.o" },
+  { "action": "create", "file": "${WORK_DIR}/build/lib/lib.a" },
+  { "action": "read", "items": ["${WORK_DIR}/build/output.o"] },
+  { "action": "read", "items": ["${WORK_DIR}/build/lib/lib.a"] }
+]

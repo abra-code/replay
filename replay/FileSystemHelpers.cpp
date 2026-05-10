@@ -161,33 +161,23 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 // Glob expansion
 // ============================================================================
 
-static std::string concrete_prefix_of_glob(const std::string &pattern)
-{
-	size_t meta_pos = std::string::npos;
-	for (size_t i = 0; i < pattern.size(); i++) {
-		char c = pattern[i];
-		if (c == '*' || c == '?' || c == '[' || c == '{') {
-			meta_pos = i;
-			break;
-		}
-	}
-	if (meta_pos == std::string::npos)
-		return pattern;
-
-	size_t last_slash = pattern.rfind('/', meta_pos);
-	if (last_slash == std::string::npos)
-		return ".";
-	return pattern.substr(0, last_slash);
-}
-
 std::vector<std::string> expand_glob(const std::string &pattern)
 {
 	std::vector<std::string> results;
 
-	std::string base_dir = concrete_prefix_of_glob(pattern);
-	std::string glob_suffix = pattern.substr(base_dir.size());
-	if (!glob_suffix.empty() && glob_suffix[0] == '/')
-		glob_suffix = glob_suffix.substr(1);
+	std::string base_dir = globoverlap::glob_concrete_prefix(pattern);
+	std::string glob_suffix;
+	if (base_dir.empty())
+	{
+		base_dir = ".";
+		glob_suffix = pattern;
+	}
+	else
+	{
+		glob_suffix = pattern.substr(base_dir.size());
+		if (!glob_suffix.empty() && glob_suffix[0] == '/')
+			glob_suffix = glob_suffix.substr(1);
+	}
 
 	if (glob_suffix.empty()) {
 		struct stat st;
@@ -248,10 +238,19 @@ std::vector<std::string> search_files(
 
 	for (const auto &pattern : patterns)
 	{
-		std::string base = concrete_prefix_of_glob(pattern);
-		std::string suffix = pattern.substr(base.size());
-		if (!suffix.empty() && suffix[0] == '/')
-			suffix = suffix.substr(1);
+		std::string base = globoverlap::glob_concrete_prefix(pattern);
+		std::string suffix;
+		if (base.empty())
+		{
+			base = ".";
+			suffix = pattern;
+		}
+		else
+		{
+			suffix = pattern.substr(base.size());
+			if (!suffix.empty() && suffix[0] == '/')
+				suffix = suffix.substr(1);
+		}
 
 		if (suffix.empty())
 		{

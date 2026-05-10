@@ -305,6 +305,36 @@ inline bool is_glob_pattern(const std::string& path) {
     return true;
 }
 
+// Return the longest path prefix of a glob pattern that contains no
+// metacharacters (*, ?, [, {). The returned prefix is always a directory —
+// it ends at the last '/' that precedes the first metacharacter component.
+//
+// Returns "" (empty) when there is no directory component before the first
+// metachar (endnode patterns like "*.txt"). Callers that need a walkable
+// path can substitute "." themselves.
+// Returns `pattern` unchanged when it contains no metacharacters (literal path).
+//
+// Examples:
+//   "/src/**/*.swift"  ->  "/src"
+//   "/src/{a,b}/*.o"   ->  "/src"
+//   "/src/[x-z]/*.h"   ->  "/src"
+//   "build/**/*.o"     ->  "build"
+//   "*.txt"            ->  ""
+inline std::string glob_concrete_prefix(const std::string& pattern)
+{
+    if (!contains_glob_pattern_char(pattern))
+        return pattern;
+
+    size_t meta_pos = pattern.find_first_of("*?[{");
+    if (meta_pos == std::string::npos)
+        return pattern;
+
+    size_t last_slash = pattern.rfind('/', meta_pos);
+    if (last_slash == std::string::npos)
+        return {};
+    return pattern.substr(0, last_slash);
+}
+
 } // namespace globoverlap
 
 #endif // GLOB_OVERLAP_H

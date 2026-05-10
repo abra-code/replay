@@ -1,0 +1,5 @@
+[
+  { "action": "create", "file": "${REPLAY_TEST_OUTDIR}/multi1.txt", "content": "one" },
+  { "action": "create", "file": "${REPLAY_TEST_OUTDIR}/multi2.txt", "content": "two" },
+  { "action": "read", "items": ["${REPLAY_TEST_OUTDIR}/multi1.txt", "${REPLAY_TEST_OUTDIR}/multi2.txt"] }
+]

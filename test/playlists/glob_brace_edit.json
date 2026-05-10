@@ -1,0 +1,7 @@
+[
+  {
+    "action": "edit",
+    "items": ["${REPLAY_TEST_OUTDIR}/{a,b}/*.txt"],
+    "edits": [{"oldText": "hello", "newText": "world", "limit": 0}]
+  }
+]

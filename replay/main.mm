@@ -9,6 +9,7 @@
 #import <Foundation/Foundation.h>
 #include <pthread.h>
 #include <getopt.h>
+#include <filesystem>
 #import "ReplayAction.h"
 #import "TaskProxy.h"
 #import "ReplayTask.h"
@@ -17,6 +18,8 @@
 #import "ActionStream.h"
 #import "ReplayServer.h"
 #include "replay_version.h"
+#include "SandboxProfile.h"
+#import "PlaylistSandboxPaths.h"
 
 
 #if DEBUG
@@ -30,6 +33,32 @@ typedef enum
 	kPlaylistFormatCount
 } PlaylistFormat;
 
+static inline std::string
+EnsureAbsolutePath(std::string_view inputPath)
+{
+	if (inputPath.empty())
+		return {};
+
+	if (inputPath[0] == '/')
+		return std::string(inputPath);
+
+	try
+	{
+		std::filesystem::path cwd = std::filesystem::current_path();
+		return (cwd / inputPath).lexically_normal().string();
+	}
+	catch (...)
+	{
+		return std::string(inputPath);
+	}
+}
+
+static inline NSString *
+MakeAbsolutePathString(std::string_view path)
+{
+	return [NSString stringWithUTF8String:EnsureAbsolutePath(path).c_str()];
+}
+
 //this function is used when the playlist key is non-null so the root container must be a dictionary
 static inline NSDictionary<NSString *, NSArray *> *
 LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
@@ -41,8 +70,9 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 	}
 
 	NSDictionary<NSString *, NSArray *> *playlistDict = nil;
-	NSURL *playlistURL = [NSURL fileURLWithFileSystemRepresentation:playlistPath isDirectory:NO relativeToURL:NULL];
-	
+	NSString *nsPlaylistPath = MakeAbsolutePathString(playlistPath);
+	NSURL *playlistURL = [NSURL fileURLWithPath:nsPlaylistPath];
+
 	PlaylistFormat hint = kPlaylistFormatPlist; //default to plist
 	int numberOfTries = 0;
 
@@ -126,8 +156,9 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 	}
 
 	NSArray<NSDictionary*> *playlistArray = nil;
-	NSURL *playlistURL = [NSURL fileURLWithFileSystemRepresentation:playlistPath isDirectory:NO relativeToURL:NULL];
-	
+	NSString *nsPlaylistPath = MakeAbsolutePathString(playlistPath);
+	NSURL *playlistURL = [NSURL fileURLWithPath:nsPlaylistPath];
+
 	PlaylistFormat hint = kPlaylistFormatPlist; //default to plist
 	int numberOfTries = 0;
 
@@ -198,23 +229,38 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 }
 
 
+// Long-only options use values >= 256 so they don't collide with short opts.
+enum
+{
+	kOptSandbox = 256,
+	kOptSandboxProfile,
+	kOptAllowRead,
+	kOptAllowWrite,
+	kOptDenyNetwork,
+};
+
 static struct option sLongOptions[] =
 {
-	{"verbose",			no_argument,		NULL, 'v'},
-	{"dry-run",			no_argument,		NULL, 'n'},
-	{"serial",			no_argument,		NULL, 's'},
-	{"max-tasks",		required_argument,	NULL, 't'},
-	{"no-dependency",	no_argument,		NULL, 'p'},
-	{"playlist-key",	required_argument,	NULL, 'k'},
-	{"stop-on-error",   no_argument,		NULL, 'e'},
-	{"force",           no_argument,		NULL, 'f'},
-	{"ordered-output",  no_argument,		NULL, 'o'},
-	{"start-server",    required_argument,  NULL, 'r'},
-	{"stdout",          required_argument,  NULL, 'l'},
-	{"stderr",          required_argument,  NULL, 'm'},
-	{"version",			no_argument,		NULL, 'V'},
-	{"help",			no_argument,		NULL, 'h'},
-	{NULL, 				0, 					NULL,  0 }
+	{"verbose",				no_argument,		NULL, 'v'},
+	{"dry-run",				no_argument,		NULL, 'n'},
+	{"serial",				no_argument,		NULL, 's'},
+	{"max-tasks",			required_argument,	NULL, 't'},
+	{"no-dependency",		no_argument,		NULL, 'p'},
+	{"playlist-key",		required_argument,	NULL, 'k'},
+	{"stop-on-error",		no_argument,		NULL, 'e'},
+	{"force",				no_argument,		NULL, 'f'},
+	{"ordered-output",		no_argument,		NULL, 'o'},
+	{"start-server",		required_argument,	NULL, 'r'},
+	{"stdout",				required_argument,	NULL, 'l'},
+	{"stderr",				required_argument,	NULL, 'm'},
+	{"sandbox",				no_argument,			NULL, kOptSandbox},
+	{"sandbox-profile",		required_argument,	NULL, kOptSandboxProfile},
+	{"allow-read",			required_argument,	NULL, kOptAllowRead},
+	{"allow-write",			required_argument,	NULL, kOptAllowWrite},
+	{"deny-network",		no_argument,			NULL, kOptDenyNetwork},
+	{"version",				no_argument,		NULL, 'V'},
+	{"help",				no_argument,		NULL, 'h'},
+	{NULL, 					0,					NULL,  0 }
 };
 
 
@@ -258,6 +304,20 @@ DisplayHelp(void)
 		"                     but it is possible if needed.\n"
 		"  -l, --stdout PATH  log standard output to provided file path.\n"
 		"  -m, --stderr PATH  log standard error to provided file path.\n"
+		"  --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay\n"
+		"                     auto-discovers declared paths from the playlist and adds them to the policy.\n"
+		"                     Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.\n"
+		"                     Tool paths in \"execute\" actions must be absolute (e.g. /usr/bin/python3),\n"
+		"                     not bare names — $PATH lookup happens after the sandbox is active.\n"
+		"                     Violations return EPERM to the caller;\n"
+		"                     To discover path requirements, use sandbox/sandbox-discover.py\n"
+        "                     To stream violations in real time run:\n"
+		"                       log stream --style compact --predicate 'subsystem == \"com.apple.sandbox\" || sender == \"Sandbox\"'\n"
+		"  --sandbox-profile FILE  JSON file with full sandbox spec; merged with --allow-read/--allow-write.\n"
+		"                     Implicitly enables --sandbox.\n"
+		"  --allow-read PATH    Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.\n"
+		"  --allow-write PATH   Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.\n"
+		"  --deny-network       With sandbox active, deny outbound network (allowed by default).\n"
 		"  -V, --version      Display version.\n"
 		"  -h, --help         Display this help.\n"
 		"\n"
@@ -434,43 +494,47 @@ DisplayHelp(void)
 
 		"Param interpretation per action\n"
 		"(examples use \"tab\" as a separator)\n"
-		"1. [clone], [move], [hardlink], [symlink] allows only simple from-to specification,\n"
-		"with first param interpretted as \"from\" and second as \"to\" e.g.:\n"
+		"- [clone], [move], [hardlink], [symlink] allow only simple from-to specification,\n"
+		"  with first param interpretted as \"from\" and second as \"to\" e.g.:\n"
 		"[clone]	/path/to/src/file.txt	/path/to/dest/file.txt\n"
 		"[symlink validate=false]	/path/to/src/file.txt	/path/to/symlink/file.txt\n"
-		"2. [delete] is followed by one or many paths to items, e.g.:\n"
+		"- [delete] is followed by one or many paths to items, e.g.:\n"
 		"[delete]	/path/to/delete/file1.txt	/path/to/delete/file2.txt\n"
-		"   [read] is followed by one or many file paths to read, e.g.:\n"
+		"- [read] is followed by one or many file paths to read, e.g.:\n"
 		"[read]	/path/to/read/file1.txt	/path/to/read/file2.bin\n"
-		"   [list] lists immediate children of a directory:\n"
+		"- [list] lists immediate children of a directory:\n"
 		"[list]	/path/to/directory\n"
-		"   [tree] recursively lists a directory as JSON (optional depth modifier, default 5):\n"
+		"- [tree] recursively lists a directory as JSON (optional depth modifier, default 5):\n"
 		"[tree]	/path/to/directory\n"
 		"[tree depth=3]	/path/to/directory\n"
-		"3. [create] has 2 variants: [create file] and [create directory].\n"
-		"If \"file\" or \"directory\" option is not specified, it falls back to \"file\"\n"
-		"A. [create file] requires path followed by optional content, e.g.:\n"
+		"- [info] requires a single path to query file metadata:\n"
+		"[info]	/path/to/file.txt\n"
+		"- [glob] requires root directory and one or more glob patterns (comma-separated):\n"
+		"[glob]	/path/to/search	*.swift\n"
+		"- [create] has 2 variants: [create file] and [create directory].\n"
+		"  If \"file\" or \"directory\" option is not specified, it falls back to \"file\"\n"
+		"  A. [create file] requires path followed by optional content, e.g.:\n"
 		"[create file]	/path/to/create/file.txt	Created by replay!\n"
 		"[create file raw=true]	/path/to/file.txt	Do not expand environment variables like ${HOME}\n"
-		"   [create file blob=true] writes binary content supplied as base64, e.g.:\n"
+		"     [create file blob=true] writes binary content supplied as base64, e.g.:\n"
 		"[create file blob=true]	/path/to/create/file.bin	iVBORw0KGgo=\n"
-		"B. [create directory] requires just a single path, e.g.:\n"
+		"  B. [create directory] requires just a single path, e.g.:\n"
 		"[create directory]	/path/to/create/directory\n"
-		"4. [execute] requires tool path and may have optional parameters separated with the same delimiter (not space delimited!), e.g.:\n"
-		"[execute]	/bin/echo	Hello from replay!\n"
-		"[execute stdout=false]	/bin/echo	This will not be printed\n"
-		"The following example uses a different separator: \"+\" to explicitly show delimited parameters:\n"
-		"[execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep \".txt\"\n"
-		"5. [echo] requires one string after separator. Supported modifiers are raw=true and newline=false\n"
-		"6. [edit] requires a file path (or glob pattern), oldText, and optional newText as tab-separated fields.\n"
-		"   When a glob pattern is used as the file path it is expanded at runtime; all matches are edited.\n"
-		"   For multiple independent paths or patterns, send one [edit] line per path.\n"
-		"   Modifiers: limit=N (default 1, 0=unlimited), regex=true, case-insensitive=true, dry-run=true\n"
+		"- [edit] requires a file path (or glob pattern), oldText, and optional newText as tab-separated fields.\n"
+		"  When a glob pattern is used as the file path it is expanded at runtime; all matches are edited.\n"
+		"  For multiple independent paths or patterns, send one [edit] line per path.\n"
+		"  Modifiers: limit=N (default 1, 0=unlimited), regex=true, case-insensitive=true, dry-run=true\n"
 		"[edit]	/path/to/file.txt	old text	new text\n"
 		"[edit]	/path/to/file.txt	old text\n"
 		"[edit regex=true limit=0]	/path/to/file.txt	([a-z]+)_v1	\\1_v2\n"
 		"[edit case-insensitive=true]	/path/to/file.txt	TODO	DONE\n"
 		"[edit]	/path/to/src/*.cpp	OLD_API	NEW_API\n"
+		"- [execute] requires tool path and may have optional parameters separated with the same delimiter (not space delimited!), e.g.:\n"
+		"[execute]	/bin/echo	Hello from replay!\n"
+		"[execute stdout=false]	/bin/echo	This will not be printed\n"
+		"  The following example uses a different separator: \"+\" to explicitly show delimited parameters:\n"
+		"[execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep \".txt\"\n"
+		"- [echo] requires one string after separator. Supported modifiers are raw=true and newline=false\n"
 		"\n"
 	);
 
@@ -565,6 +629,31 @@ DisplayHelp(void)
 		"In the above example playlist some output files are inputs to later actions.\n"
 		"The dependency analysis will create an execution graph to run dependent actions after the required outputs are produced.\n"
 		"\n"
+	);
+
+	printf(
+		"Sandbox profile JSON schema (--sandbox-profile FILE):\n"
+		"\n"
+		"  All fields are optional. Defaults shown.\n"
+		"\n"
+		"  {\n"
+		"    \"import_baseline\": true,        // include bsd.sb (covers dyld, /tmp reads, Mach IPC)\n"
+		"    \"read_only\":  [\"/path\", ...],   // recursive file-read* access\n"
+		"    \"read_write\": [\"/path\", ...],   // recursive file-read* + file-write* access\n"
+		"    \"allow_network\": true,           // set false to deny all network connections\n"
+		"    \"allow_exec\":    true,           // set false to deny process-exec*\n"
+		"    \"allow_fork\":    true,           // set false to deny process-fork\n"
+		"    \"extra_rules\": [\"(allow ...)\"]  // raw SBPL rules appended verbatim\n"
+		"  }\n"
+		"\n"
+		"  System binaries (/bin, /usr/bin) do not need an explicit read_only entry;\n"
+		"  process-exec* covers launching them and bsd.sb covers their system dylibs.\n"
+		"  Third-party tools (Homebrew, Python frameworks) need their prefix in read_only\n"
+		"  because dyld must open their framework or library files at startup.\n"
+		"\n"
+	);
+
+	printf(
 		"See also:\n"
 		"\n"
 		"  dispatch --help\n"
@@ -628,13 +717,19 @@ int main(int argc, const char * argv[])
 
 	NSMutableArray *playlistKeys = [NSMutableArray new];
 
+	bool sandboxRequested = false;
+	std::string sandboxProfilePath;
+	std::vector<std::string> sandboxAllowRead;
+	std::vector<std::string> sandboxAllowWrite;
+	bool sandboxDenyNetwork = false;
+
 	while(true)
 	{
 		int index = 0;
-		int oneOption = getopt_long (argc, (char * const *)argv, "Vnst:pk:efor:l:m:ih", sLongOptions, &index);
+		int oneOption = getopt_long (argc, (char * const *)argv, "Vnst:pk:efor:l:m:vh", sLongOptions, &index);
 		if (oneOption == -1) // end of options is signalled by -1
 			break;
-			
+
 		switch(oneOption)
 		{
 			case 'v':
@@ -701,11 +796,35 @@ int main(int argc, const char * argv[])
 			}
 			break;
 			
+			case kOptSandbox:
+				sandboxRequested = true;
+			break;
+
+			case kOptAllowRead:
+				sandboxRequested = true;
+				sandboxAllowRead.emplace_back(optarg);
+			break;
+
+			case kOptAllowWrite:
+				sandboxRequested = true;
+				sandboxAllowWrite.emplace_back(optarg);
+			break;
+
+			case kOptSandboxProfile:
+				sandboxRequested = true;
+				sandboxProfilePath = optarg;
+			break;
+
+			case kOptDenyNetwork:
+				sandboxRequested = true;
+				sandboxDenyNetwork = true;
+			break;
+
 			case 'V':
 				printf( "replay %s\n", STRINGIFY_VALUE(REPLAY_VERSION) );
 				return EXIT_SUCCESS;
 			break;
-			
+
 			case 'h':
 			{
 				DisplayHelp();
@@ -713,6 +832,30 @@ int main(int argc, const char * argv[])
 			}
 			break;
 		}
+	}
+
+	// Before applying the sandbox, pre-read the playlist to extract all paths
+	// referenced by actions. This auto-populates the sandbox policy so the
+	// user does not have to repeat every path with --allow-read/--allow-write flags.
+	if (sandboxRequested && (optind < argc))
+	{
+		const char *playlistPeekPath = argv[optind];
+
+		NSString *nsPlaylistPath = MakeAbsolutePathString(playlistPeekPath);
+		NSString *playlistDir = [nsPlaylistPath stringByDeletingLastPathComponent];
+		if (playlistDir != nil && [playlistDir length] > 0)
+			sandboxAllowRead.emplace_back([playlistDir UTF8String]);
+
+		ExtractPlaylistSandboxPaths(playlistPeekPath, playlistKeys, context.environment,
+		                             sandboxAllowRead, sandboxAllowWrite);
+	}
+
+	// Apply sandbox before any real work. Once applied, the policy is
+	// kernel-enforced on this process and every child it spawns.
+	if(sandboxRequested)
+	{
+		if(!sandbox::InitializeSandbox(sandboxProfilePath, sandboxAllowRead, sandboxAllowWrite, !sandboxDenyNetwork, context.verbose))
+			safe_exit(EXIT_FAILURE);
 	}
 
 	// when executed with --start-server BATCH_NAME option start server and wait for messages in runloop
