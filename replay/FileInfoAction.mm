@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <cerrno>
+#include <string>
 
 static void format_permissions(mode_t mode, char out[11])
 {
@@ -42,8 +43,8 @@ GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionConte
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[info]\t%s\n", path];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		std::string desc = std::string("[info]\t") + path + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -62,10 +63,10 @@ GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionConte
 	if(lstat(path, &st) != 0)
 	{
 		int err = errno;
-		NSString *errStr = [NSString stringWithFormat:@"error: failed to stat \"%s\": %s\n", path, strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		std::string errStr = std::string("error: failed to stat \"") + path + "\": " + strerror(err) + "\n";
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}
@@ -88,14 +89,21 @@ GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionConte
 	else if (S_ISLNK(st.st_mode))  typeStr = "symlink";
 	else                            typeStr = "other";
 
-	NSString *output = [NSString stringWithFormat:
-		@"[info:%s]\nsize: %lld\ncreated: %s\nmodified: %s\ntype: %s\npermissions: %s\n",
-		path,
-		(long long)st.st_size,
-		created,
-		modified,
-		typeStr,
-		perms];
-	PrintToStdOut(context, output, actionContext->index);
+	std::string output;
+	output.reserve(128 + strlen(path));
+	output += "[info:";
+	output += path;
+	output += "]\nsize: ";
+	output += std::to_string((long long)st.st_size);
+	output += "\ncreated: ";
+	output += created;
+	output += "\nmodified: ";
+	output += modified;
+	output += "\ntype: ";
+	output += typeStr;
+	output += "\npermissions: ";
+	output += perms;
+	output += "\n";
+	PrintToStdOut(context, std::move(output), actionContext->index);
 	return true;
 }

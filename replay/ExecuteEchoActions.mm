@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "ReplayAction.h"
 #import "ReplayActionPrivate.h"
+#include <string>
 
 bool
 ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext)
@@ -15,12 +16,12 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *settingsStr = @"";
-		if(useStdOutNum != nil)
-			settingsStr = useStdOut ? @" stdout=true" : @" stdout=false";
-		NSString *allArgsStr = [arguments componentsJoinedByString:@"\t"];
-		NSString *stdoutStr = [NSString stringWithFormat:@"[execute%@]	%@	%@\n", settingsStr, toolPath, allArgsStr];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		const char *settingsCStr = (useStdOutNum == nil) ? "" : (useStdOut ? " stdout=true" : " stdout=false");
+		std::string stdoutStr = std::string("[execute") + settingsCStr + "]\t" + [toolPath UTF8String];
+		for(NSString *arg in arguments)
+			{ stdoutStr += "\t"; stdoutStr += [arg UTF8String]; }
+		stdoutStr += "\n";
+		PrintToStdOut(context, std::move(stdoutStr), actionContext->index);
 	}
 	else
 	{
@@ -51,16 +52,14 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 				NSData *stdErrData = [stdOutFileHandle readDataToEndOfFileAndReturnError:&dataError];
 				if((stdErrData != nil) && (stdErrData.length > 0))
 				{
-					NSString *stdErrStr = [[NSString alloc] initWithData:stdErrData encoding:NSUTF8StringEncoding];
-					PrintToStdErr(context, stdErrStr);
+					PrintToStdErr(context, std::string((const char *)[stdErrData bytes], (size_t)[stdErrData length]));
 				}
 
-				NSString *toolErrorDescription = [NSString stringWithFormat:@"%@ returned error %d", toolPath, toolStatus];
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: toolErrorDescription };
+				std::string toolErrDesc = std::string([toolPath UTF8String]) + " returned error " + std::to_string(toolStatus);
+				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(toolErrDesc.c_str()) };
 				NSError *taskError = [NSError errorWithDomain:NSPOSIXErrorDomain code:toolStatus userInfo:userInfo];
 				context->lastError.error = taskError;
-				NSString *errStr = [NSString stringWithFormat:@"error: failed to execute \"%@\". Error: %d\n", toolPath, toolStatus];
-				PrintToStdErr(context, errStr);
+				PrintToStdErr(context, std::string("error: failed to execute \"") + [toolPath UTF8String] + "\". Error: " + std::to_string(toolStatus) + "\n");
 			}
 		}];
 
@@ -80,8 +79,7 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 			{
 				if(useStdOut)
 				{
-					NSString *stdOutStr = [[NSString alloc] initWithData:stdOutData encoding:NSUTF8StringEncoding];
-					PrintToStdOut(context, stdOutStr, actionContext->index);
+					PrintToStdOut(context, std::string((const char *)[stdOutData bytes], (size_t)[stdOutData length]), actionContext->index);
 					secondStringPrinted = true;
 				}
 			}
@@ -97,8 +95,7 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to execute \"%@\". Error: %@\n", toolPath, errorDesc];
-			PrintToStdErr(context, errStr);
+			PrintToStdErr(context, std::string("error: failed to execute \"") + [toolPath UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n");
 		}
 	}
 
@@ -125,16 +122,10 @@ Echo(NSString *text, ReplayContext *context, ActionContext *actionContext)
 	if(context->verbose || context->dryRun)
 	{
 		id useRawText = actionContext->settings[@"raw"];
-		NSString *rawSetting = @"";
-		if([useRawText isKindOfClass:[NSNumber class]])
-			rawSetting = [useRawText boolValue] ? @" raw=true" : @" raw=false";
-
-		NSString *newlineSetting = @"";
-		if(newlineVal != nil)
-			newlineSetting = addNewline ? @" newline=true" : @" newline=false";
-
-		NSString *stdoutStr = [NSString stringWithFormat:@"[echo%@%@]	%@\n", rawSetting, newlineSetting, text];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		const char *rawCStr = ([useRawText isKindOfClass:[NSNumber class]]) ? ([useRawText boolValue] ? " raw=true" : " raw=false") : "";
+		const char *newlineCStr = (newlineVal != nil) ? (addNewline ? " newline=true" : " newline=false") : "";
+		std::string desc = std::string("[echo") + rawCStr + newlineCStr + "]\t" + [text UTF8String] + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -146,15 +137,11 @@ Echo(NSString *text, ReplayContext *context, ActionContext *actionContext)
 
 	if(!context->dryRun)
 	{
+		std::string textStr([text UTF8String]);
 		if(addNewline)
-		{
-			NSArray<NSString *> *array = @[text, @"\n"];
-			PrintStringsToStdOut(context, array, actionContext->index);
-		}
+			PrintToStdOut(context, textStr + "\n", actionContext->index);
 		else
-		{
-			PrintToStdOut(context, text, actionContext->index);
-		}
+			PrintToStdOut(context, std::move(textStr), actionContext->index);
 	}
 	else
 	{

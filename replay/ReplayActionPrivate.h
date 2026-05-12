@@ -4,40 +4,31 @@
 
 #import <Foundation/Foundation.h>
 #import "ReplayAction.h"
-#import "OutputSerializer.h"
+#include "OutputSerializer.h"
 #include <cassert>
+#include <string>
 
-static inline void PrintToStdOut(ReplayContext *context, NSString *string, NSInteger actionIndex)
+static inline void PrintToStdOut(ReplayContext *context, std::string str, NSInteger actionIndex)
 {
-	if(context->orderedOutput)
-	{
-		assert(context->outputSerializer != nil);
-		assert(actionIndex >= 0);
-	}
-	PrintSerializedString(context->outputSerializer, string, context->orderedOutput ? actionIndex : -1);
+    assert(context->outputSerializer != nullptr);
+    context->outputSerializer->scheduleString(
+        std::move(str),
+        context->orderedOutput ? (int64_t)actionIndex : -1
+    );
 }
 
-static inline void PrintToStdErr(ReplayContext *context, NSString *string)
+static inline void PrintToStdErr(ReplayContext *context, std::string str)
 {
-	PrintSerializedErrorString(context->outputSerializer, string);
-}
-
-static inline void PrintStringsToStdOut(ReplayContext *context, NSArray<NSString *> *array, NSInteger actionIndex)
-{
-	if(context->orderedOutput)
-	{
-		assert(context->outputSerializer != nil);
-		assert(actionIndex >= 0);
-	}
-	PrintSerializedStrings(context->outputSerializer, array, context->orderedOutput ? actionIndex : -1);
+    assert(context->outputSerializer != nullptr);
+    context->outputSerializer->scheduleErrorString(std::move(str));
 }
 
 static inline void ActionWithNoOutput(ReplayContext *context, NSInteger actionIndex)
 {
-	if(context->orderedOutput)
-	{
-		assert(context->outputSerializer != nil);
-		assert(actionIndex >= 0);
-		PrintSerializedString(context->outputSerializer, nil, actionIndex);
-	}
+    if(context->orderedOutput)
+    {
+        assert(context->outputSerializer != nullptr);
+        assert(actionIndex >= 0);
+        context->outputSerializer->scheduleNoOutput((int64_t)actionIndex);
+    }
 }

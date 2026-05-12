@@ -1,6 +1,10 @@
 #import <Foundation/Foundation.h>
 #include "FileTree.h"
-#import "OutputSerializer.h"
+#include "LogStream.h"
+
+#ifdef __cplusplus
+class OutputSerializer;
+#endif
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -17,7 +21,7 @@ typedef struct
 	NSDictionary<NSString *,NSString *> *environment;
 	AtomicError *lastError;
 	FileNode * __nullable fileTreeRoot;
-	OutputSerializer *__nullable outputSerializer; //not used in serial execution
+	OutputSerializer* outputSerializer; // always non-null during execution
 	dispatch_queue_t queue; // used only for serial execution
 	intptr_t councurrencyLimit; //maximum number of tasks allowed to be executed concurrently. 0 = unlimited
 	NSInteger actionCounter; //counter incremented with each serially created action

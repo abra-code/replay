@@ -11,6 +11,7 @@
 #include <getopt.h>
 #include <filesystem>
 #import "ReplayAction.h"
+#include "OutputSerializer.h"
 #import "TaskProxy.h"
 #import "ReplayTask.h"
 #import "SerialDispatch.h"
@@ -667,7 +668,6 @@ ProcessPlaylist(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 {
 	if(context->concurrent)
 	{
-		context->outputSerializer = [OutputSerializer sharedOutputSerializer];
 		context->actionCounter = -1;
 
 		if(context->analyzeDependencies)
@@ -680,18 +680,15 @@ ProcessPlaylist(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 		{
 			DispatchTasksConcurrentlyWithNoDependency(playlist, context);
 		}
-
-		FlushSerializedOutputs(context->outputSerializer);
 	}
 	else
 	{
- 		// output is ordered by the virtue of serial execution
- 		// but we don't want to trigger the complex infra for ordering of concurrent task outputs
- 		context->outputSerializer = nil;
 		context->actionCounter = -1;
 		context->orderedOutput = false;
 		DispatchTasksSerially(playlist, context);
 	}
+
+	context->outputSerializer->flush();
 }
 
 
@@ -701,7 +698,7 @@ int main(int argc, const char * argv[])
 	context.environment = [[NSProcessInfo processInfo] environment];
 	context.lastError = [AtomicError new];
 	context.fileTreeRoot = NULL;
-	context.outputSerializer = nil;
+	context.outputSerializer = &OutputSerializer::shared();
 	context.queue = nil;
 	context.councurrencyLimit = 0; //unlimited
 	context.actionCounter = -1;

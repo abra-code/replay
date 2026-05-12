@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "ReplayAction.h"
 #import "ReplayActionPrivate.h"
+#include <string>
 
 bool
 CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
@@ -10,8 +11,8 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[clone]	%@	%@\n", [fromURL path], [toURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		std::string desc = std::string("[clone]\t") + [[fromURL path] UTF8String] + "\t" + [[toURL path] UTF8String] + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -42,9 +43,8 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to clone from \"%@\" to \"%@\". Error: %@\n",
-			                    [fromURL path], [toURL path], errorDesc];
-			PrintToStdErr(context, errStr);
+			std::string errStr = std::string("error: failed to clone from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			PrintToStdErr(context, std::move(errStr));
 		}
 	}
 	return isSuccessful;
@@ -58,8 +58,8 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *ac
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[move]	%@	%@\n", [fromURL path], [toURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		std::string desc = std::string("[move]\t") + [[fromURL path] UTF8String] + "\t" + [[toURL path] UTF8String] + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -90,9 +90,8 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *ac
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to move from \"%@\" to \"%@\". Error: %@\n",
-			                    [fromURL path], [toURL path], errorDesc];
-			PrintToStdErr(context, errStr);
+			std::string errStr = std::string("error: failed to move from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			PrintToStdErr(context, std::move(errStr));
 		}
 	}
 	return isSuccessful;
@@ -106,8 +105,8 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[hardlink]	%@	%@\n", [fromURL path], [toURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		std::string desc = std::string("[hardlink]\t") + [[fromURL path] UTF8String] + "\t" + [[toURL path] UTF8String] + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -138,9 +137,8 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to create a hardlink from \"%@\" to \"%@\". Error: %@\n",
-			                    [fromURL path], [toURL path], errorDesc];
-			PrintToStdErr(context, errStr);
+			std::string errStr = std::string("error: failed to create a hardlink from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			PrintToStdErr(context, std::move(errStr));
 		}
 	}
 	return isSuccessful;
@@ -159,12 +157,9 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *settingsStr = @"";
-		if(validateSource != nil)
-			settingsStr = validateSymlinkSource ? @" validate=true" : @" validate=false";
-		NSString *stdoutStr = [NSString stringWithFormat:@"[symlink%@]	%@	%@\n",
-		                       settingsStr, [fromURL path], [linkURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		const char *settingsCStr = (validateSource == nil) ? "" : (validateSymlinkSource ? " validate=true" : " validate=false");
+		std::string desc = std::string("[symlink") + settingsCStr + "]\t" + [[fromURL path] UTF8String] + "\t" + [[linkURL path] UTF8String] + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -208,9 +203,8 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to create a symlink at \"%@\" referring to \"%@\". Error: %@\n",
-			                    [linkURL path], [fromURL path], errorDesc];
-			PrintToStdErr(context, errStr);
+			std::string errStr = std::string("error: failed to create a symlink at \"") + [[linkURL path] UTF8String] + "\" referring to \"" + [[fromURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			PrintToStdErr(context, std::move(errStr));
 		}
 	}
 	return isSuccessful;

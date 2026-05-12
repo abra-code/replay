@@ -221,8 +221,8 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	// Slot 1: verbose/dry-run descriptor
 	if (context->verbose || combined_dry_run)
 	{
-		NSString *desc = [NSString stringWithFormat:@"[edit]\t%s\n", filePath];
-		PrintToStdOut(context, desc, actionContext->index);
+		std::string desc = std::string("[edit]\t") + filePath + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -235,7 +235,7 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	{
 		if (actionDryRun && !context->dryRun)
 		{
-			NSMutableString *plan = [NSMutableString stringWithFormat:@"[edit-dry-run:%s]\n", filePath];
+			std::string plan = std::string("[edit-dry-run:") + filePath + "]\n";
 			for (NSDictionary *edit in edits)
 			{
 				NSString *old = edit[@"oldText"] ?: @"";
@@ -244,10 +244,15 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 				NSInteger lim = [limitVal isKindOfClass:[NSNumber class]] ? [limitVal integerValue] : 1;
 				id regexVal = edit[@"regex"];
 				bool useRegex = [regexVal isKindOfClass:[NSNumber class]] ? [regexVal boolValue] : false;
-				[plan appendFormat:@"  \"%@\" \xe2\x86\x92 \"%@\" (limit=%ld%s)\n",
-				    old, neu, (long)lim, useRegex ? " regex" : ""];
+				plan += "  \"";
+				plan += [old UTF8String];
+				plan += "\" \xe2\x86\x92 \"";
+				plan += [neu UTF8String];
+				plan += "\" (limit=";
+				plan += std::to_string((long)lim);
+				plan += useRegex ? " regex)\n" : ")\n";
 			}
-			PrintToStdOut(context, plan, actionContext->index);
+			PrintToStdOut(context, std::move(plan), actionContext->index);
 		}
 		else
 		{
@@ -261,10 +266,10 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	if (!f.is_open())
 	{
 		int err = errno;
-		NSString *errStr = [NSString stringWithFormat:@"error: edit: failed to open \"%s\": %s\n", filePath, strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		std::string errStr = std::string("error: edit: failed to open \"") + filePath + "\": " + strerror(err) + "\n";
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}
@@ -274,10 +279,10 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	std::string content((size_t)fileSize, '\0');
 	if (fileSize > 0 && !f.read(&content[0], fileSize))
 	{
-		NSString *errStr = [NSString stringWithFormat:@"error: edit: failed to read \"%s\"\n", filePath];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		std::string errStr = std::string("error: edit: failed to read \"") + filePath + "\"\n";
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EIO userInfo:userInfo];
+		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}
@@ -291,10 +296,10 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 
 		if (![oldText isKindOfClass:[NSString class]])
 		{
-			NSString *errStr = [NSString stringWithFormat:@"error: edit \"%s\": \"oldText\" must be a string\n", filePath];
-			PrintToStdErr(context, errStr);
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+			std::string errStr = std::string("error: edit \"") + filePath + "\": \"oldText\" must be a string\n";
+			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EINVAL userInfo:userInfo];
+			PrintToStdErr(context, std::move(errStr));
 			ActionWithNoOutput(context, actionContext->index);
 			return false;
 		}
@@ -316,10 +321,10 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 		NSString *editError = nil;
 		if (!apply_one_edit(content, old_str, new_str, limit, use_regex, case_insensitive, &editError))
 		{
-			NSString *errStr = [NSString stringWithFormat:@"error: edit \"%s\": %@\n", filePath, editError];
-			PrintToStdErr(context, errStr);
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+			std::string errStr = std::string("error: edit \"") + filePath + "\": " + [editError UTF8String] + "\n";
+			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+			PrintToStdErr(context, std::move(errStr));
 			ActionWithNoOutput(context, actionContext->index);
 			return false;
 		}
@@ -335,10 +340,10 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	if (tmpFd < 0)
 	{
 		int err = errno;
-		NSString *errStr = [NSString stringWithFormat:@"error: edit: failed to create temp file: %s\n", strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		std::string errStr = std::string("error: edit: failed to create temp file: ") + strerror(err) + "\n";
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}
@@ -351,10 +356,10 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	{
 		int err = errno;
 		::unlink(tmpl.c_str());
-		NSString *errStr = [NSString stringWithFormat:@"error: edit: failed to write \"%s\": %s\n", filePath, strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		std::string errStr = std::string("error: edit: failed to write \"") + filePath + "\": " + strerror(err) + "\n";
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}

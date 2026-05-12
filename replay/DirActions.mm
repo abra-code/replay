@@ -12,8 +12,8 @@ ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *action
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[list]\t%s\n", dirPath];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		std::string desc = std::string("[list]\t") + dirPath + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -32,18 +32,22 @@ ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *action
 	if(!list_directory(dirPath, entries))
 	{
 		int err = errno;
-		NSString *errStr = [NSString stringWithFormat:@"error: failed to list \"%s\": %s\n", dirPath, strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		std::string errStr = std::string("error: failed to list \"") + dirPath + "\": " + strerror(err) + "\n";
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}
 
-	NSMutableString *output = [NSMutableString stringWithFormat:@"[list:%s]\n", dirPath];
+	std::string output = std::string("[list:") + dirPath + "]\n";
 	for(const auto &entry : entries)
-		[output appendFormat:@"[%s] %s\n", entry.isDirectory ? "DIR" : "FILE", entry.name.c_str()];
-	PrintToStdOut(context, output, actionContext->index);
+	{
+		output += entry.isDirectory ? "[DIR] " : "[FILE] ";
+		output += entry.name;
+		output += "\n";
+	}
+	PrintToStdOut(context, std::move(output), actionContext->index);
 	return true;
 }
 
@@ -70,8 +74,8 @@ DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, A
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[tree]\t%s\n", dirPath];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		std::string desc = std::string("[tree]\t") + dirPath + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -90,10 +94,10 @@ DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, A
 	if(!build_directory_tree(dirPath, root, (int)maxDepth))
 	{
 		int err = errno;
-		NSString *errStr = [NSString stringWithFormat:@"error: failed to read directory \"%s\": %s\n", dirPath, strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		std::string errStr = std::string("error: failed to read directory \"") + dirPath + "\": " + strerror(err) + "\n";
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}
@@ -102,11 +106,16 @@ DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, A
 	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:TreeNodeToObject(root)
 	                                                   options:0
 	                                                     error:&jsonError];
-	NSString *jsonStr = jsonData
-		? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding]
-		: @"{}";
+	const char *jsonBytes = jsonData ? (const char *)[jsonData bytes] : "{}";
+	size_t jsonLen = jsonData ? (size_t)[jsonData length] : 2;
 
-	NSString *output = [NSString stringWithFormat:@"[tree:%s]\n%@\n", dirPath, jsonStr];
-	PrintToStdOut(context, output, actionContext->index);
+	std::string output;
+	output.reserve(strlen("[tree:") + strlen(dirPath) + 2 + jsonLen + 1);
+	output += "[tree:";
+	output += dirPath;
+	output += "]\n";
+	output.append(jsonBytes, jsonLen);
+	output += "\n";
+	PrintToStdOut(context, std::move(output), actionContext->index);
 	return true;
 }

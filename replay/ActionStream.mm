@@ -6,6 +6,7 @@
 //
 
 #import "ActionStream.h"
+#include "OutputSerializer.h"
 #import "ReplayServer.h"
 #import "ConcurrentDispatchWithNoDependency.h"
 #import "SerialDispatch.h"
@@ -16,16 +17,12 @@ StartReceivingActions(ReplayContext *context)
 {
 	if(context->concurrent)
 	{
-		context->outputSerializer = [OutputSerializer sharedOutputSerializer];
 		context->actionCounter = -1;
 		context->analyzeDependencies = false; // building dependency graph is not supported when tasks are streamed
 		StartConcurrentDispatchWithNoDependency(context);
 	}
 	else
 	{
- 		// output is ordered by the virtue of serial execution
- 		// but we don't want to trigger the complex infra for ordering of concurrent task outputs
- 		context->outputSerializer = nil;
 		context->actionCounter = -1;
 		context->orderedOutput = false;
 		StartSerialDispatch(context);
@@ -36,14 +33,11 @@ void
 FinishReceivingActionsAndWait(ReplayContext *context)
 {
 	if(context->concurrent)
-	{
 		FinishConcurrentDispatchWithNoDependencyAndWait(context);
-		FlushSerializedOutputs(context->outputSerializer);
-	}
 	else
-	{
 		FinishSerialDispatchAndWait(context);
-	}
+
+	context->outputSerializer->flush();
 }
 
 void

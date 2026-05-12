@@ -14,13 +14,13 @@ GlobFiles(NSString *rootDir, NSArray<NSString*> *globPatterns, NSArray<NSString*
 
 	if(context->verbose || context->dryRun)
 	{
-		NSMutableString *desc = [NSMutableString stringWithFormat:@"[glob]\t%@", rootDir];
+		std::string desc = std::string("[glob]\t") + [rootDir UTF8String];
 		for(NSString *p in globPatterns)
-			[desc appendFormat:@"\t%@", p];
+			{ desc += "\t"; desc += [p UTF8String]; }
 		for(NSString *p in excludePatterns)
-			[desc appendFormat:@"\t!%@", p];
-		[desc appendString:@"\n"];
-		PrintToStdOut(context, desc, actionContext->index);
+			{ desc += "\t!"; desc += [p UTF8String]; }
+		desc += "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -48,9 +48,9 @@ GlobFiles(NSString *rootDir, NSArray<NSString*> *globPatterns, NSArray<NSString*
 	size_t maxR = (maxResults > 0) ? (size_t)maxResults : 1000;
 	auto matches = glob_files_in_dir(cRoot, cGlobs, cExcludes, maxR);
 
-	NSMutableString *output = [NSMutableString stringWithString:@"[glob]\n"];
+	std::string output = "[glob]\n";
 	for(const auto &m : matches)
-		[output appendFormat:@"%s\n", m.c_str()];
-	PrintToStdOut(context, output, actionContext->index);
+		{ output += m; output += "\n"; }
+	PrintToStdOut(context, std::move(output), actionContext->index);
 	return true;
 }

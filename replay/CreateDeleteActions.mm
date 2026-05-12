@@ -4,8 +4,8 @@
 #include "ABase64.h"
 #include <cerrno>
 #include <fstream>
-#include <vector>
 #include <string>
+#include <vector>
 
 bool
 CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionContext *actionContext)
@@ -16,11 +16,9 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 	if(context->verbose || context->dryRun)
 	{
 		id useRawText = actionContext->settings[@"raw"];
-		NSString *settingsStr = @"";
-		if([useRawText isKindOfClass:[NSNumber class]])
-			settingsStr = [useRawText boolValue] ? @" raw=true" : @" raw=false";
-		NSString *stdoutStr = [NSString stringWithFormat:@"[create file%@]	%@	%@\n", settingsStr, [itemURL path], content];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		const char *settingsCStr = ([useRawText isKindOfClass:[NSNumber class]]) ? ([useRawText boolValue] ? " raw=true" : " raw=false") : "";
+		std::string desc = std::string("[create file") + settingsCStr + "]\t" + [[itemURL path] UTF8String] + "\t" + [content UTF8String] + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -51,9 +49,8 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to create file \"%@\". Error: %@\n",
-			                    [itemURL path], errorDesc];
-			PrintToStdErr(context, errStr);
+			std::string errStr = std::string("error: failed to create file \"") + [[itemURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			PrintToStdErr(context, std::move(errStr));
 		}
 	}
 	return isSuccessful;
@@ -67,8 +64,8 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[create file blob=true]\t%@\n", [itemURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		std::string desc = std::string("[create file blob=true]\t") + [[itemURL path] UTF8String] + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -107,11 +104,10 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 		if(!isSuccessful)
 		{
 			int err = errno;
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to create file \"%@\". Error: %s\n",
-			                    [itemURL path], strerror(err)];
-			PrintToStdErr(context, errStr);
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+			std::string errStr = std::string("error: failed to create file \"") + [[itemURL path] UTF8String] + "\". Error: " + strerror(err) + "\n";
+			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+			PrintToStdErr(context, std::move(errStr));
 		}
 	}
 	return isSuccessful;
@@ -125,8 +121,8 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[create directory]	%@\n", [itemURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		std::string desc = std::string("[create directory]\t") + [[itemURL path] UTF8String] + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -146,9 +142,8 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to create directory \"%@\". Error: %@\n",
-			                    [itemURL path], errorDesc];
-			PrintToStdErr(context, errStr);
+			std::string errStr = std::string("error: failed to create directory \"") + [[itemURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			PrintToStdErr(context, std::move(errStr));
 		}
 	}
 	return isSuccessful;
@@ -162,8 +157,8 @@ DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 
 	if(context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[delete]	%@\n", [itemURL path]];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		std::string desc = std::string("[delete]\t") + [[itemURL path] UTF8String] + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -185,9 +180,8 @@ DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-			NSString *errStr = [NSString stringWithFormat:@"error: failed to delete \"%@\". Error: %@\n",
-			                    [itemURL path], errorDesc];
-			PrintToStdErr(context, errStr);
+			std::string errStr = std::string("error: failed to delete \"") + [[itemURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			PrintToStdErr(context, std::move(errStr));
 		}
 	}
 	return isSuccessful;

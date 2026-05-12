@@ -37,8 +37,8 @@ ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionCont
 
 	if (context->verbose || context->dryRun)
 	{
-		NSString *stdoutStr = [NSString stringWithFormat:@"[read]\t%s\n", filePath];
-		PrintToStdOut(context, stdoutStr, actionContext->index);
+		std::string desc = std::string("[read]\t") + filePath + "\n";
+		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
 	{
@@ -57,10 +57,10 @@ ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionCont
 	if (!f.is_open())
 	{
 		int err = errno;
-		NSString *errStr = [NSString stringWithFormat:@"error: failed to open \"%s\" for reading: %s\n", filePath, strerror(err)];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		std::string errStr = std::string("error: failed to open \"") + filePath + "\" for reading: " + strerror(err) + "\n";
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}
@@ -71,33 +71,42 @@ ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionCont
 	std::vector<uint8_t> data(static_cast<size_t>(fileSize));
 	if (fileSize > 0 && !f.read(reinterpret_cast<char *>(data.data()), fileSize))
 	{
-		NSString *errStr = [NSString stringWithFormat:@"error: failed to read \"%s\"\n", filePath];
-		PrintToStdErr(context, errStr);
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: errStr };
+		std::string errStr = std::string("error: failed to read \"") + filePath + "\"\n";
+		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
 		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EIO userInfo:userInfo];
+		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}
 
 	if (is_utf8_text(data.data(), data.size()))
 	{
-		NSString *header = [NSString stringWithFormat:@"[text:%s]\n", filePath];
-		NSString *content = data.empty() ? @"" : [[NSString alloc] initWithBytes:data.data() length:data.size() encoding:NSUTF8StringEncoding];
-		if (content == nil) content = @"";
-		if (![content hasSuffix:@"\n"]) content = [content stringByAppendingString:@"\n"];
-		PrintToStdOut(context, [header stringByAppendingString:content], actionContext->index);
+		// Build output directly from the raw bytes — no NSString round-trip
+		// (avoids UTF-8→UTF-16→UTF-8 conversion+copy for potentially large content)
+		std::string output;
+		output.reserve(strlen("[text:") + strlen(filePath) + 2 + data.size() + 1);
+		output += "[text:";
+		output += filePath;
+		output += "]\n";
+		output.append(reinterpret_cast<const char *>(data.data()), data.size());
+		if (output.empty() || output.back() != '\n')
+			output += '\n';
+		PrintToStdOut(context, std::move(output), actionContext->index);
 	}
 	else
 	{
 		unsigned long encodedSize = CalculateEncodedBufferSize((unsigned long)data.size());
 		std::vector<unsigned char> encoded(encodedSize + 1, 0);
 		unsigned long written = EncodeBase64(data.data(), (unsigned long)data.size(), encoded.data(), encodedSize);
-		encoded[written] = '\0';
 
-		NSString *header = [NSString stringWithFormat:@"[blob:%s]\n", filePath];
-		NSString *encodedStr = [NSString stringWithUTF8String:(const char *)encoded.data()];
-		if (encodedStr == nil) encodedStr = @"";
-		PrintToStdOut(context, [[header stringByAppendingString:encodedStr] stringByAppendingString:@"\n"], actionContext->index);
+		std::string output;
+		output.reserve(strlen("[blob:") + strlen(filePath) + 2 + written + 1);
+		output += "[blob:";
+		output += filePath;
+		output += "]\n";
+		output.append(reinterpret_cast<const char *>(encoded.data()), written);
+		output += '\n';
+		PrintToStdOut(context, std::move(output), actionContext->index);
 	}
 
 	return true;
