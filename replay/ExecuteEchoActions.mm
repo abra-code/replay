@@ -6,7 +6,7 @@
 bool
 ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	NSNumber *useStdOutNum = actionContext->settings[@"stdout"];
@@ -55,11 +55,9 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 					PrintToStdErr(context, std::string((const char *)[stdErrData bytes], (size_t)[stdErrData length]));
 				}
 
-				std::string toolErrDesc = std::string([toolPath UTF8String]) + " returned error " + std::to_string(toolStatus);
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(toolErrDesc.c_str()) };
-				NSError *taskError = [NSError errorWithDomain:NSPOSIXErrorDomain code:toolStatus userInfo:userInfo];
-				context->lastError.error = taskError;
-				PrintToStdErr(context, std::string("error: failed to execute \"") + [toolPath UTF8String] + "\". Error: " + std::to_string(toolStatus) + "\n");
+				std::string toolErrStr = std::string("error: failed to execute \"") + [toolPath UTF8String] + "\". Error: " + std::to_string(toolStatus) + "\n";
+				context->lastError.set(toolErrStr, toolStatus);
+				PrintToStdErr(context, std::move(toolErrStr));
 			}
 		}];
 
@@ -91,11 +89,12 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 
 		if (!isSuccessful)
 		{
-			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-			PrintToStdErr(context, std::string("error: failed to execute \"") + [toolPath UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n");
+			std::string launchErrStr = std::string("error: failed to execute \"") + [toolPath UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			context->lastError.set(launchErrStr, operationError ? (int)[operationError code] : 1);
+			PrintToStdErr(context, std::move(launchErrStr));
 		}
 	}
 
@@ -108,7 +107,7 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 bool
 Echo(NSString *text, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	bool addNewline = true;

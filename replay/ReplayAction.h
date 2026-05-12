@@ -3,8 +3,51 @@
 #include "LogStream.h"
 
 #ifdef __cplusplus
+#include <atomic>
+#include <mutex>
+#include <string>
+
+// Thread-safe error holder. hasError() is a lock-free atomic read — hot path in
+// every action guard. set/clear/description take a mutex for the string payload.
+
+// Note: The explicit std::atomic load/store are used here specifically to override the default memory order.
+// The implicit operators use memory_order_seq_cst — the strongest and most expensive ordering, which emits a full memory barrier on ARM.
+// The explicit calls use memory_order_acquire/release, which on Apple Silicon compile to ldar/stlr (load-acquire/store-release) instead of ldar + dmb ish.
+// The explicit load/store calls are worth keeping here since hasError() is the guard check at the top of every action — it's called constantly during execution.
+
+struct ReplayError {
+	bool hasError() const noexcept {
+		return _flag.load(std::memory_order_acquire);
+	}
+	void set(std::string description, int code = 1) {
+		std::lock_guard<std::mutex> lk(_mutex);
+		_description = std::move(description);
+		_code = code;
+		_flag.store(true, std::memory_order_release);
+	}
+	void clear() {
+		std::lock_guard<std::mutex> lk(_mutex);
+		_description.clear();
+		_code = 0;
+		_flag.store(false, std::memory_order_release);
+	}
+	std::string description() const {
+		std::lock_guard<std::mutex> lk(_mutex);
+		return _description;
+	}
+	int code() const {
+		std::lock_guard<std::mutex> lk(_mutex);
+		return _code;
+	}
+private:
+	std::atomic<bool>  _flag{false};
+	mutable std::mutex _mutex;
+	std::string        _description;
+	int                _code = 0;
+};
+
 class OutputSerializer;
-#endif
+#endif // __cplusplus
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -12,14 +55,10 @@ NS_ASSUME_NONNULL_BEGIN
 extern "C" {
 #endif
 
-@interface AtomicError : NSObject
-	@property(atomic, strong, direct) NSError *error;
-@end
-
 typedef struct
 {
 	NSDictionary<NSString *,NSString *> *environment;
-	AtomicError *lastError;
+	ReplayError lastError;
 	FileNode * __nullable fileTreeRoot;
 	OutputSerializer* outputSerializer; // always non-null during execution
 	dispatch_queue_t queue; // used only for serial execution

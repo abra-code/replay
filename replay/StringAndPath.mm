@@ -107,9 +107,7 @@ StringByExpandingEnvironmentVariablesWithErrorCheck(NSString *origString, Replay
 	NSString *outStr = StringByExpandingEnvironmentVariables(origString, context->environment);
 	if(outStr == nil)
 	{
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Malformed string or missing evnironment variable" };
-		NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-		context->lastError.error = operationError;
+		context->lastError.set("error: malformed string or missing environment variable", 1);
 	}
 	return outStr;
 }

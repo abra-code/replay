@@ -50,7 +50,7 @@ static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path
 NSArray<TaskProxy *> *
 TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return nil;
 
 	__block NSMutableArray<TaskProxy *> *tasksFromStep = [NSMutableArray arrayWithCapacity:0];

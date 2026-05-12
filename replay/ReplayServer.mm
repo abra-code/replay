@@ -32,14 +32,8 @@ SendCallbackMessage(ReplayContext *context, SInt32 messageID)
 
 	NSMutableDictionary *callbackInfo = [NSMutableDictionary new];
 	
-	NSError *lastError = context->lastError.error;
-	if(lastError != nil)
-	{
-		NSString *errorDesc = [lastError localizedDescription];
-		if(errorDesc == nil)
-			errorDesc = [lastError localizedFailureReason];
-		callbackInfo[@"lastError"] = errorDesc;
-	}
+	if(context->lastError.hasError())
+		callbackInfo[@"lastError"] = @(context->lastError.description().c_str());
 
 	if(messageID == kCallbackMessageHeartbeat)
 	{
@@ -77,8 +71,7 @@ ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 			fprintf(gLogErr, "error: corrupt mesage - cannot unpack property list dictionary from data\n");
 			if(context->stopOnError)
 			{
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Corrupt mesage - cannot unpack property list dictionary from data" };
-				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				context->lastError.set("error: corrupt message - cannot unpack property list dictionary from data", 1);
 			}
 		}
 		else if(CFGetTypeID(replayMessage) != CFDictionaryGetTypeID())
@@ -88,8 +81,7 @@ ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 			fprintf(gLogErr, "error: invalid message - cannot unpack property list dictionary from data\n");
 			if(context->stopOnError)
 			{
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid mesage - cannot unpack property list dictionary from data" };
-				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				context->lastError.set("error: invalid message - cannot unpack property list dictionary from data", 1);
 			}
 		}
 	}
@@ -143,8 +135,7 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 			fprintf(gLogErr, "error: unknown action request received\n");
 			if(context->stopOnError)
 			{
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unknown message request received" };
-				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				context->lastError.set("error: unknown message request received", 1);
 				stopLoop = true;
 			}
 		}
@@ -165,8 +156,7 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 			fprintf(gLogErr, "error: invalid null action request received\n");
 			if(context->stopOnError)
 			{
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid null action request received" };
-				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				context->lastError.set("error: invalid null action request received", 1);
 				stopLoop = true;
 			}
 		}
@@ -182,14 +172,8 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 	NSNumber *pidNum = @(myPid);
 	replayReply[@"pid"] = pidNum;
 	
-	NSError *lastError = context->lastError.error;
-	if(lastError != nil)
-	{
-		NSString *errorDesc = [lastError localizedDescription];
-		if(errorDesc == nil)
-			errorDesc = [lastError localizedFailureReason];
-		replayReply[@"lastError"] = errorDesc;
-	}
+	if(context->lastError.hasError())
+		replayReply[@"lastError"] = @(context->lastError.description().c_str());
 	
 	CFDataRef plistData = CFPropertyListCreateData(kCFAllocatorDefault, (__bridge CFMutableDictionaryRef)replayReply, kCFPropertyListBinaryFormat_v1_0, 0, NULL);
 	return plistData;

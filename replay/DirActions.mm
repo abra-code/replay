@@ -7,7 +7,7 @@
 bool
 ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	if(context->verbose || context->dryRun)
@@ -33,8 +33,7 @@ ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *action
 	{
 		int err = errno;
 		std::string errStr = std::string("error: failed to list \"") + dirPath + "\": " + strerror(err) + "\n";
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		context->lastError.set(errStr, err);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
@@ -69,7 +68,7 @@ static id TreeNodeToObject(const TreeNode &node)
 bool
 DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	if(context->verbose || context->dryRun)
@@ -95,8 +94,7 @@ DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, A
 	{
 		int err = errno;
 		std::string errStr = std::string("error: failed to read directory \"") + dirPath + "\": " + strerror(err) + "\n";
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		context->lastError.set(errStr, err);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;

@@ -32,7 +32,7 @@ static bool is_utf8_text(const uint8_t *data, size_t len)
 bool
 ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionContext)
 {
-	if (context->stopOnError && context->lastError.error != nil)
+	if (context->stopOnError && context->lastError.hasError())
 		return false;
 
 	if (context->verbose || context->dryRun)
@@ -58,8 +58,7 @@ ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionCont
 	{
 		int err = errno;
 		std::string errStr = std::string("error: failed to open \"") + filePath + "\" for reading: " + strerror(err) + "\n";
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		context->lastError.set(errStr, err);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
@@ -72,8 +71,7 @@ ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionCont
 	if (fileSize > 0 && !f.read(reinterpret_cast<char *>(data.data()), fileSize))
 	{
 		std::string errStr = std::string("error: failed to read \"") + filePath + "\"\n";
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EIO userInfo:userInfo];
+		context->lastError.set(errStr, EIO);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;

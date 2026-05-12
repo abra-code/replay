@@ -38,7 +38,7 @@ static void format_iso8601(time_t t, char out[21])
 bool
 GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && context->lastError.error != nil)
+	if(context->stopOnError && context->lastError.hasError())
 		return false;
 
 	if(context->verbose || context->dryRun)
@@ -64,8 +64,7 @@ GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionConte
 	{
 		int err = errno;
 		std::string errStr = std::string("error: failed to stat \"") + path + "\": " + strerror(err) + "\n";
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		context->lastError.set(errStr, err);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;

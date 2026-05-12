@@ -7,10 +7,6 @@
 #include "FileSystemHelpers.h"
 #include <string>
 
-//a helper class to ensure atomic access to shared NSError from multiple threads
-@implementation AtomicError
-
-@end
 
 static inline dispatch_block_t
 CreateSourceDestinationAction(Action replayAction, NSURL *sourceURL, NSURL *destinationURL, ReplayContext *context, NSDictionary *actionSettings, NSInteger actionIndex)
@@ -104,7 +100,7 @@ NSArray<NSString*> *PathArrayFromFileURL(NSURL *inURL)
 void
 HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return;
 
  @autoreleasepool {
@@ -150,14 +146,13 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					if(matches.empty())
 					{
 						std::string errStr = std::string("error: glob pattern \"") + [globPattern UTF8String] + "\" matched no files\n";
-						NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-						context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+						context->lastError.set(errStr, 1);
 						PrintToStdErr(context, std::move(errStr));
 						return;
 					}
 					for(const auto& match : matches)
 					{
-						if(context->stopOnError && (context->lastError.error != nil))
+						if(context->stopOnError && (context->lastError.hasError()))
 							break;
 						NSString *matchPath = [NSString stringWithUTF8String:match.c_str()];
 						NSURL *srcURL = [NSURL fileURLWithPath:matchPath];
@@ -238,14 +233,13 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 							if(matches.empty())
 							{
 								std::string errStr = std::string("error: glob pattern \"") + [globPattern UTF8String] + "\" matched no files\n";
-								NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-								context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+								context->lastError.set(errStr, 1);
 								PrintToStdErr(context, std::move(errStr));
 								return;
 							}
 							for(const auto& match : matches)
 							{
-								if(context->stopOnError && (context->lastError.error != nil))
+								if(context->stopOnError && (context->lastError.hasError()))
 									break;
 								NSString *matchPath = [NSString stringWithUTF8String:match.c_str()];
 								NSURL *srcURL = [NSURL fileURLWithPath:matchPath];
@@ -318,14 +312,13 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 								if(matches.empty())
 								{
 									std::string errStr = std::string("error: glob pattern \"") + [globPattern UTF8String] + "\" matched no files\n";
-									NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-									context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+									context->lastError.set(errStr, 1);
 									PrintToStdErr(context, std::move(errStr));
 									return;
 								}
 								for(const auto& match : matches)
 								{
-									if(context->stopOnError && (context->lastError.error != nil))
+									if(context->stopOnError && (context->lastError.hasError()))
 										break;
 									NSString *matchPath = [NSString stringWithUTF8String:match.c_str()];
 									NSURL *matchURL = [NSURL fileURLWithPath:matchPath];
@@ -365,10 +358,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 			else
 			{
-				PrintToStdErr(context, "error: \"delete\" action: \"items\" is expected to be an array of paths\n");
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unexpected items type" };
-				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-				context->lastError.error = operationError;
+				std::string errStr = "error: \"delete\" action: \"items\" is expected to be an array of paths\n";
+				context->lastError.set(errStr, 1);
+				PrintToStdErr(context, std::move(errStr));
 			}
 		}
 		else if(replayAction == kFileActionRead)
@@ -405,10 +397,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 			else
 			{
-				PrintToStdErr(context, "error: \"read\" action: \"items\" is expected to be an array of paths\n");
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unexpected items type" };
-				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-				context->lastError.error = operationError;
+				std::string errStr = "error: \"read\" action: \"items\" is expected to be an array of paths\n";
+				context->lastError.set(errStr, 1);
+				PrintToStdErr(context, std::move(errStr));
 			}
 		}
 		else if(replayAction == kFileActionList)
@@ -437,9 +428,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 			else
 			{
-				PrintToStdErr(context, "error: \"list\" action: \"directory\" path is required\n");
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing directory path" };
-				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				std::string errStr = "error: \"list\" action: \"directory\" path is required\n";
+				context->lastError.set(errStr, 1);
+				PrintToStdErr(context, std::move(errStr));
 			}
 		}
 		else if(replayAction == kFileActionTree)
@@ -473,9 +464,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 			else
 			{
-				PrintToStdErr(context, "error: \"tree\" action: \"directory\" path is required\n");
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing directory path" };
-				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				std::string errStr = "error: \"tree\" action: \"directory\" path is required\n";
+				context->lastError.set(errStr, 1);
+				PrintToStdErr(context, std::move(errStr));
 			}
 		}
 		else if(replayAction == kFileActionInfo)
@@ -504,9 +495,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 			else
 			{
-				PrintToStdErr(context, "error: \"info\" action: \"path\" is required\n");
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing path" };
-				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				std::string errStr = "error: \"info\" action: \"path\" is required\n";
+				context->lastError.set(errStr, 1);
+				PrintToStdErr(context, std::move(errStr));
 			}
 		}
 		else if(replayAction == kFileActionGlob)
@@ -562,9 +553,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 			else
 			{
-				PrintToStdErr(context, "error: \"glob\" action: \"root\" string and \"glob\" array are required\n");
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing root or glob patterns" };
-				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				std::string errStr = "error: \"glob\" action: \"root\" string and \"glob\" array are required\n";
+				context->lastError.set(errStr, 1);
+				PrintToStdErr(context, std::move(errStr));
 			}
 		}
 		else if(replayAction == kFileActionEdit)
@@ -590,9 +581,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				}
 				else
 				{
-					PrintToStdErr(context, "error: \"edit\" action: \"edits\" array or \"oldText\" string is required\n");
-					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing edits for edit action" };
-					context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+					std::string errStr = "error: \"edit\" action: \"edits\" array or \"oldText\" string is required\n";
+					context->lastError.set(errStr, 1);
+					PrintToStdErr(context, std::move(errStr));
 					editsArray = nil;
 				}
 			}
@@ -607,15 +598,15 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				NSArray<NSString*> *itemPaths = stepDescription[@"items"];
 				if(![itemPaths isKindOfClass:arrayClass] || [itemPaths count] == 0)
 				{
-					PrintToStdErr(context, "error: \"edit\" action: \"items\" array of paths is required\n");
-					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Missing items for edit action" };
-					context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+					std::string errStr = "error: \"edit\" action: \"items\" array of paths is required\n";
+					context->lastError.set(errStr, 1);
+					PrintToStdErr(context, std::move(errStr));
 					itemPaths = nil;
 				}
 
 				for(NSString *onePath in itemPaths)
 				{
-					if(context->stopOnError && (context->lastError.error != nil))
+					if(context->stopOnError && (context->lastError.hasError()))
 						break;
 
 					NSString *expandedPath = StringByExpandingEnvironmentVariablesWithErrorCheck(onePath, context);
@@ -638,14 +629,13 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 							if(matches.empty())
 							{
 								std::string errStr = std::string("error: glob pattern \"") + [globPattern UTF8String] + "\" matched no files\n";
-								NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-								context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+								context->lastError.set(errStr, 1);
 								PrintToStdErr(context, std::move(errStr));
 								return;
 							}
 							for(const auto& match : matches)
 							{
-								if(context->stopOnError && (context->lastError.error != nil))
+								if(context->stopOnError && (context->lastError.hasError()))
 									break;
 								ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
 								__unused bool isOK = EditFile(match.c_str(), capturedEdits, capturedDryRun, context, &actionContext);
@@ -788,10 +778,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				}
 				else
 				{
-					PrintToStdErr(context, "error: \"create\" action must specify \"file\" or \"directory\"\n");
-					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid create action specification" };
-					NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-					context->lastError.error = operationError;
+					std::string errStr = "error: \"create\" action must specify \"file\" or \"directory\"\n";
+					context->lastError.set(errStr, 1);
+					PrintToStdErr(context, std::move(errStr));
 				}
 			}
 		}
@@ -803,10 +792,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				NSArray<NSString*> *arguments = stepDescription[@"arguments"];
 				if((arguments != nil) && ![arguments isKindOfClass:arrayClass])
 				{
-					PrintToStdErr(context, "error: \"execute\" action must specify \"arguments\" as a string array\n");
-					NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid execute action specification" };
-					NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-					context->lastError.error = operationError;
+					std::string errStr = "error: \"execute\" action must specify \"arguments\" as a string array\n";
+					context->lastError.set(errStr, 1);
+					PrintToStdErr(context, std::move(errStr));
 				}
 				else
 				{
@@ -857,10 +845,9 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 			else
 			{
-				PrintToStdErr(context, "error: \"execute\" action must specify \"tool\" value with path to executable\n");
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Invalid execute action specification" };
-				NSError *operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
-				context->lastError.error = operationError;
+				std::string errStr = "error: \"execute\" action must specify \"tool\" value with path to executable\n";
+				context->lastError.set(errStr, 1);
+				PrintToStdErr(context, std::move(errStr));
 			}
 		}
 		else if(replayAction == kActionEcho)

@@ -10,7 +10,7 @@
 bool
 CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	if(context->verbose || context->dryRun)
@@ -45,11 +45,11 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 
 		if(!isSuccessful)
 		{
-			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 			std::string errStr = std::string("error: failed to create file \"") + [[itemURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			context->lastError.set(errStr, (int)[operationError code]);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -59,7 +59,7 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 bool
 CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	if(context->verbose || context->dryRun)
@@ -105,8 +105,7 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 		{
 			int err = errno;
 			std::string errStr = std::string("error: failed to create file \"") + [[itemURL path] UTF8String] + "\". Error: " + strerror(err) + "\n";
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -116,7 +115,7 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 bool
 CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	if(context->verbose || context->dryRun)
@@ -138,11 +137,11 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 
 		if(!isSuccessful)
 		{
-			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 			std::string errStr = std::string("error: failed to create directory \"") + [[itemURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			context->lastError.set(errStr, (int)[operationError code]);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -152,7 +151,7 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 bool
 DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	if(context->verbose || context->dryRun)
@@ -176,11 +175,11 @@ DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 			if(![fileManager fileExistsAtPath:[itemURL path]])
 				return true;
 
-			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 			std::string errStr = std::string("error: failed to delete \"") + [[itemURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			context->lastError.set(errStr, (int)[operationError code]);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}

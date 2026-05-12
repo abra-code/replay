@@ -9,7 +9,7 @@ bool
 GlobFiles(NSString *rootDir, NSArray<NSString*> *globPatterns, NSArray<NSString*> *excludePatterns,
           NSInteger maxResults, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && context->lastError.error != nil)
+	if(context->stopOnError && context->lastError.hasError())
 		return false;
 
 	if(context->verbose || context->dryRun)

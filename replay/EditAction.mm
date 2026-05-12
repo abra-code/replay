@@ -213,7 +213,7 @@ bool
 EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun,
          ReplayContext *context, ActionContext *actionContext)
 {
-	if (context->stopOnError && context->lastError.error != nil)
+	if (context->stopOnError && context->lastError.hasError())
 		return false;
 
 	bool combined_dry_run = context->dryRun || actionDryRun;
@@ -267,8 +267,7 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	{
 		int err = errno;
 		std::string errStr = std::string("error: edit: failed to open \"") + filePath + "\": " + strerror(err) + "\n";
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		context->lastError.set(errStr, err);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
@@ -280,8 +279,7 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	if (fileSize > 0 && !f.read(&content[0], fileSize))
 	{
 		std::string errStr = std::string("error: edit: failed to read \"") + filePath + "\"\n";
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EIO userInfo:userInfo];
+		context->lastError.set(errStr, EIO);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
@@ -297,8 +295,7 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 		if (![oldText isKindOfClass:[NSString class]])
 		{
 			std::string errStr = std::string("error: edit \"") + filePath + "\": \"oldText\" must be a string\n";
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EINVAL userInfo:userInfo];
+			context->lastError.set(errStr, EINVAL);
 			PrintToStdErr(context, std::move(errStr));
 			ActionWithNoOutput(context, actionContext->index);
 			return false;
@@ -322,8 +319,7 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 		if (!apply_one_edit(content, old_str, new_str, limit, use_regex, case_insensitive, &editError))
 		{
 			std::string errStr = std::string("error: edit \"") + filePath + "\": " + [editError UTF8String] + "\n";
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+			context->lastError.set(errStr, 1);
 			PrintToStdErr(context, std::move(errStr));
 			ActionWithNoOutput(context, actionContext->index);
 			return false;
@@ -341,8 +337,7 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	{
 		int err = errno;
 		std::string errStr = std::string("error: edit: failed to create temp file: ") + strerror(err) + "\n";
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		context->lastError.set(errStr, err);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
@@ -357,8 +352,7 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 		int err = errno;
 		::unlink(tmpl.c_str());
 		std::string errStr = std::string("error: edit: failed to write \"") + filePath + "\": " + strerror(err) + "\n";
-		NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @(errStr.c_str()) };
-		context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:err userInfo:userInfo];
+		context->lastError.set(errStr, err);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;

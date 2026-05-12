@@ -126,17 +126,15 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 		BOOL isReachable = [playlistURL checkResourceIsReachableAndReturnError:&operationError];
 		if(!isReachable)
 		{
-			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-
+			context->lastError.set(std::string("error: playlist file \"") + [[playlistURL path] UTF8String] + "\" cannot be opened: " + ([errorDesc UTF8String] ?: "unknown"), (int)[operationError code]);
 			fprintf(gLogErr, "error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
 		}
 		else
 		{
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unkown or invalid playlist type" };
-			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+			context->lastError.set("error: unknown or invalid playlist type", 1);
 			fprintf(gLogErr, "error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key specified, the root container is expected to be a dictionary\n");
 		}
 	}
@@ -211,17 +209,15 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 		BOOL isReachable = [playlistURL checkResourceIsReachableAndReturnError:&operationError];
 		if(!isReachable)
 		{
-			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-
+			context->lastError.set(std::string("error: playlist file \"") + [[playlistURL path] UTF8String] + "\" cannot be opened: " + ([errorDesc UTF8String] ?: "unknown"), (int)[operationError code]);
 			fprintf(gLogErr, "error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
 		}
 		else
 		{
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Unkown or invalid playlist type" };
-			context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+			context->lastError.set("error: unknown or invalid playlist type", 1);
 			fprintf(gLogErr, "error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key not specified, the root container is expected to be an array.\n");
 		}
 	}
@@ -696,7 +692,6 @@ int main(int argc, const char * argv[])
 {
 	ReplayContext context;
 	context.environment = [[NSProcessInfo processInfo] environment];
-	context.lastError = [AtomicError new];
 	context.fileTreeRoot = NULL;
 	context.outputSerializer = &OutputSerializer::shared();
 	context.queue = nil;
@@ -859,7 +854,7 @@ int main(int argc, const char * argv[])
 	if(context.batchName != nil)
 	{
 		StartServerAndRunLoop(&context);
-		safe_exit((context.lastError.error != nil) ? EXIT_FAILURE : EXIT_SUCCESS);
+		safe_exit(context.lastError.hasError() ? EXIT_FAILURE : EXIT_SUCCESS);
 	}
 
 	const char *playlistPath = NULL;
@@ -910,7 +905,7 @@ int main(int argc, const char * argv[])
 	// It looks like a lot of unnecessary Obj-C memory cleanup is happening at exit
 	// and takes long time so skip it and just terminate the app now
 
-	if(context.lastError.error != nil)
+	if(context.lastError.hasError())
 		safe_exit(EXIT_FAILURE);
 
 	safe_exit(EXIT_SUCCESS);

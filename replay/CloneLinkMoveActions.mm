@@ -6,7 +6,7 @@
 bool
 CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	if(context->verbose || context->dryRun)
@@ -39,11 +39,11 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 
 		if(!isSuccessful)
 		{
-			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 			std::string errStr = std::string("error: failed to clone from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			context->lastError.set(errStr, (int)[operationError code]);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -53,7 +53,7 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 bool
 MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	if(context->verbose || context->dryRun)
@@ -86,11 +86,11 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *ac
 
 		if(!isSuccessful)
 		{
-			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 			std::string errStr = std::string("error: failed to move from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			context->lastError.set(errStr, (int)[operationError code]);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -100,7 +100,7 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *ac
 bool
 HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	if(context->verbose || context->dryRun)
@@ -133,11 +133,11 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext
 
 		if(!isSuccessful)
 		{
-			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 			std::string errStr = std::string("error: failed to create a hardlink from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			context->lastError.set(errStr, (int)[operationError code]);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -147,7 +147,7 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext
 bool
 SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.error != nil))
+	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
 	NSNumber *validateSource = actionContext->settings[@"validate"];
@@ -176,8 +176,6 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 
 		if(validateSymlinkSource && ![fileManager fileExistsAtPath:[fromURL path]])
 		{
-			NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Strict validation: attempt to create a symlink to nonexistent item" };
-			operationError = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
 			isSuccessful = false;
 			force = false;
 		}
@@ -199,11 +197,11 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 
 		if(!isSuccessful)
 		{
-			context->lastError.error = operationError;
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 			std::string errStr = std::string("error: failed to create a symlink at \"") + [[linkURL path] UTF8String] + "\" referring to \"" + [[fromURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			context->lastError.set(errStr, operationError ? (int)[operationError code] : 1);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}

@@ -63,8 +63,7 @@ StreamActionsFromStdIn(ReplayContext *context)
 			if(context->stopOnError)
 			{
 				fprintf(gLogErr, "error: malformed action description on stdin: %s\n", line);
-				NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Malformed action description on stdin" };
-				context->lastError.error = [NSError errorWithDomain:NSPOSIXErrorDomain code:1 userInfo:userInfo];
+				context->lastError.set("error: malformed action description on stdin", 1);
 				break;
 			}
 			else
