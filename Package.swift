@@ -14,6 +14,22 @@ let package = Package(
         // MARK: - Internal Libraries
 
         .target(
+            name: "Yyjson",
+            path: "yyjson",
+            sources: ["src"],
+            publicHeadersPath: "src"
+        ),
+
+        .target(
+            name: "YyjsonCpp",
+            dependencies: ["Yyjson"],
+            path: "yyjson-cpp",
+            cxxSettings: [
+                .unsafeFlags(["-std=c++20"]),
+            ]
+        ),
+
+        .target(
             name: "GlobCpp",
             path: "glob-cpp"
         ),
@@ -44,7 +60,7 @@ let package = Package(
 
         .target(
             name: "Sandbox",
-            dependencies: ["Common", "FileHelpers"],
+            dependencies: ["Common", "FileHelpers", "Yyjson", "YyjsonCpp"],
             path: "sandbox",
             cxxSettings: [
                 .unsafeFlags(["-std=c++20"]),

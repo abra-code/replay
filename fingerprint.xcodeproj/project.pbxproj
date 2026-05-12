@@ -169,6 +169,16 @@
 			path = "file-helpers";
 			sourceTree = "<group>";
 		};
+		1DDC258D2FB2F7FD004B4724 /* src */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = src;
+			sourceTree = "<group>";
+		};
+		1DDC25902FB2F9DB004B4724 /* yyjson-cpp */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "yyjson-cpp";
+			sourceTree = "<group>";
+		};
 		1DDD17142F7A0D6000DB718A /* gate */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = gate;
@@ -251,6 +261,8 @@
 				1DDD17142F7A0D6000DB718A /* gate */,
 				1DDD179B2F7B47F400DB718A /* glob-overlap */,
 				1DDC250E2FAD6437004B4724 /* sandbox */,
+				1DDC258A2FB2F7D0004B4724 /* yyjson */,
+				1DDC25902FB2F9DB004B4724 /* yyjson-cpp */,
 				1DFF72532ECF2BF100860A62 /* Frameworks */,
 				1DEA53F62ED46C4500554E45 /* xcconfigs */,
 				1D7ED29F2E9648EB003BA8A7 /* Products */,
@@ -266,6 +278,14 @@
 				1DDD170E2F7A0CAC00DB718A /* gate */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		1DDC258A2FB2F7D0004B4724 /* yyjson */ = {
+			isa = PBXGroup;
+			children = (
+				1DDC258D2FB2F7FD004B4724 /* src */,
+			);
+			path = yyjson;
 			sourceTree = "<group>";
 		};
 		1DEA53F62ED46C4500554E45 /* xcconfigs */ = {
@@ -355,6 +375,8 @@
 				1DB17C212F7E4A6200E67624 /* common */,
 				1DDC250E2FAD6437004B4724 /* sandbox */,
 				1DDC25792FB05A75004B4724 /* file-helpers */,
+				1DDC258D2FB2F7FD004B4724 /* src */,
+				1DDC25902FB2F9DB004B4724 /* yyjson-cpp */,
 				1DDD17142F7A0D6000DB718A /* gate */,
 				1DDD179B2F7B47F400DB718A /* glob-overlap */,
 			);

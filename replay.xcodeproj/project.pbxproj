@@ -68,6 +68,8 @@
 		1DB17ACC2F7E002F00E67624 /* replay-server */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "replay-server"; sourceTree = "<group>"; };
 		1DDC25132FAD644F004B4724 /* sandbox */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = sandbox; sourceTree = "<group>"; };
 		1DDC257B2FB05AA1004B4724 /* file-helpers */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "file-helpers"; sourceTree = "<group>"; };
+		1DDC25882FB2F759004B4724 /* src */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = src; sourceTree = "<group>"; };
+		1DDC258F2FB2F9C5004B4724 /* yyjson-cpp */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "yyjson-cpp"; sourceTree = "<group>"; };
 		1DDD17A62F7B4E7800DB718A /* glob-overlap */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1C8FF2F7C3DF5000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "glob-overlap"; sourceTree = "<group>"; };
 		1DDD17AF2F7B4EBA00DB718A /* glob-cpp */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "glob-cpp"; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -98,6 +100,8 @@
 				1DDD17AF2F7B4EBA00DB718A /* glob-cpp */,
 				1DDD17A62F7B4E7800DB718A /* glob-overlap */,
 				1DDC25132FAD644F004B4724 /* sandbox */,
+				1DDC25802FB2F61D004B4724 /* yyjson */,
+				1DDC258F2FB2F9C5004B4724 /* yyjson-cpp */,
 				1DA1151F25B5A35700C0C6A5 /* xcconfigs */,
 				1D19043524DE9EE900276D83 /* Products */,
 			);
@@ -121,6 +125,14 @@
 			);
 			path = xcconfigs;
 			sourceTree = "<group>";
+		};
+		1DDC25802FB2F61D004B4724 /* yyjson */ = {
+			isa = PBXGroup;
+			children = (
+				1DDC25882FB2F759004B4724 /* src */,
+			);
+			path = yyjson;
+			sourceTree = SOURCE_ROOT;
 		};
 /* End PBXGroup section */
 
@@ -147,6 +159,8 @@
 				1DB17ACC2F7E002F00E67624 /* replay-server */,
 				1DDC25132FAD644F004B4724 /* sandbox */,
 				1DDC257B2FB05AA1004B4724 /* file-helpers */,
+				1DDC25882FB2F759004B4724 /* src */,
+				1DDC258F2FB2F9C5004B4724 /* yyjson-cpp */,
 				1DDD17A62F7B4E7800DB718A /* glob-overlap */,
 				1DDD17AF2F7B4EBA00DB718A /* glob-cpp */,
 			);

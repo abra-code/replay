@@ -5,3 +5,6 @@ build/**
 xcconfigs/ReplayDistribution.xcconfig
 private
 .build
+yyjson/test
+yyjson/doc
+yyjson/misc

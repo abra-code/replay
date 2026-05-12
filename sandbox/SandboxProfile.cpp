@@ -1,15 +1,13 @@
 //
-//  SandboxProfile.mm
+//  SandboxProfile.cpp
 //
 //  Implementation of the sandbox module declared in SandboxProfile.h.
-//  Obj-C++ to use NSJSONSerialization for parsing the JSON spec; the
-//  rest of the file is plain C++.
+//  Pure C++; uses Json wrappers instead of NSJSONSerialization.
 //
-
-#import <Foundation/Foundation.h>
 
 #include "SandboxProfile.h"
 #include "FileHelpers.h"
+#include "yyjson.hpp"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,64 +108,6 @@ std::vector<std::string> DeduplicatePaths(const std::vector<std::string>& paths)
     return result;
 }
 
-// Convert NSString to std::string without going through .UTF8String when
-// the string contains a NUL byte (it shouldn't for paths but be defensive).
-std::string NSStringToStd(NSString *ns)
-{
-    if (ns == nil)
-        return std::string();
-    NSData *data = [ns dataUsingEncoding:NSUTF8StringEncoding];
-    return std::string((const char *)data.bytes, data.length);
-}
-
-// Pull a string-array field from an NSDictionary into a std::vector. Any
-// non-string element is rejected with a diagnostic.
-bool ReadStringArray(NSDictionary *dict, NSString *key,
-                     std::vector<std::string>& out, const std::string& path_for_errors)
-{
-    id value = dict[key];
-    if (value == nil)
-        return true;  // optional field
-    if (![value isKindOfClass:[NSArray class]])
-    {
-        fprintf(stderr, "error: sandbox profile %s: \"%s\" must be an array of strings\n",
-                path_for_errors.c_str(), key.UTF8String);
-        return false;
-    }
-    for (id element in (NSArray *)value)
-    {
-        if (![element isKindOfClass:[NSString class]])
-        {
-            fprintf(stderr, "error: sandbox profile %s: \"%s\" contains non-string element\n",
-                    path_for_errors.c_str(), key.UTF8String);
-            return false;
-        }
-        out.push_back(NSStringToStd((NSString *)element));
-    }
-    return true;
-}
-
-// Pull a bool field with a default. Accepts JSON bool only — numeric 0/1
-// would be ambiguous and we'd rather force the user to be explicit.
-bool ReadBool(NSDictionary *dict, NSString *key, bool default_value, bool& out,
-              const std::string& path_for_errors)
-{
-    id value = dict[key];
-    if (value == nil)
-    {
-        out = default_value;
-        return true;
-    }
-    if (![value isKindOfClass:[NSNumber class]])
-    {
-        fprintf(stderr, "error: sandbox profile %s: \"%s\" must be a boolean\n",
-                path_for_errors.c_str(), key.UTF8String);
-        return false;
-    }
-    out = [(NSNumber *)value boolValue];
-    return true;
-}
-
 // Add allow-read entries for paths that every sandboxed process needs at
 // startup: LaunchServices quarantine-resolver prefs (otherwise the kernel
 // violation rate-limiter fills up before action-level denials are logged)
@@ -199,51 +139,91 @@ void AddSystemAutoAllows(Config& cfg)
     }
 }
 
+// Read a bool field from a JSON object node, with a default value.
+// Accepts JSON bool only — numeric 0/1 would be ambiguous.
+bool ReadBool(Json::Val obj, std::string_view key,
+              bool default_value, bool& out,
+              const std::string& path_for_errors)
+{
+    Json::Val v = obj.obj_get(key);
+    if (!v.valid())
+    {
+        out = default_value;
+        return true;
+    }
+    auto b = v.get_bool();
+    if (!b.has_value())
+    {
+        fprintf(stderr, "error: sandbox profile %s: \"%.*s\" must be a boolean\n",
+                path_for_errors.c_str(), (int)key.size(), key.data());
+        return false;
+    }
+    out = *b;
+    return true;
+}
+
+// Pull a string-array field from a JSON object node into a std::vector.
+// Any non-string element is rejected with a diagnostic.
+bool ReadStringArray(Json::Val obj, std::string_view key,
+                     std::vector<std::string>& out,
+                     const std::string& path_for_errors)
+{
+    Json::Val v = obj.obj_get(key);
+    if (!v.valid())
+        return true;  // optional field
+    if (!v.is_arr())
+    {
+        fprintf(stderr, "error: sandbox profile %s: \"%.*s\" must be an array of strings\n",
+                path_for_errors.c_str(), (int)key.size(), key.data());
+        return false;
+    }
+    size_t n = v.arr_size();
+    for (size_t i = 0; i < n; ++i)
+    {
+        auto s = v.arr_get(i).get_str();
+        if (!s.has_value())
+        {
+            fprintf(stderr, "error: sandbox profile %s: \"%.*s\" contains non-string element\n",
+                    path_for_errors.c_str(), (int)key.size(), key.data());
+            return false;
+        }
+        out.emplace_back(*s);
+    }
+    return true;
+}
+
 }  // namespace
 
 
 bool LoadConfigFromJsonFile(const std::string& path, Config& out)
 {
-    NSError *error = nil;
-    NSString *nsPath = [NSString stringWithUTF8String:path.c_str()];
-    NSData *data = [NSData dataWithContentsOfFile:nsPath
-                                           options:0
-                                             error:&error];
-    if (data == nil)
+    yyjson_read_err err{};
+    Json::Document doc = Json::parse_file(path.c_str(), YYJSON_READ_NOFLAG, &err);
+    if (!doc.valid())
     {
-        fprintf(stderr, "error: cannot read sandbox profile \"%s\": %s\n",
-                path.c_str(),
-                error.localizedDescription.UTF8String ?: "unknown");
+        fprintf(stderr, "error: cannot parse sandbox profile \"%s\": %s\n",
+                path.c_str(), err.msg != nullptr ? err.msg : "unknown error");
         return false;
     }
 
-    id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-    if (parsed == nil)
-    {
-        fprintf(stderr, "error: sandbox profile \"%s\" is not valid JSON: %s\n",
-                path.c_str(),
-                error.localizedDescription.UTF8String ?: "unknown");
-        return false;
-    }
-    if (![parsed isKindOfClass:[NSDictionary class]])
+    Json::Val root = doc.root();
+    if (!root.is_obj())
     {
         fprintf(stderr, "error: sandbox profile \"%s\" root must be a JSON object\n",
                 path.c_str());
         return false;
     }
 
-    NSDictionary *root = (NSDictionary *)parsed;
-
     Config cfg;  // build into a temporary so partial failures don't pollute `out`
 
-    if (!ReadBool(root, @"import_baseline", true, cfg.import_baseline, path)) return false;
-    if (!ReadBool(root, @"allow_network",   true,  cfg.allow_network,   path)) return false;
-    if (!ReadBool(root, @"allow_exec",      true, cfg.allow_exec,      path)) return false;
-    if (!ReadBool(root, @"allow_fork",      true, cfg.allow_fork,      path)) return false;
+    if (!ReadBool(root, "import_baseline", true,  cfg.import_baseline, path)) return false;
+    if (!ReadBool(root, "allow_network",   true,  cfg.allow_network,   path)) return false;
+    if (!ReadBool(root, "allow_exec",      true,  cfg.allow_exec,      path)) return false;
+    if (!ReadBool(root, "allow_fork",      true,  cfg.allow_fork,      path)) return false;
 
-    if (!ReadStringArray(root, @"read_only",   cfg.read_only,   path)) return false;
-    if (!ReadStringArray(root, @"read_write",  cfg.read_write,  path)) return false;
-    if (!ReadStringArray(root, @"extra_rules", cfg.extra_rules, path)) return false;
+    if (!ReadStringArray(root, "read_only",   cfg.read_only,   path)) return false;
+    if (!ReadStringArray(root, "read_write",  cfg.read_write,  path)) return false;
+    if (!ReadStringArray(root, "extra_rules", cfg.extra_rules, path)) return false;
 
     // Move into out so callers can pre-populate fields before calling — we
     // overwrite with parsed values and the caller can then append more.
