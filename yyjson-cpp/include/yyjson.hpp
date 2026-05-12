@@ -255,4 +255,107 @@ inline size_t Val::obj_size() const noexcept
     return yyjson_obj_size(val_);
 }
 
+// ---------------------------------------------------------------------------
+// MutableVal — non-owning handle to a mutable yyjson node (owned by MutableDoc).
+// ---------------------------------------------------------------------------
+
+class MutableVal {
+public:
+    MutableVal() noexcept : val_(nullptr) {}
+    explicit MutableVal(yyjson_mut_val *v) noexcept : val_(v) {}
+    bool valid()   const noexcept { return val_ != nullptr; }
+    explicit operator bool() const noexcept { return val_ != nullptr; }
+    yyjson_mut_val *raw() const noexcept { return val_; }
+private:
+    yyjson_mut_val *val_;
+};
+
+// ---------------------------------------------------------------------------
+// MutableDoc — RAII owner of a mutable yyjson document (JSON builder).
+//
+// All Val objects produced by a MutableDoc are owned by that document's
+// internal allocator and must not outlive it.
+// ---------------------------------------------------------------------------
+
+class MutableDoc {
+public:
+    MutableDoc() noexcept : doc_(yyjson_mut_doc_new(nullptr)) {}
+    ~MutableDoc() noexcept { if (doc_ != nullptr) yyjson_mut_doc_free(doc_); }
+
+    MutableDoc(const MutableDoc &) = delete;
+    MutableDoc &operator=(const MutableDoc &) = delete;
+    MutableDoc(MutableDoc &&o) noexcept : doc_(o.doc_) { o.doc_ = nullptr; }
+    MutableDoc &operator=(MutableDoc &&o) noexcept
+    {
+        if (this != &o)
+        {
+            if (doc_ != nullptr) yyjson_mut_doc_free(doc_);
+            doc_ = o.doc_;
+            o.doc_ = nullptr;
+        }
+        return *this;
+    }
+
+    bool valid() const noexcept { return doc_ != nullptr; }
+
+    // Scalar constructors — memory owned by this document.
+    MutableVal new_null()           noexcept { return MutableVal{yyjson_mut_null(doc_)}; }
+    MutableVal new_bool(bool v)     noexcept { return MutableVal{yyjson_mut_bool(doc_, v)}; }
+    MutableVal new_sint(int64_t v)  noexcept { return MutableVal{yyjson_mut_sint(doc_, v)}; }
+    MutableVal new_uint(uint64_t v) noexcept { return MutableVal{yyjson_mut_uint(doc_, v)}; }
+    MutableVal new_real(double v)   noexcept { return MutableVal{yyjson_mut_real(doc_, v)}; }
+    MutableVal new_obj()            noexcept { return MutableVal{yyjson_mut_obj(doc_)}; }
+    MutableVal new_arr()            noexcept { return MutableVal{yyjson_mut_arr(doc_)}; }
+
+    // Copies sv into the document allocator — safe for temporaries and string_views.
+    MutableVal new_str(std::string_view sv) noexcept
+    {
+        return MutableVal{yyjson_mut_strncpy(doc_, sv.data(), sv.size())};
+    }
+
+    // Embeds raw JSON verbatim without parsing or escaping.
+    // Copies sv so the caller's string need not outlive this document.
+    // Useful for preserving JSON-RPC ids (numbers, strings, null) as-is.
+    MutableVal new_raw(std::string_view sv) noexcept
+    {
+        return MutableVal{yyjson_mut_rawncpy(doc_, sv.data(), sv.size())};
+    }
+
+    // Add key->val pair to an object.  The key string is copied.
+    bool obj_add(MutableVal obj, std::string_view key, MutableVal val) noexcept
+    {
+        MutableVal k = new_str(key);
+        if (!k.valid() || !val.valid()) return false;
+        return yyjson_mut_obj_add(obj.raw(), k.raw(), val.raw());
+    }
+
+    // Append val to an array.
+    bool arr_append(MutableVal arr, MutableVal val) noexcept
+    {
+        if (!arr.valid() || !val.valid()) return false;
+        return yyjson_mut_arr_append(arr.raw(), val.raw());
+    }
+
+    void set_root(MutableVal val) noexcept
+    {
+        yyjson_mut_doc_set_root(doc_, val.raw());
+    }
+
+    // Serialize to std::string (compact by default). Returns empty on error.
+    std::string to_string(yyjson_write_flag flags = YYJSON_WRITE_NOFLAG) const noexcept
+    {
+        size_t len = 0;
+        char *json = yyjson_mut_write(doc_, flags, &len);
+        if (json == nullptr) return {};
+        std::string result(json, len);
+        free(json);
+        return result;
+    }
+
+    yyjson_mut_doc *raw_doc() const noexcept { return doc_; }
+
+private:
+    yyjson_mut_doc *doc_;
+};
+
 } // namespace Json
