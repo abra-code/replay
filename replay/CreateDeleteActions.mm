@@ -10,8 +10,35 @@
 bool
 CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.hasError()))
+	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 		return false;
+
+	if(context->mcpServer)
+	{
+		NSError *operationError = nil;
+		bool isSuccessful = [content writeToURL:itemURL atomically:NO
+		                               encoding:NSUTF8StringEncoding error:&operationError];
+		if(!isSuccessful && context->force)
+		{
+			NSFileManager *fm = [NSFileManager defaultManager];
+			[fm removeItemAtURL:itemURL error:nil];
+			NSURL *parentDirURL = [itemURL URLByDeletingLastPathComponent];
+			[fm createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
+			isSuccessful = [content writeToURL:itemURL atomically:NO
+			                          encoding:NSUTF8StringEncoding error:&operationError];
+		}
+		if(!isSuccessful)
+		{
+			NSString *errorDesc = [operationError localizedDescription];
+			if(errorDesc == nil) errorDesc = [operationError localizedFailureReason];
+			std::string errStr = std::string("failed to create file \"") + [[itemURL path] UTF8String] + "\": " + ([errorDesc UTF8String] ?: "unknown");
+			PrintMCPError(context, actionContext, -32603, std::move(errStr));
+			return false;
+		}
+		PrintMCPTextResult(context, actionContext,
+		                   std::string("Successfully wrote ") + [[itemURL path] UTF8String]);
+		return true;
+	}
 
 	if(context->verbose || context->dryRun)
 	{
@@ -115,8 +142,27 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 bool
 CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.hasError()))
+	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 		return false;
+
+	if(context->mcpServer)
+	{
+		NSFileManager *fm = [NSFileManager defaultManager];
+		NSError *operationError = nil;
+		bool isSuccessful = [fm createDirectoryAtURL:itemURL withIntermediateDirectories:YES
+		                                  attributes:nil error:&operationError];
+		if(!isSuccessful)
+		{
+			NSString *errorDesc = [operationError localizedDescription];
+			if(errorDesc == nil) errorDesc = [operationError localizedFailureReason];
+			std::string errStr = std::string("failed to create directory \"") + [[itemURL path] UTF8String] + "\": " + ([errorDesc UTF8String] ?: "unknown");
+			PrintMCPError(context, actionContext, -32603, std::move(errStr));
+			return false;
+		}
+		PrintMCPTextResult(context, actionContext,
+		                   std::string("Created directory ") + [[itemURL path] UTF8String]);
+		return true;
+	}
 
 	if(context->verbose || context->dryRun)
 	{
@@ -151,8 +197,32 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 bool
 DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.hasError()))
+	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 		return false;
+
+	if(context->mcpServer)
+	{
+		NSFileManager *fm = [NSFileManager defaultManager];
+		NSError *operationError = nil;
+		bool isSuccessful = (bool)[fm removeItemAtURL:itemURL error:&operationError];
+		if(!isSuccessful)
+		{
+			if(![fm fileExistsAtPath:[itemURL path]])
+			{
+				PrintMCPTextResult(context, actionContext,
+				                   std::string("Deleted ") + [[itemURL path] UTF8String]);
+				return true;
+			}
+			NSString *errorDesc = [operationError localizedDescription];
+			if(errorDesc == nil) errorDesc = [operationError localizedFailureReason];
+			std::string errStr = std::string("failed to delete \"") + [[itemURL path] UTF8String] + "\": " + ([errorDesc UTF8String] ?: "unknown");
+			PrintMCPError(context, actionContext, -32603, std::move(errStr));
+			return false;
+		}
+		PrintMCPTextResult(context, actionContext,
+		                   std::string("Deleted ") + [[itemURL path] UTF8String]);
+		return true;
+	}
 
 	if(context->verbose || context->dryRun)
 	{

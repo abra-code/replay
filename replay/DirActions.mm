@@ -7,8 +7,29 @@
 bool
 ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.hasError()))
+	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 		return false;
+
+	if(context->mcpServer)
+	{
+		std::vector<DirEntry> entries;
+		if(!list_directory(dirPath, entries))
+		{
+			int err = errno;
+			std::string errStr = std::string("failed to list \"") + dirPath + "\": " + strerror(err);
+			PrintMCPError(context, actionContext, -32603, std::move(errStr));
+			return false;
+		}
+		std::string text;
+		for(const auto &e : entries)
+		{
+			text += e.isDirectory ? "[DIR]  " : "[FILE] ";
+			text += e.name;
+			text += "\n";
+		}
+		PrintMCPTextResult(context, actionContext, std::move(text));
+		return true;
+	}
 
 	if(context->verbose || context->dryRun)
 	{
@@ -68,8 +89,28 @@ static id TreeNodeToObject(const TreeNode &node)
 bool
 DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.hasError()))
+	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 		return false;
+
+	if(context->mcpServer)
+	{
+		TreeNode root;
+		if(!build_directory_tree(dirPath, root, (int)maxDepth))
+		{
+			int err = errno;
+			std::string errStr = std::string("failed to read directory \"") + dirPath + "\": " + strerror(err);
+			PrintMCPError(context, actionContext, -32603, std::move(errStr));
+			return false;
+		}
+		NSError *jsonError = nil;
+		NSData *jsonData = [NSJSONSerialization dataWithJSONObject:TreeNodeToObject(root)
+		                                                   options:0
+		                                                     error:&jsonError];
+		const char *jsonBytes = jsonData ? (const char *)[jsonData bytes] : "{}";
+		size_t jsonLen = jsonData ? (size_t)[jsonData length] : 2;
+		PrintMCPTextResult(context, actionContext, std::string(jsonBytes, jsonLen));
+		return true;
+	}
 
 	if(context->verbose || context->dryRun)
 	{

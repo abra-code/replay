@@ -38,8 +38,42 @@ static void format_iso8601(time_t t, char out[21])
 bool
 GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && context->lastError.hasError())
+	if(!context->mcpServer && context->stopOnError && context->lastError.hasError())
 		return false;
+
+	if(context->mcpServer)
+	{
+		struct stat st;
+		if(lstat(path, &st) != 0)
+		{
+			int err = errno;
+			std::string errStr = std::string("failed to stat \"") + path + "\": " + strerror(err);
+			PrintMCPError(context, actionContext, -32002, std::move(errStr));
+			return false;
+		}
+		char perms[11];
+		format_permissions(st.st_mode, perms);
+		char created[21], modified[21];
+		time_t birthtime = st.st_birthtimespec.tv_sec;
+		if(birthtime == 0) birthtime = st.st_ctimespec.tv_sec;
+		format_iso8601(birthtime, created);
+		format_iso8601(st.st_mtimespec.tv_sec, modified);
+		const char *typeStr;
+		if      (S_ISREG(st.st_mode))  typeStr = "file";
+		else if (S_ISDIR(st.st_mode))  typeStr = "directory";
+		else if (S_ISLNK(st.st_mode))  typeStr = "symlink";
+		else                            typeStr = "other";
+		std::string output;
+		output += "path: ";          output += path;
+		output += "\ntype: ";        output += typeStr;
+		output += "\nsize: ";        output += std::to_string((long long)st.st_size);
+		output += "\ncreated: ";     output += created;
+		output += "\nmodified: ";    output += modified;
+		output += "\npermissions: "; output += perms;
+		output += "\n";
+		PrintMCPTextResult(context, actionContext, std::move(output));
+		return true;
+	}
 
 	if(context->verbose || context->dryRun)
 	{

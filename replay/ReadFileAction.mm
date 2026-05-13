@@ -32,8 +32,44 @@ static bool is_utf8_text(const uint8_t *data, size_t len)
 bool
 ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionContext)
 {
-	if (context->stopOnError && context->lastError.hasError())
+	if (!context->mcpServer && context->stopOnError && context->lastError.hasError())
 		return false;
+
+	if (context->mcpServer)
+	{
+		std::ifstream f(filePath, std::ios::binary | std::ios::ate);
+		if (!f.is_open())
+		{
+			int err = errno;
+			std::string errStr = std::string("failed to open \"") + filePath + "\" for reading: " + strerror(err);
+			PrintMCPError(context, actionContext, -32002, std::move(errStr));
+			return false;
+		}
+		std::streamoff fileSize = f.tellg();
+		f.seekg(0, std::ios::beg);
+		std::vector<uint8_t> data(static_cast<size_t>(fileSize));
+		if (fileSize > 0 && !f.read(reinterpret_cast<char *>(data.data()), fileSize))
+		{
+			std::string errStr = std::string("failed to read \"") + filePath + "\"";
+			PrintMCPError(context, actionContext, -32002, std::move(errStr));
+			return false;
+		}
+		if (is_utf8_text(data.data(), data.size()))
+		{
+			std::string text(reinterpret_cast<const char *>(data.data()), data.size());
+			PrintMCPTextResult(context, actionContext, std::move(text));
+		}
+		else
+		{
+			unsigned long encodedSize = CalculateEncodedBufferSize((unsigned long)data.size());
+			std::vector<unsigned char> encoded(encodedSize + 1, 0);
+			unsigned long written = EncodeBase64(data.data(), (unsigned long)data.size(),
+			                                     encoded.data(), encodedSize);
+			std::string b64(reinterpret_cast<const char *>(encoded.data()), written);
+			PrintMCPBlobResult(context, actionContext, std::move(b64), "application/octet-stream");
+		}
+		return true;
+	}
 
 	if (context->verbose || context->dryRun)
 	{

@@ -21,6 +21,10 @@
 #include "replay_version.h"
 #include "SandboxProfile.h"
 #import "PlaylistSandboxPaths.h"
+#include "FileHelpers.h"
+#include "MCPServer.h"
+
+#include <limits.h>
 
 
 #if DEBUG
@@ -234,6 +238,7 @@ enum
 	kOptAllowRead,
 	kOptAllowWrite,
 	kOptDenyNetwork,
+	kOptMCPServer,
 };
 
 static struct option sLongOptions[] =
@@ -255,6 +260,7 @@ static struct option sLongOptions[] =
 	{"allow-read",			required_argument,	NULL, kOptAllowRead},
 	{"allow-write",			required_argument,	NULL, kOptAllowWrite},
 	{"deny-network",		no_argument,			NULL, kOptDenyNetwork},
+	{"mcp-server",			no_argument,			NULL, kOptMCPServer},
 	{"version",				no_argument,		NULL, 'V'},
 	{"help",				no_argument,		NULL, 'h'},
 	{NULL, 					0,					NULL,  0 }
@@ -315,6 +321,14 @@ DisplayHelp(void)
 		"  --allow-read PATH    Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.\n"
 		"  --allow-write PATH   Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.\n"
 		"  --deny-network       With sandbox active, deny outbound network (allowed by default).\n"
+		"  --mcp-server             Start an MCP (Model Context Protocol) stdio server.\n"
+		"                     Use --allow-read PATH for read-only dirs and --allow-write PATH for\n"
+		"                     read-write dirs (repeatable). Both flags imply --sandbox.\n"
+		"                     Implements the standard MCP filesystem tool set plus extended tools:\n"
+		"                     read_file, read_multiple_files, write_file, edit_file (with regex),\n"
+		"                     create_directory, list_directory, directory_tree, move_file,\n"
+		"                     delete_file, search_files, get_file_info,\n"
+		"                     list_allowed_directories, glob_search.\n"
 		"  -V, --version      Display version.\n"
 		"  -h, --help         Display this help.\n"
 		"\n"
@@ -706,6 +720,7 @@ int main(int argc, const char * argv[])
 	context.stopOnError = false;
 	context.force = false;
 	context.orderedOutput = false;
+	context.mcpServer = false;
 
 	NSMutableArray *playlistKeys = [NSMutableArray new];
 
@@ -714,6 +729,7 @@ int main(int argc, const char * argv[])
 	std::vector<std::string> sandboxAllowRead;
 	std::vector<std::string> sandboxAllowWrite;
 	bool sandboxDenyNetwork = false;
+	bool mcpServerMode = false;
 
 	while(true)
 	{
@@ -812,6 +828,10 @@ int main(int argc, const char * argv[])
 				sandboxDenyNetwork = true;
 			break;
 
+			case kOptMCPServer:
+				mcpServerMode = true;
+			break;
+
 			case 'V':
 				printf( "replay %s\n", STRINGIFY_VALUE(REPLAY_VERSION) );
 				return EXIT_SUCCESS;
@@ -848,6 +868,29 @@ int main(int argc, const char * argv[])
 	{
 		if(!sandbox::InitializeSandbox(sandboxProfilePath, sandboxAllowRead, sandboxAllowWrite, !sandboxDenyNetwork, context.verbose))
 			safe_exit(EXIT_FAILURE);
+	}
+
+	// --mcp-server: start MCP stdio server.
+	// Allowed dirs come exclusively from --allow-read / --allow-write (both imply --sandbox).
+	if(mcpServerMode)
+	{
+		MCPServerOptions mcpOpts;
+
+		for (const auto &p : sandboxAllowRead)
+        {
+            std::string resolved_path = file_helpers::resolve_literal_path(p);
+			mcpOpts.allowedDirs.push_back({resolved_path, false});
+        }
+        
+        for (const auto &p : sandboxAllowWrite)
+        {
+            std::string resolved_path = file_helpers::resolve_literal_path(p);
+			mcpOpts.allowedDirs.push_back({resolved_path, true});
+        }
+        
+		context.mcpServer = true;
+		int ret = RunMCPServer(&context, mcpOpts);
+		safe_exit(ret);
 	}
 
 	// when executed with --start-server BATCH_NAME option start server and wait for messages in runloop

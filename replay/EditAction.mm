@@ -213,8 +213,106 @@ bool
 EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun,
          ReplayContext *context, ActionContext *actionContext)
 {
-	if (context->stopOnError && context->lastError.hasError())
+	if (!context->mcpServer && context->stopOnError && context->lastError.hasError())
 		return false;
+
+	if (context->mcpServer)
+	{
+		if (actionDryRun)
+		{
+			std::string plan = std::string("Dry-run edit plan for ") + filePath + ":\n";
+			for (NSDictionary *edit in edits)
+			{
+				NSString *old = edit[@"oldText"] ?: @"";
+				NSString *neu = edit[@"newText"] ?: @"";
+				id limitVal = edit[@"limit"];
+				NSInteger lim = [limitVal isKindOfClass:[NSNumber class]] ? [limitVal integerValue] : 1;
+				id regexVal = edit[@"regex"];
+				bool useRegex = [regexVal isKindOfClass:[NSNumber class]] ? [regexVal boolValue] : false;
+				plan += "  oldText: "; plan += [old UTF8String]; plan += "\n";
+				plan += "  newText: "; plan += [neu UTF8String]; plan += "\n";
+				plan += "  limit: "; plan += std::to_string((long)lim); plan += "\n";
+				if (useRegex) plan += "  regex: true\n";
+				plan += "\n";
+			}
+			PrintMCPTextResult(context, actionContext, std::move(plan));
+			return true;
+		}
+
+		std::ifstream f(filePath, std::ios::binary | std::ios::ate);
+		if (!f.is_open())
+		{
+			int err = errno;
+			std::string errStr = std::string("failed to open \"") + filePath + "\": " + strerror(err);
+			PrintMCPError(context, actionContext, -32002, std::move(errStr));
+			return false;
+		}
+		std::streamoff fileSize = f.tellg();
+		f.seekg(0, std::ios::beg);
+		std::string content((size_t)fileSize, '\0');
+		if (fileSize > 0 && !f.read(&content[0], fileSize))
+		{
+			std::string errStr = std::string("failed to read \"") + filePath + "\"";
+			PrintMCPError(context, actionContext, -32002, std::move(errStr));
+			return false;
+		}
+		f.close();
+
+		for (NSDictionary *edit in edits)
+		{
+			NSString *oldText = edit[@"oldText"];
+			NSString *newText = edit[@"newText"];
+			if (![oldText isKindOfClass:[NSString class]])
+			{
+				PrintMCPError(context, actionContext, -32602, "edit: \"oldText\" must be a string");
+				return false;
+			}
+			if (![newText isKindOfClass:[NSString class]]) newText = @"";
+
+			std::string old_str([oldText UTF8String]);
+			std::string new_str([newText UTF8String]);
+			id limitVal = edit[@"limit"];
+			NSInteger limit = [limitVal isKindOfClass:[NSNumber class]] ? [limitVal integerValue] : 1;
+			id regexVal = edit[@"regex"];
+			bool use_regex = [regexVal isKindOfClass:[NSNumber class]] ? [regexVal boolValue] : false;
+			id caseVal = edit[@"case-insensitive"];
+			bool case_insensitive = [caseVal isKindOfClass:[NSNumber class]] ? [caseVal boolValue] : false;
+
+			NSString *editError = nil;
+			if (!apply_one_edit(content, old_str, new_str, limit, use_regex, case_insensitive, &editError))
+			{
+				PrintMCPError(context, actionContext, -32603, [editError UTF8String]);
+				return false;
+			}
+		}
+
+		std::string pathStr(filePath);
+		size_t lastSlash = pathStr.rfind('/');
+		std::string dir = (lastSlash != std::string::npos) ? pathStr.substr(0, lastSlash) : ".";
+		std::string tmpl = dir + "/.replay_edit_XXXXXX";
+		int tmpFd = mkstemp(&tmpl[0]);
+		if (tmpFd < 0)
+		{
+			int err = errno;
+			std::string errStr = std::string("failed to create temp file: ") + strerror(err);
+			PrintMCPError(context, actionContext, -32603, std::move(errStr));
+			return false;
+		}
+		bool write_ok = content.empty() ||
+		                ::write(tmpFd, content.data(), content.size()) == (ssize_t)content.size();
+		::close(tmpFd);
+		if (!write_ok || ::rename(tmpl.c_str(), filePath) != 0)
+		{
+			int err = errno;
+			::unlink(tmpl.c_str());
+			std::string errStr = std::string("failed to write \"") + filePath + "\": " + strerror(err);
+			PrintMCPError(context, actionContext, -32603, std::move(errStr));
+			return false;
+		}
+
+		PrintMCPTextResult(context, actionContext, std::string("Successfully edited ") + filePath);
+		return true;
+	}
 
 	bool combined_dry_run = context->dryRun || actionDryRun;
 

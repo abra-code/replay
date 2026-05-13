@@ -4,9 +4,11 @@
 
 #import <Foundation/Foundation.h>
 #import "ReplayAction.h"
+#include "MCPServer.h"
 #include "OutputSerializer.h"
 #include <cassert>
 #include <string>
+#include <vector>
 
 static inline void PrintToStdOut(ReplayContext *context, std::string str, NSInteger actionIndex)
 {
@@ -31,4 +33,40 @@ static inline void ActionWithNoOutput(ReplayContext *context, NSInteger actionIn
         assert(actionIndex >= 0);
         context->outputSerializer->scheduleNoOutput((int64_t)actionIndex);
     }
+}
+
+// MCP output helpers — write a JSON-RPC response through OutputSerializer (unordered).
+// Only call these when context->mcpServer is true.
+
+static inline void PrintMCPTextResult(ReplayContext *context, ActionContext *actionContext,
+                                       std::string text)
+{
+    assert(context->mcpServer);
+    std::string response = MakeMCPTextResult(actionContext->mcpRequestID, std::move(text));
+    context->outputSerializer->scheduleString(std::move(response), -1);
+}
+
+static inline void PrintMCPBlobResult(ReplayContext *context, ActionContext *actionContext,
+                                       std::string base64Data, std::string mimeType)
+{
+    assert(context->mcpServer);
+    std::string response = MakeMCPBlobResult(actionContext->mcpRequestID,
+                                              std::move(base64Data), std::move(mimeType));
+    context->outputSerializer->scheduleString(std::move(response), -1);
+}
+
+static inline void PrintMCPError(ReplayContext *context, ActionContext *actionContext,
+                                  int code, std::string message)
+{
+    assert(context->mcpServer);
+    std::string response = MakeMCPError(actionContext->mcpRequestID, code, std::move(message));
+    context->outputSerializer->scheduleString(std::move(response), -1);
+}
+
+static inline void PrintMCPMultiTextResult(ReplayContext *context, ActionContext *actionContext,
+                                            const std::vector<std::string> &texts)
+{
+    assert(context->mcpServer);
+    std::string response = MakeMCPMultiTextResult(actionContext->mcpRequestID, texts);
+    context->outputSerializer->scheduleString(std::move(response), -1);
 }

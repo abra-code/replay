@@ -53,8 +53,33 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 bool
 MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
 {
-	if(context->stopOnError && (context->lastError.hasError()))
+	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 		return false;
+
+	if(context->mcpServer)
+	{
+		NSFileManager *fm = [NSFileManager defaultManager];
+		NSError *operationError = nil;
+		bool isSuccessful = (bool)[fm moveItemAtURL:fromURL toURL:toURL error:&operationError];
+		if(!isSuccessful && context->force)
+		{
+			[fm removeItemAtURL:toURL error:nil];
+			NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
+			[fm createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
+			isSuccessful = (bool)[fm moveItemAtURL:fromURL toURL:toURL error:&operationError];
+		}
+		if(!isSuccessful)
+		{
+			NSString *errorDesc = [operationError localizedDescription];
+			if(errorDesc == nil) errorDesc = [operationError localizedFailureReason];
+			std::string errStr = std::string("failed to move from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\": " + ([errorDesc UTF8String] ?: "unknown");
+			PrintMCPError(context, actionContext, -32603, std::move(errStr));
+			return false;
+		}
+		PrintMCPTextResult(context, actionContext,
+		                   std::string("Moved ") + [[fromURL path] UTF8String] + " -> " + [[toURL path] UTF8String]);
+		return true;
+	}
 
 	if(context->verbose || context->dryRun)
 	{

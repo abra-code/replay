@@ -73,12 +73,14 @@ typedef struct
 	bool stopOnError;
 	bool force;
 	bool orderedOutput;
+	bool mcpServer;
 } ReplayContext;
 
 typedef struct
 {
 	NSDictionary *settings;
 	NSInteger index;
+	std::string mcpRequestID; // raw JSON of the JSON-RPC id field; empty when not in MCP mode
 } ActionContext;
 
 typedef void (^action_handler_t)(__nullable dispatch_block_t action,

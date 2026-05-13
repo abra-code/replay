@@ -104,8 +104,11 @@ void OutputSerializer::flush()
 
 /*static*/ void OutputSerializer::printStrings(FILE* stream, const std::vector<std::string>& strings)
 {
-    for (const auto& s : strings)
-        fprintf(stream, "%s", s.c_str());
+    for (const auto& s: strings) {
+        fwrite(s.data(), 1, s.size(), stream);
+    }
+    
+//    fflush(stream);
 }
 
 void OutputSerializer::tryPrintPending()
