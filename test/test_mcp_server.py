@@ -200,7 +200,7 @@ def test_tools_list(tmpdir: str) -> None:
 
     tools = {t["name"] for t in by_id[1].get("result", {}).get("tools", [])}
     required = {
-        "read_file", "read_multiple_files", "write_file", "edit_file",
+        "read_file", "read_multiple_files", "write_file", "edit_file", "edit_files",
         "create_directory", "list_directory", "directory_tree", "move_file",
         "delete_file", "search_files", "get_file_info",
         "list_allowed_directories", "glob_search",
@@ -710,7 +710,7 @@ def test_tools_list_schema(tmpdir: str) -> None:
     tools = by_id[1].get("result", {}).get("tools", [])
     # These tools declare at least one required param in their schema.
     tools_with_required = {
-        "read_file", "read_multiple_files", "write_file", "edit_file",
+        "read_file", "read_multiple_files", "write_file", "edit_file", "edit_files",
         "create_directory", "list_directory", "directory_tree", "move_file",
         "delete_file", "search_files", "get_file_info", "glob_search",
     }
@@ -942,6 +942,151 @@ def test_glob_search_brace(tmpdir: str) -> None:
           "README.txt" not in text, text)
 
 
+def test_edit_files_literal(tmpdir: str) -> None:
+    print("=== MCP: edit_files (two literal paths) ===")
+
+    a = f"{tmpdir}/ef_lit_a.txt"
+    b = f"{tmpdir}/ef_lit_b.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file", "arguments": {"path": a, "content": "hello world\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file", "arguments": {"path": b, "content": "hello again\n"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "edit_files",
+                    "arguments": {"paths": [a, b],
+                                  "edits": [{"oldText": "hello", "newText": "goodbye",
+                                             "limit": 0}]}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": a}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": b}}},
+    ], [tmpdir], sequential=True)
+
+    content = by_id[3].get("result", {}).get("content", [])
+    check("edit_files literal: two content items returned",
+          len(content) == 2, f"got {len(content)} items: {content}")
+    check("edit_files literal: first file success",
+          "Successfully edited" in content[0].get("text", ""), str(content[0]))
+    check("edit_files literal: second file success",
+          "Successfully edited" in content[1].get("text", ""), str(content[1]))
+    check("edit_files literal: file a modified",
+          "goodbye world" in text_of(by_id[4]), text_of(by_id[4]))
+    check("edit_files literal: file b modified",
+          "goodbye again" in text_of(by_id[5]), text_of(by_id[5]))
+
+
+def test_edit_files_glob(tmpdir: str) -> None:
+    print("=== MCP: edit_files (glob pattern expands to multiple files) ===")
+
+    d = f"{tmpdir}/ef_glob"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/one.txt", "content": "version 1\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/two.txt", "content": "version 2\n"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/three.txt", "content": "version 3\n"}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "edit_files",
+                    "arguments": {"paths": [f"{d}/*.txt"],
+                                  "edits": [{"oldText": "version", "newText": "release",
+                                             "limit": 0}]}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": f"{d}/one.txt"}}},
+    ], [tmpdir], sequential=True)
+
+    content = by_id[4].get("result", {}).get("content", [])
+    check("edit_files glob: three files matched",
+          len(content) == 3, f"got {len(content)} items")
+    all_ok = all("Successfully edited" in item.get("text", "") for item in content)
+    check("edit_files glob: all files succeeded", all_ok, str(content))
+    check("edit_files glob: file content updated",
+          "release 1" in text_of(by_id[5]), text_of(by_id[5]))
+
+
+def test_edit_files_mixed(tmpdir: str) -> None:
+    print("=== MCP: edit_files (literal path + glob mixed) ===")
+
+    d = f"{tmpdir}/ef_mixed"
+    lit = f"{tmpdir}/ef_mixed_lit.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": lit, "content": "file alpha\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/a.txt", "content": "file bravo\n"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/b.txt", "content": "file charlie\n"}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "edit_files",
+                    "arguments": {"paths": [lit, f"{d}/*.txt"],
+                                  "edits": [{"oldText": "file", "newText": "FILE",
+                                             "limit": 0}]}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": lit}}},
+    ], [tmpdir], sequential=True)
+
+    content = by_id[4].get("result", {}).get("content", [])
+    check("edit_files mixed: three results (1 literal + 2 from glob)",
+          len(content) == 3, f"got {len(content)} items")
+    all_ok = all("Successfully edited" in item.get("text", "") for item in content)
+    check("edit_files mixed: all files succeeded", all_ok, str(content))
+    check("edit_files mixed: literal file modified",
+          "FILE alpha" in text_of(by_id[5]), text_of(by_id[5]))
+
+
+def test_edit_files_no_glob_match(tmpdir: str) -> None:
+    print("=== MCP: edit_files (glob matches no files → -32002) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "edit_files",
+                    "arguments": {"paths": [f"{tmpdir}/no_such_dir/*.txt"],
+                                  "edits": [{"oldText": "foo", "newText": "bar"}]}}},
+    ], [tmpdir])
+
+    check("edit_files no glob match → -32002",
+          is_error(by_id[1], -32002), str(by_id[1]))
+
+
+def test_edit_files_dryrun(tmpdir: str) -> None:
+    print("=== MCP: edit_files (dryRun — per-file plans, no writes) ===")
+
+    a = f"{tmpdir}/ef_dry_a.txt"
+    b = f"{tmpdir}/ef_dry_b.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": a, "content": "original A\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": b, "content": "original B\n"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "edit_files",
+                    "arguments": {"paths": [a, b],
+                                  "edits": [{"oldText": "original", "newText": "modified"}],
+                                  "dryRun": True}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": a}}},
+    ], [tmpdir], sequential=True)
+
+    content = by_id[3].get("result", {}).get("content", [])
+    check("edit_files dryRun: two content items",
+          len(content) == 2, f"got {len(content)} items")
+    check("edit_files dryRun: first item is dry-run plan",
+          "Dry-run" in content[0].get("text", ""), str(content[0]))
+    check("edit_files dryRun: second item is dry-run plan",
+          "Dry-run" in content[1].get("text", ""), str(content[1]))
+    check("edit_files dryRun: file not modified",
+          "original A" in text_of(by_id[4]), text_of(by_id[4]))
+
+
 def test_missing_required_params(tmpdir: str) -> None:
     print("=== MCP: missing required params (-32602) ===")
 
@@ -989,6 +1134,11 @@ def main() -> int:
         test_edit_default_limit(tmpdir)
         test_edit_no_match_error(tmpdir)
         test_edit_invalid_regex(tmpdir)
+        test_edit_files_literal(tmpdir)
+        test_edit_files_glob(tmpdir)
+        test_edit_files_mixed(tmpdir)
+        test_edit_files_no_glob_match(tmpdir)
+        test_edit_files_dryrun(tmpdir)
         test_create_directory(tmpdir)
         test_list_directory(tmpdir)
         test_directory_tree(tmpdir)

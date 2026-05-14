@@ -15,6 +15,7 @@
 #import "ReplayActionPrivate.h"
 #include "MCPServer.h"
 #include "FileSystemHelpers.h"
+#include "GlobOverlap.h"
 #include "ABase64.h"
 #include "yyjson.hpp"
 
@@ -443,6 +444,117 @@ static void dispatch_mcp_tool(const std::string &tool,
 
         EditFile(vr.canonical.c_str(), edits, action_dry_run, context, ac);
     }
+    else if (tool == "edit_files")
+    {
+        bool action_dry_run = false;
+        if (auto dv = args.obj_get("dryRun").get_bool(); dv) action_dry_run = *dv;
+
+        auto paths_val = args.obj_get("paths");
+        if (!paths_val.is_arr())
+        {
+            PrintMCPError(context, ac, -32602, "Missing required param: paths (array)");
+            return;
+        }
+        auto edits_val = args.obj_get("edits");
+        if (!edits_val.is_arr())
+        {
+            PrintMCPError(context, ac, -32602, "Missing required param: edits (array)");
+            return;
+        }
+
+        // Build edits array (same structure as edit_file)
+        NSMutableArray<NSDictionary *> *edits = [NSMutableArray array];
+        {
+            Json::ArrIter it(edits_val);
+            while (it.has_next())
+            {
+                auto ev = it.next();
+                if (!ev.is_obj()) continue;
+                auto old_sv = ev.obj_get("oldText").get_str();
+                if (!old_sv) continue;
+                NSMutableDictionary *edit = [NSMutableDictionary dictionary];
+                edit[@"oldText"] = [NSString stringWithUTF8String:std::string(*old_sv).c_str()];
+                if (auto ns = ev.obj_get("newText").get_str(); ns)
+                    edit[@"newText"] = [NSString stringWithUTF8String:std::string(*ns).c_str()];
+                if (auto lv = ev.obj_get("limit").get_sint(); lv)
+                    edit[@"limit"] = @((NSInteger)*lv);
+                else if (auto lv2 = ev.obj_get("limit").get_uint(); lv2)
+                    edit[@"limit"] = @((NSInteger)*lv2);
+                if (auto rv = ev.obj_get("regex").get_bool(); rv)
+                    edit[@"regex"] = @((BOOL)*rv);
+                if (auto cv = ev.obj_get("caseInsensitive").get_bool(); cv)
+                    edit[@"case-insensitive"] = @((BOOL)*cv);
+                [edits addObject:edit];
+            }
+        }
+
+        // Expand paths: each entry is a literal path or a glob pattern
+        std::vector<std::string> concrete_paths;
+        {
+            bool early_error = false;
+            Json::ArrIter it(paths_val);
+            while (it.has_next() && !early_error)
+            {
+                auto pv = it.next();
+                auto ps = pv.get_str();
+                if (!ps) continue;
+                std::string path_str(*ps);
+
+                if (globoverlap::contains_glob_pattern_char(path_str))
+                {
+                    auto matches = expand_glob(path_str);
+                    if (matches.empty())
+                    {
+                        PrintMCPError(context, ac, -32002,
+                                      "Glob matched no files: " + path_str);
+                        early_error = true;
+                        break;
+                    }
+                    for (const auto &m : matches)
+                    {
+                        auto vr = validate_path(m, *opts, !action_dry_run);
+                        if (!vr.ok)
+                        {
+                            PrintMCPError(context, ac, -32001, vr.error);
+                            early_error = true;
+                            break;
+                        }
+                        concrete_paths.push_back(vr.canonical);
+                    }
+                }
+                else
+                {
+                    auto vr = validate_path(path_str, *opts, !action_dry_run);
+                    if (!vr.ok)
+                    {
+                        PrintMCPError(context, ac, -32001, vr.error);
+                        early_error = true;
+                        break;
+                    }
+                    concrete_paths.push_back(vr.canonical);
+                }
+            }
+            if (early_error) return;
+        }
+
+        if (concrete_paths.empty())
+        {
+            PrintMCPError(context, ac, -32602, "paths resolved to no files");
+            return;
+        }
+
+        // Edit each file; collect per-file results into one multi-text response
+        std::vector<std::string> results;
+        for (const auto &path : concrete_paths)
+        {
+            auto r = EditFileMCPCore(path.c_str(), edits, action_dry_run);
+            if (r.ok)
+                results.push_back(r.message);
+            else
+                results.push_back(path + ": [error " + std::to_string(r.error_code) + "] " + r.message);
+        }
+        PrintMCPMultiTextResult(context, ac, results);
+    }
     else if (tool == "glob_search" || tool == "search_files")
     {
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
@@ -702,6 +814,51 @@ static std::string build_tools_list_json()
             "Apply text edits to a file. Supports literal and POSIX ERE regex matching, "
             "back-references, case-insensitive mode, and configurable replacement limits. "
             "Writes atomically. Extended beyond standard MCP edit_file.", schema));
+    }
+
+    // edit_files (extended — multi-file via literal paths and/or glob patterns)
+    {
+        auto edit_item_props = doc.new_obj();
+        add_str_prop(doc, edit_item_props, "oldText",
+            "Text or regex pattern to find (required)");
+        add_str_prop(doc, edit_item_props, "newText",
+            "Replacement text. Use \\1..\\9 for regex back-references. Default: empty string.");
+        add_int_prop(doc, edit_item_props, "limit",
+            "Maximum replacements per file (default 1; 0 = unlimited)");
+        add_bool_prop(doc, edit_item_props, "regex",
+            "Treat oldText as a POSIX ERE regex pattern (default false)");
+        add_bool_prop(doc, edit_item_props, "caseInsensitive",
+            "Case-insensitive matching (default false)");
+        auto edit_item_schema = doc.new_obj();
+        doc.obj_add(edit_item_schema, "type", doc.new_str("object"));
+        doc.obj_add(edit_item_schema, "properties", edit_item_props);
+        doc.obj_add(edit_item_schema, "required", make_req(doc, {"oldText"}));
+        auto edits_prop = doc.new_obj();
+        doc.obj_add(edits_prop, "type", doc.new_str("array"));
+        doc.obj_add(edits_prop, "items", edit_item_schema);
+        doc.obj_add(edits_prop, "description", doc.new_str("Array of edit operations applied in order to every resolved file"));
+        auto paths_prop = doc.new_obj();
+        doc.obj_add(paths_prop, "type", doc.new_str("array"));
+        auto paths_items = doc.new_obj();
+        doc.obj_add(paths_items, "type", doc.new_str("string"));
+        doc.obj_add(paths_prop, "items", paths_items);
+        doc.obj_add(paths_prop, "description",
+            doc.new_str("Absolute file paths and/or glob patterns (e.g. /src/**/*.cpp). "
+                        "Literal paths edit one file each; globs expand to all matching files at runtime. "
+                        "Error if a glob matches no files."));
+        auto props = doc.new_obj();
+        doc.obj_add(props, "paths", paths_prop);
+        doc.obj_add(props, "edits", edits_prop);
+        add_bool_prop(doc, props, "dryRun", "Show the edit plan per file without writing (default false)");
+        auto schema = doc.new_obj();
+        doc.obj_add(schema, "type", doc.new_str("object"));
+        doc.obj_add(schema, "properties", props);
+        doc.obj_add(schema, "required", make_req(doc, {"paths", "edits"}));
+        doc.arr_append(tools, add_tool(doc, "edit_files",
+            "[Extended] Apply edits to one or more files specified as literal paths and/or glob patterns. "
+            "Glob patterns (e.g. /src/**/*.cpp) expand to all matching files at runtime. "
+            "Supports all edit_file options. Returns per-file results in a single response.",
+            schema));
     }
 
     // create_directory

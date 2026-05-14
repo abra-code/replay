@@ -47,6 +47,13 @@ private:
 };
 
 class OutputSerializer;
+
+// Returned by EditFileMCPCore — decouples edit logic from MCP response emission.
+struct MCPEditResult {
+    bool ok;
+    int error_code; // JSON-RPC error code on failure (-32002, -32603, …)
+    std::string message; // result text on success, error description on failure
+};
 #endif // __cplusplus
 
 NS_ASSUME_NONNULL_BEGIN
@@ -113,6 +120,9 @@ bool Echo(NSString *content, ReplayContext *context, ActionContext *actionContex
 
 #ifdef __cplusplus
 }
+// Core edit logic without MCP output emission — used by edit_files multi-file handler.
+// Returns MCPEditResult (C++ struct) so must live outside extern "C".
+MCPEditResult EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edits, bool dryRun);
 #endif
 
 NS_ASSUME_NONNULL_END
