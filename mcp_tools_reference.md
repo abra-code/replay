@@ -18,7 +18,7 @@ Describes the 14 tools exposed by `replay --mcp-server`, design choices, and err
 | `delete_file` | `path` | | Recursive for directories. |
 | `get_file_info` | `path` | | type, size, modified timestamp, permissions. |
 | `list_allowed_directories` | — | | Lists configured dirs with access mode. |
-| `search_files` | `path`, `pattern` | | Filename glob under root. Optional `excludePatterns`. Max 1000. |
+| `search_files` | `pattern` | ✓ | Content search (grep). Requires `path` or `paths`. Regex, case-insensitive, context lines. |
 | `edit_file` | `path`, `edits` | ✓ | Structured edits: literal/regex, backrefs, limit, caseInsensitive. |
 | `edit_files` | `paths`, `edits` | ✓ | Multi-file edit with glob expansion. |
 | `glob_search` | `path` | ✓ | Multi-pattern array, brace alternation `{a,b}`, `excludePatterns`. |
@@ -32,11 +32,31 @@ Describes the 14 tools exposed by `replay --mcp-server`, design choices, and err
 
 - **`edit_file`**: the MCP spec takes a unified diff; replay's version takes structured edit operations (see below). Same tool name, different interface.
 - **`read_file`**: binary files are returned as a `blob` content item (base64 + mimeType) rather than an error or escaped text, which is an extension beyond the spec.
-- **`search_files`**: spec defines a content-search tool; replay's implementation is a filename/glob search, not a full-text grep. The `glob_search` extended tool covers the same ground with more options.
+- **`search_files`**: spec defines a content-search tool (grep). replay's implementation is now a proper content search, extended with `paths` (explicit files/globs), `regex`, `caseInsensitive`, `contextLines`, and `maxResults`. The `path` param (root directory) follows the standard MCP signature.
 
 ---
 
 ## Extended tools (replay-specific capabilities)
+
+### `search_files` — content search (grep-style)
+
+Required: `pattern` (content pattern). Either `path` or `paths` is also required.  
+Optional: `regex`, `caseInsensitive`, `contextLines` (default 0, max 50), `maxResults` (default 500, max 10000), `excludePatterns`.
+
+File selection:
+- **`path`** (string) — root directory; all files under it are searched recursively (standard MCP)
+- **`paths`** (array) — explicit absolute file paths and/or glob patterns (extended); overrides `path`. Same expansion rules as `edit_files`.
+
+Search:
+- `pattern` — literal text or POSIX ERE regex
+- `regex: true` — treat `pattern` as ERE
+- `caseInsensitive: true` — case-insensitive matching
+
+Output is grep-style `file:linenum:content`. Context lines use `-` separators (`file-linenum-context`). Groups separated by `--`. Binary files are skipped silently. A `[N matches]` footer is always appended. When results are truncated by `maxResults`, a truncation notice is prepended.
+
+**vs. `glob_search`**: `glob_search` finds files by *filename pattern*. `search_files` finds text *inside* files.
+
+---
 
 ### `edit_file` — single-file text editor
 
@@ -98,7 +118,7 @@ Runs `command` via `/bin/sh -c <command>`. Captures both stdout and stderr. Supp
 
 **Difference from `ExcecuteTool` (replay action system)**:
 
-| Dimension | `ExcecuteTool` (action) | `run_command_mcp` (MCP) |
+| Dimension | `ExcecuteTool` (action) | `ExcecuteToolMCPCore` |
 |-----------|------------------------|------------------------|
 | Invocation | Binary path + args array | `/bin/sh -c <string>` |
 | stdout | Streamed to OutputSerializer | Captured and returned in response |
@@ -116,7 +136,7 @@ Optional: `patterns` (array), `pattern` (single string), `excludePatterns`, `max
 
 Uses replay's glob engine which supports `**`, `?`, `{a,b}` alternation. Accepts either a `patterns` array or a single `pattern` string.
 
-**vs. `search_files`**: `search_files` is the MCP-standard tool name (single pattern, standard glob). `glob_search` is the extended version adding multi-pattern arrays, brace alternation, and a `max` cap. AI agents that inspect schemas will discover the richer capabilities from `glob_search`'s description and schema.
+**vs. `search_files`**: `search_files` searches file *contents* (text/regex inside files). `glob_search` finds files by *filename pattern*. `glob_search` is the extended version of the filename-search concept, adding multi-pattern arrays, brace alternation, and a `max` cap. AI agents that inspect schemas will discover the richer capabilities from `glob_search`'s description and schema.
 
 ---
 

@@ -290,6 +290,159 @@ EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edits, bool dryRu
 	return {true, 0, std::string("Successfully edited ") + filePath};
 }
 
+MCPSearchResult
+SearchFileMCPCore(const char *filePath, const std::string &pattern,
+                  bool use_regex, bool case_insensitive,
+                  int context_lines, int max_matches)
+{
+    MCPSearchResult result;
+
+    std::ifstream f(filePath, std::ios::binary | std::ios::ate);
+    if (!f.is_open())
+    {
+        result.error = std::string("cannot open: ") + strerror(errno);
+        return result;
+    }
+    std::streamoff file_size = f.tellg();
+    f.seekg(0, std::ios::beg);
+    std::string content((size_t)file_size, '\0');
+    if (file_size > 0 && !f.read(&content[0], file_size))
+    {
+        result.error = "read failed";
+        return result;
+    }
+    f.close();
+
+    // Binary check: null bytes in first 4 KB → skip
+    {
+        size_t check = std::min((size_t)4096, content.size());
+        if (memchr(content.data(), '\0', check) != nullptr)
+        {
+            result.is_binary = true;
+            return result;
+        }
+    }
+
+    // Split into lines, recording [start, end) per line (end excludes the newline)
+    std::vector<std::pair<size_t, size_t>> line_ranges;
+    {
+        size_t pos = 0;
+        while (pos <= content.size())
+        {
+            size_t nl = content.find('\n', pos);
+            if (nl == std::string::npos)
+            {
+                if (pos < content.size())
+                    line_ranges.push_back({pos, content.size()});
+                break;
+            }
+            size_t end = nl;
+            if (end > pos && content[end - 1] == '\r')
+                --end;
+            line_ranges.push_back({pos, end});
+            pos = nl + 1;
+        }
+    }
+
+    // Compile regex (REG_NOSUB: we only need match/no-match, not sub-expressions)
+    regex_t re;
+    bool re_compiled = false;
+    if (use_regex)
+    {
+        int flags = REG_EXTENDED | REG_NOSUB;
+        if (case_insensitive) flags |= REG_ICASE;
+        int err = regcomp(&re, pattern.c_str(), flags);
+        if (err != 0)
+        {
+            char buf[512];
+            regerror(err, &re, buf, sizeof(buf));
+            regfree(&re);
+            result.error = std::string("regex error: ") + buf;
+            return result;
+        }
+        re_compiled = true;
+    }
+
+    // Find matching line indices (stop counting at max_matches)
+    const int n_lines = (int)line_ranges.size();
+    std::vector<int> match_indices;
+    for (int i = 0; i < n_lines && result.match_count < max_matches; ++i)
+    {
+        auto [s, e] = line_ranges[i];
+        // Build null-terminated line string; the regexec/find operates on it
+        std::string line(content.data() + s, e - s);
+        bool matched = false;
+        if (use_regex)
+        {
+            matched = (regexec(&re, line.c_str(), 0, nullptr, 0) == 0);
+        }
+        else if (case_insensitive)
+        {
+            matched = (strcasestr(line.c_str(), pattern.c_str()) != nullptr);
+        }
+        else
+        {
+            matched = (line.find(pattern) != std::string::npos);
+        }
+        if (matched)
+        {
+            match_indices.push_back(i);
+            ++result.match_count;
+        }
+    }
+
+    if (re_compiled)
+        regfree(&re);
+
+    if (match_indices.empty())
+        return result; // text stays empty
+
+    // Format grep-style output with context lines
+    std::string &out = result.text;
+    int last_printed = -1;
+
+    auto append_line = [&](int i, bool is_match)
+    {
+        auto [s, e] = line_ranges[i];
+        out += filePath;
+        char delim = is_match ? ':' : '-';
+        out += delim;
+        out += std::to_string(i + 1); // 1-based
+        out += delim;
+        out.append(content.data() + s, e - s);
+        out += '\n';
+        last_printed = i;
+    };
+
+    for (int mi = 0; mi < (int)match_indices.size(); ++mi)
+    {
+        int m          = match_indices[mi];
+        int ctx_start  = std::max(0, m - context_lines);
+        int ctx_end    = std::min(n_lines - 1, m + context_lines);
+
+        // Group separator when there is a gap since last printed line
+        if (last_printed >= 0 && ctx_start > last_printed + 1)
+            out += "--\n";
+
+        // Context before (continue from where we left off to avoid reprinting)
+        for (int j = std::max(ctx_start, last_printed + 1); j < m; ++j)
+            append_line(j, false);
+
+        // Match line (may already be printed when it overlaps previous context)
+        if (m > last_printed)
+            append_line(m, true);
+
+        // Context after (stop where the next match's leading context begins)
+        int next_ctx_start = (mi + 1 < (int)match_indices.size())
+                           ? std::max(m + 1, match_indices[mi + 1] - context_lines)
+                           : n_lines;
+        for (int j = m + 1; j <= ctx_end && j < next_ctx_start; ++j)
+            append_line(j, false);
+    }
+
+    return result;
+}
+
 bool
 EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun,
          ReplayContext *context, ActionContext *actionContext)

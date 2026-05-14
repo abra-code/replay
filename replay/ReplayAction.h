@@ -64,6 +64,14 @@ struct MCPExecuteResult {
     std::string stderr_text;
     std::string launch_error; // non-empty when !launched
 };
+
+// Returned by SearchFileMCPCore — grep-style search results for one file.
+struct MCPSearchResult {
+    std::string text;         // formatted grep-style output; empty when no matches
+    int         match_count = 0;
+    bool        is_binary   = false; // file contains null bytes — skipped
+    std::string error;        // non-empty on I/O failure
+};
 #endif // __cplusplus
 
 NS_ASSUME_NONNULL_BEGIN
@@ -136,6 +144,10 @@ MCPEditResult EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edi
 // timeoutSeconds: SIGTERM at deadline, SIGKILL after 3s grace.
 MCPExecuteResult ExcecuteToolMCPCore(NSString *toolPath, NSArray<NSString*> *arguments,
                                       const std::string &workingDir, int timeoutSeconds);
+// pattern: literal or POSIX ERE string. max_matches: stops counting (not formatting) at this limit.
+MCPSearchResult SearchFileMCPCore(const char *filePath, const std::string &pattern,
+                                   bool use_regex, bool case_insensitive,
+                                   int context_lines, int max_matches);
 #endif
 
 NS_ASSUME_NONNULL_END

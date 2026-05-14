@@ -449,29 +449,187 @@ def test_delete_file(tmpdir: str) -> None:
 
 
 def test_search_files(tmpdir: str) -> None:
-    print("=== MCP: search_files ===")
+    """search_files performs content search (grep), not filename glob."""
+    print("=== MCP: search_files (content search, literal) ===")
 
-    d = f"{tmpdir}/search"
+    d = f"{tmpdir}/sf_basic"
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "write_file",
-                    "arguments": {"path": f"{d}/foo.swift", "content": "swift"}}},
+                    "arguments": {"path": f"{d}/a.txt",
+                                  "content": "hello world\nfoo bar\n"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "write_file",
-                    "arguments": {"path": f"{d}/bar.cpp", "content": "cpp"}}},
+                    "arguments": {"path": f"{d}/b.txt",
+                                  "content": "nothing here\nhello again\n"}}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "write_file",
-                    "arguments": {"path": f"{d}/sub/baz.swift", "content": "s2"}}},
+                    "arguments": {"path": f"{d}/c.txt",
+                                  "content": "no match\n"}}},
+        # Standard MCP style: root dir + content pattern
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
          "params": {"name": "search_files",
-                    "arguments": {"path": d, "pattern": "**/*.swift"}}},
+                    "arguments": {"path": d, "pattern": "hello"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[4])
-    check("search_files: matches swift files",
-          "foo.swift" in text and "baz.swift" in text, f"got: {text!r}")
-    check("search_files: excludes cpp files",
-          "bar.cpp" not in text, f"got: {text!r}")
+    check("search_files literal: matches in a.txt", "a.txt" in text, text)
+    check("search_files literal: matches in b.txt", "b.txt" in text, text)
+    check("search_files literal: c.txt not in output (no match)", "c.txt" not in text, text)
+    check("search_files literal: matching line content shown", "hello world" in text, text)
+    check("search_files literal: match count footer", "match" in text, text)
+    # grep format: file:linenum:content
+    check("search_files literal: grep-style file:line format",
+          ":1:hello world" in text or ":2:hello again" in text, text)
+
+
+def test_search_files_regex(tmpdir: str) -> None:
+    print("=== MCP: search_files (regex pattern) ===")
+
+    d = f"{tmpdir}/sf_regex"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/src.cpp",
+                                  "content": "int foo = 1;\nfloat bar = 2.0;\nchar baz;\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "^(int|float)",
+                                  "regex": True}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[2])
+    check("search_files regex: int line matched", "int foo" in text, text)
+    check("search_files regex: float line matched", "float bar" in text, text)
+    check("search_files regex: char line not matched", "char baz" not in text, text)
+    check("search_files regex: 2 matches footer", "2 match" in text, text)
+
+
+def test_search_files_case_insensitive(tmpdir: str) -> None:
+    print("=== MCP: search_files (caseInsensitive) ===")
+
+    d = f"{tmpdir}/sf_ci"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/mixed.txt",
+                                  "content": "Hello World\nhello world\nHELLO WORLD\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "hello",
+                                  "caseInsensitive": True}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[2])
+    check("search_files caseInsensitive: all 3 variants matched",
+          "3 match" in text, text)
+
+
+def test_search_files_context_lines(tmpdir: str) -> None:
+    print("=== MCP: search_files (contextLines) ===")
+
+    d = f"{tmpdir}/sf_ctx"
+    content = "\n".join([f"line{i}" for i in range(1, 11)]) + "\n"
+    # line5 is the match; with contextLines=2 we expect lines 3-7
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/file.txt", "content": content}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "line5",
+                                  "contextLines": 2}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[2])
+    check("search_files contextLines: match line present", "line5" in text, text)
+    check("search_files contextLines: before context present", "line3" in text, text)
+    check("search_files contextLines: after context present", "line7" in text, text)
+    # Context lines use '-' separator, match lines use ':'
+    check("search_files contextLines: context uses '-' separator",
+          "-3-" in text or "-4-" in text, text)
+    check("search_files contextLines: match uses ':' separator", ":5:" in text, text)
+
+
+def test_search_files_paths_glob(tmpdir: str) -> None:
+    print("=== MCP: search_files (paths array with glob, extended) ===")
+
+    d = f"{tmpdir}/sf_glob"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/a.txt", "content": "needle\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/b.txt", "content": "needle\n"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/c.log", "content": "needle\n"}}},
+        # Use paths glob: search only .txt files
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"paths": [f"{d}/*.txt"], "pattern": "needle"}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[4])
+    check("search_files paths glob: a.txt matched", "a.txt" in text, text)
+    check("search_files paths glob: b.txt matched", "b.txt" in text, text)
+    check("search_files paths glob: c.log excluded (not in glob)", "c.log" not in text, text)
+    check("search_files paths glob: 2 matches", "2 match" in text, text)
+
+
+def test_search_files_no_match(tmpdir: str) -> None:
+    print("=== MCP: search_files (no matches) ===")
+
+    d = f"{tmpdir}/sf_nomatch"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/file.txt", "content": "some content\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "xyzzy_not_here"}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[2])
+    check("search_files no match: returns no-matches message",
+          "no match" in text.lower(), text)
+
+
+def test_search_files_exclude_patterns(tmpdir: str) -> None:
+    print("=== MCP: search_files (excludePatterns with root dir) ===")
+
+    d = f"{tmpdir}/sf_excl"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/src/main.cpp", "content": "needle\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/vendor/lib.cpp", "content": "needle\n"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "needle",
+                                  "excludePatterns": ["vendor/**"]}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[3])
+    check("search_files excludePatterns: main.cpp matched", "main.cpp" in text, text)
+    check("search_files excludePatterns: vendor/lib.cpp excluded", "lib.cpp" not in text, text)
+    check("search_files excludePatterns: 1 match", "1 match" in text, text)
+
+
+def test_search_files_missing_pattern(tmpdir: str) -> None:
+    print("=== MCP: search_files (missing pattern → -32602) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": tmpdir}}},
+    ], [tmpdir])
+
+    check("search_files missing pattern → -32602",
+          is_error(by_id[1], -32602), str(by_id[1]))
 
 
 def test_get_file_info(tmpdir: str) -> None:
@@ -883,7 +1041,7 @@ def test_delete_directory(tmpdir: str) -> None:
 
 
 def test_glob_search_exclude_patterns(tmpdir: str) -> None:
-    print("=== MCP: glob_search / search_files (excludePatterns) ===")
+    print("=== MCP: glob_search (excludePatterns) ===")
 
     d = f"{tmpdir}/excl"
     by_id = run_mcp([
@@ -898,11 +1056,6 @@ def test_glob_search_exclude_patterns(tmpdir: str) -> None:
                     "arguments": {"path": d,
                                   "patterns": ["**/*.cpp"],
                                   "excludePatterns": ["vendor/**"]}}},
-        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-         "params": {"name": "search_files",
-                    "arguments": {"path": d,
-                                  "pattern": "**/*.cpp",
-                                  "excludePatterns": ["vendor/**"]}}},
     ], [tmpdir], sequential=True)
 
     text3 = text_of(by_id[3])
@@ -910,12 +1063,6 @@ def test_glob_search_exclude_patterns(tmpdir: str) -> None:
           "main.cpp" in text3, text3)
     check("glob_search excludePatterns: vendor/lib.cpp excluded",
           "lib.cpp" not in text3, text3)
-
-    text4 = text_of(by_id[4])
-    check("search_files excludePatterns: src/main.cpp included",
-          "main.cpp" in text4, text4)
-    check("search_files excludePatterns: vendor/lib.cpp excluded",
-          "lib.cpp" not in text4, text4)
 
 
 def test_glob_search_brace(tmpdir: str) -> None:
@@ -1289,6 +1436,13 @@ def main() -> int:
         test_delete_file(tmpdir)
         test_delete_directory(tmpdir)
         test_search_files(tmpdir)
+        test_search_files_regex(tmpdir)
+        test_search_files_case_insensitive(tmpdir)
+        test_search_files_context_lines(tmpdir)
+        test_search_files_paths_glob(tmpdir)
+        test_search_files_no_match(tmpdir)
+        test_search_files_exclude_patterns(tmpdir)
+        test_search_files_missing_pattern(tmpdir)
         test_get_file_info(tmpdir)
         test_read_file_not_found(tmpdir)
         test_read_binary_file(tmpdir)
