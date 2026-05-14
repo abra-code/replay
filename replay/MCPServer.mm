@@ -32,6 +32,8 @@
 #include <fstream>
 #include <iostream>
 
+#include "AsyncDispatch.h"
+
 #include <unistd.h>
 #include <sys/stat.h>
 #include <limits.h>
@@ -42,6 +44,8 @@ static constexpr const char *kServerVersion   = "1.0.0";
 static constexpr size_t kMaxFileSize          = 10u * 1024u * 1024u;
 static constexpr size_t kMaxReadMultiple      = 50;
 static constexpr size_t kMaxSearchResults     = 1000;
+static constexpr int    kDefaultCommandTimeout = 30; // seconds; passed via ActionContext settings
+static constexpr int    kMaxCommandTimeout     = 60; // seconds; hard cap enforced here
 
 
 // ============================================================================
@@ -286,13 +290,6 @@ static ReadFileResult read_file_bytes(const std::string &path)
 }
 
 // ============================================================================
-// GCD concurrent dispatch state
-// ============================================================================
-
-static dispatch_group_t sDispatchGroup;
-static dispatch_queue_t sQueue;
-
-// ============================================================================
 // Param helper — validate a path param and emit an MCP error on failure
 // ============================================================================
 
@@ -313,6 +310,57 @@ static std::string validate_and_get(Json::Val args, const char *key,
         return {};
     }
     return vr.canonical;
+}
+
+// ============================================================================
+// execute_command response builder — declared in MCPServer.h, called via
+// PrintMCPExecuteResult in ReplayActionPrivate.h from ExecuteEchoActions.mm.
+// Separate from make_text_result because it carries isError and an optional
+// stderr content item.
+// ============================================================================
+
+std::string MakeMCPExecuteResult(const std::string &request_id,
+                                  const MCPExecuteResult &r)
+{
+    Json::MutableDoc doc;
+    auto content = doc.new_arr();
+
+    // Primary item: stdout (or timeout notice) with exit code footer.
+    {
+        auto item = doc.new_obj();
+        doc.obj_add(item, "type", doc.new_str("text"));
+        std::string text;
+        if (r.timed_out)
+        {
+            text = "[command timed out]\n";
+            if (!r.stdout_text.empty())
+                text += r.stdout_text;
+        }
+        else
+        {
+            text = r.stdout_text.empty() ? "(no output)\n" : r.stdout_text;
+            if (!text.empty() && text.back() != '\n')
+                text += '\n';
+        }
+        text += "[exit code: " + std::to_string(r.exit_code) + "]";
+        doc.obj_add(item, "text", doc.new_str(text));
+        doc.arr_append(content, item);
+    }
+
+    // Second item: stderr, only when non-empty.
+    if (!r.stderr_text.empty())
+    {
+        auto item = doc.new_obj();
+        doc.obj_add(item, "type", doc.new_str("text"));
+        doc.obj_add(item, "text", doc.new_str("[stderr]\n" + r.stderr_text));
+        doc.arr_append(content, item);
+    }
+
+    auto result = doc.new_obj();
+    doc.obj_add(result, "content", content);
+    if (r.timed_out || r.exit_code != 0)
+        doc.obj_add(result, "isError", doc.new_bool(true));
+    return make_result_response(request_id, doc, result);
 }
 
 // ============================================================================
@@ -554,6 +602,58 @@ static void dispatch_mcp_tool(const std::string &tool,
                 results.push_back(path + ": [error " + std::to_string(r.error_code) + "] " + r.message);
         }
         PrintMCPMultiTextResult(context, ac, results);
+    }
+    else if (tool == "execute_command")
+    {
+        auto cmd_sv = args.obj_get("command").get_str();
+        if (!cmd_sv)
+        {
+            PrintMCPError(context, ac, -32602, "Missing required param: command");
+            return;
+        }
+        std::string command(*cmd_sv);
+
+        // Optional working directory — must resolve within an allowed dir.
+        std::string working_dir;
+        if (auto wd_sv = args.obj_get("workingDirectory").get_str(); wd_sv)
+        {
+            auto vr = validate_path(std::string(*wd_sv), *opts, false);
+            if (!vr.ok)
+            {
+                PrintMCPError(context, ac, -32001, vr.error);
+                return;
+            }
+            working_dir = vr.canonical;
+        }
+        else
+        {
+            // Default: first writable allowed dir, else first readable dir.
+            for (const auto &d : opts->allowedDirs)
+            {
+                if (d.writable)
+                {
+                    working_dir = d.path;
+                    break;
+                }
+            }
+            if (working_dir.empty() && !opts->allowedDirs.empty())
+                working_dir = opts->allowedDirs[0].path;
+        }
+
+        // Optional timeout, capped at kMaxCommandTimeout.
+        int timeout_sec = kDefaultCommandTimeout;
+        if (auto tv = args.obj_get("timeout").get_sint(); tv && *tv > 0)
+            timeout_sec = (int)std::min((int64_t)kMaxCommandTimeout, *tv);
+        else if (auto tv2 = args.obj_get("timeout").get_uint(); tv2)
+            timeout_sec = (int)std::min((uint64_t)kMaxCommandTimeout, *tv2);
+
+        // Pass execution parameters via ActionContext settings.
+        // ExcecuteTool detects context->mcpServer and delegates to ExcecuteToolMCPCore.
+        ac->settings = @{
+            @"workingDirectory": @(working_dir.c_str()),
+            @"timeout":          @(timeout_sec),
+        };
+        ExcecuteTool(@"/bin/sh", @[@"-c", @(command.c_str())], context, ac);
     }
     else if (tool == "glob_search" || tool == "search_files")
     {
@@ -861,6 +961,34 @@ static std::string build_tools_list_json()
             schema));
     }
 
+    // execute_command (extended — hard-sandboxed shell execution)
+    {
+        auto props = doc.new_obj();
+        add_str_prop(doc, props, "command",
+            "Shell command executed via /bin/sh -c. Supports pipes, redirects, "
+            "environment variables, and shell built-ins. When the server is started "
+            "with --sandbox, the macOS Seatbelt kernel sandbox confines the child "
+            "shell process to the allowed directories — stronger than path-validation alone.");
+        add_str_prop(doc, props, "workingDirectory",
+            "Absolute path to use as the working directory (must be within an allowed "
+            "directory). Defaults to the first writable allowed directory.");
+        add_int_prop(doc, props, "timeout",
+            "Timeout in seconds before the command is killed (default 30, max 60). "
+            "On timeout isError is set to true and the exit code is the shell's "
+            "termination status.");
+        auto schema = doc.new_obj();
+        doc.obj_add(schema, "type", doc.new_str("object"));
+        doc.obj_add(schema, "properties", props);
+        doc.obj_add(schema, "required", make_req(doc, {"command"}));
+        doc.arr_append(tools, add_tool(doc, "execute_command",
+            "[Extended] Execute a shell command. Returns stdout as the primary content "
+            "item and stderr as a second item when non-empty. Sets isError=true when "
+            "the command exits non-zero or times out. When replay is started with "
+            "--sandbox, the Seatbelt kernel sandbox enforces filesystem access limits "
+            "on the child process — making shell execution safer than soft path-checking.",
+            schema));
+    }
+
     // create_directory
     {
         auto props = doc.new_obj();
@@ -1111,7 +1239,7 @@ static void handle_message(const std::string &line,
         std::string captured_tool = std::string(*name_sv);
         auto shared_doc = std::make_shared<Json::Document>(std::move(doc));
 
-        dispatch_group_async(sDispatchGroup, sQueue, ^{
+        AsyncDispatch(^{
             @autoreleasepool {
                 ActionContext ac;
                 ac.settings     = nil;
@@ -1151,8 +1279,7 @@ int RunMCPServer(ReplayContext *context, const MCPServerOptions &opts)
             fprintf(stderr, "replay-mcp: allowed %s %s\n",
                     dir.writable ? "[rw]" : "[ro]", dir.path.c_str());
 
-    sDispatchGroup = dispatch_group_create();
-    sQueue         = dispatch_queue_create("replay.mcp.tools", DISPATCH_QUEUE_CONCURRENT);
+    StartAsyncDispatch(context->councurrencyLimit);
 
     bool initialized = false;
     std::string line;
@@ -1163,7 +1290,7 @@ int RunMCPServer(ReplayContext *context, const MCPServerOptions &opts)
             handle_message(line, context, &opts, initialized);
     }
 
-    dispatch_group_wait(sDispatchGroup, DISPATCH_TIME_FOREVER);
+    FinishAsyncDispatchAndWait();
     context->outputSerializer->flush();
 
     fprintf(stderr, "replay-mcp: stdin closed, exiting\n");

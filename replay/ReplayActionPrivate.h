@@ -70,3 +70,11 @@ static inline void PrintMCPMultiTextResult(ReplayContext *context, ActionContext
     std::string response = MakeMCPMultiTextResult(actionContext->mcpRequestID, texts);
     context->outputSerializer->scheduleString(std::move(response), -1);
 }
+
+static inline void PrintMCPExecuteResult(ReplayContext *context, ActionContext *actionContext,
+                                          const MCPExecuteResult &r)
+{
+    assert(context->mcpServer);
+    std::string response = MakeMCPExecuteResult(actionContext->mcpRequestID, r);
+    context->outputSerializer->scheduleString(std::move(response), -1);
+}

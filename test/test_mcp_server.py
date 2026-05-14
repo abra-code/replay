@@ -144,6 +144,10 @@ def is_error(resp: dict, code: int | None = None) -> bool:
         return resp["error"]["code"] == code
     return True
 
+def is_command_error(resp: dict) -> bool:
+    """Return True when a tools/call result has isError=true (command failed, not MCP error)."""
+    return resp.get("result", {}).get("isError", False) is True
+
 # ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
@@ -203,7 +207,7 @@ def test_tools_list(tmpdir: str) -> None:
         "read_file", "read_multiple_files", "write_file", "edit_file", "edit_files",
         "create_directory", "list_directory", "directory_tree", "move_file",
         "delete_file", "search_files", "get_file_info",
-        "list_allowed_directories", "glob_search",
+        "list_allowed_directories", "glob_search", "execute_command",
     }
     missing = required - tools
     check("tools/list includes all required tools",
@@ -712,7 +716,7 @@ def test_tools_list_schema(tmpdir: str) -> None:
     tools_with_required = {
         "read_file", "read_multiple_files", "write_file", "edit_file", "edit_files",
         "create_directory", "list_directory", "directory_tree", "move_file",
-        "delete_file", "search_files", "get_file_info", "glob_search",
+        "delete_file", "search_files", "get_file_info", "glob_search", "execute_command",
     }
     for tool in tools:
         name = tool.get("name", "?")
@@ -1087,6 +1091,136 @@ def test_edit_files_dryrun(tmpdir: str) -> None:
           "original A" in text_of(by_id[4]), text_of(by_id[4]))
 
 
+def test_execute_simple(tmpdir: str) -> None:
+    print("=== MCP: execute_command (simple echo) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "execute_command",
+                    "arguments": {"command": "echo 'hello mcp'",
+                                  "workingDirectory": tmpdir}}},
+    ], [tmpdir])
+
+    text = text_of(by_id[1])
+    check("execute_command simple: stdout contains output", "hello mcp" in text, text)
+    check("execute_command simple: exit code 0 in text", "[exit code: 0]" in text, text)
+    check("execute_command simple: isError absent",
+          not is_command_error(by_id[1]), str(by_id[1]))
+
+
+def test_execute_working_dir(tmpdir: str) -> None:
+    print("=== MCP: execute_command (workingDirectory → pwd) ===")
+
+    canonical = os.path.realpath(tmpdir)
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "execute_command",
+                    "arguments": {"command": "pwd",
+                                  "workingDirectory": tmpdir}}},
+    ], [tmpdir])
+
+    text = text_of(by_id[1])
+    check("execute_command workingDirectory: pwd output contains canonical path",
+          canonical in text, f"expected {canonical!r} in {text!r}")
+
+
+def test_execute_exit_nonzero(tmpdir: str) -> None:
+    print("=== MCP: execute_command (non-zero exit → isError) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "execute_command",
+                    "arguments": {"command": "exit 42",
+                                  "workingDirectory": tmpdir}}},
+    ], [tmpdir])
+
+    text = text_of(by_id[1])
+    check("execute_command exit 42: isError true", is_command_error(by_id[1]), str(by_id[1]))
+    check("execute_command exit 42: exit code in text", "[exit code: 42]" in text, text)
+
+
+def test_execute_stderr(tmpdir: str) -> None:
+    print("=== MCP: execute_command (stdout + stderr → two content items) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "execute_command",
+                    "arguments": {"command": "echo 'out_line'; echo 'err_line' >&2",
+                                  "workingDirectory": tmpdir}}},
+    ], [tmpdir])
+
+    content = by_id[1].get("result", {}).get("content", [])
+    check("execute_command stderr: two content items",
+          len(content) == 2, f"got {len(content)}: {content}")
+    check("execute_command stderr: first item contains stdout",
+          "out_line" in content[0].get("text", ""), str(content[0]))
+    check("execute_command stderr: second item has [stderr] prefix",
+          content[1].get("text", "").startswith("[stderr]"), str(content[1]))
+    check("execute_command stderr: stderr content present",
+          "err_line" in content[1].get("text", ""), str(content[1]))
+
+
+def test_execute_timeout(tmpdir: str) -> None:
+    print("=== MCP: execute_command (timeout kills command) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "execute_command",
+                    "arguments": {"command": "sleep 100",
+                                  "workingDirectory": tmpdir,
+                                  "timeout": 1}}},
+    ], [tmpdir])
+
+    text = text_of(by_id[1])
+    check("execute_command timeout: isError true", is_command_error(by_id[1]), str(by_id[1]))
+    check("execute_command timeout: timeout notice in output",
+          "timed out" in text.lower(), text)
+
+
+def test_execute_workdir_invalid(tmpdir: str) -> None:
+    print("=== MCP: execute_command (workingDirectory outside allowed → -32001) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "execute_command",
+                    "arguments": {"command": "echo hi", "workingDirectory": "/etc"}}},
+    ], [tmpdir])
+
+    check("execute_command invalid workdir → -32001",
+          is_error(by_id[1], -32001), str(by_id[1]))
+
+
+def test_execute_missing_command(tmpdir: str) -> None:
+    print("=== MCP: execute_command (missing command → -32602) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "execute_command", "arguments": {}}},
+    ], [tmpdir])
+
+    check("execute_command missing command → -32602",
+          is_error(by_id[1], -32602), str(by_id[1]))
+
+
+def test_execute_file_write(tmpdir: str) -> None:
+    print("=== MCP: execute_command (shell writes file, read_file verifies) ===")
+
+    path = f"{tmpdir}/shell_created.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "execute_command",
+                    "arguments": {"command": f"printf 'from shell\\n' > {path}",
+                                  "workingDirectory": tmpdir}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path}}},
+    ], [tmpdir], sequential=True)
+
+    check("execute_command file write: exit 0",
+          "[exit code: 0]" in text_of(by_id[1]), text_of(by_id[1]))
+    check("execute_command file write: read_file sees shell output",
+          "from shell" in text_of(by_id[2]), text_of(by_id[2]))
+
+
 def test_missing_required_params(tmpdir: str) -> None:
     print("=== MCP: missing required params (-32602) ===")
 
@@ -1139,6 +1273,14 @@ def main() -> int:
         test_edit_files_mixed(tmpdir)
         test_edit_files_no_glob_match(tmpdir)
         test_edit_files_dryrun(tmpdir)
+        test_execute_simple(tmpdir)
+        test_execute_working_dir(tmpdir)
+        test_execute_exit_nonzero(tmpdir)
+        test_execute_stderr(tmpdir)
+        test_execute_timeout(tmpdir)
+        test_execute_workdir_invalid(tmpdir)
+        test_execute_missing_command(tmpdir)
+        test_execute_file_write(tmpdir)
         test_create_directory(tmpdir)
         test_list_directory(tmpdir)
         test_directory_tree(tmpdir)

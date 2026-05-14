@@ -54,6 +54,16 @@ struct MCPEditResult {
     int error_code; // JSON-RPC error code on failure (-32002, -32603, …)
     std::string message; // result text on success, error description on failure
 };
+
+// Returned by ExcecuteToolMCPCore — decouples execution from MCP response emission.
+struct MCPExecuteResult {
+    bool        launched    = false; // false if the executable could not be spawned
+    bool        timed_out   = false;
+    int         exit_code   = 0;
+    std::string stdout_text;
+    std::string stderr_text;
+    std::string launch_error; // non-empty when !launched
+};
 #endif // __cplusplus
 
 NS_ASSUME_NONNULL_BEGIN
@@ -120,9 +130,12 @@ bool Echo(NSString *content, ReplayContext *context, ActionContext *actionContex
 
 #ifdef __cplusplus
 }
-// Core edit logic without MCP output emission — used by edit_files multi-file handler.
-// Returns MCPEditResult (C++ struct) so must live outside extern "C".
+// These functions return C++ structs so they must live outside extern "C".
 MCPEditResult EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edits, bool dryRun);
+// workingDir: passed to NSTask setCurrentDirectoryPath; empty = inherited CWD.
+// timeoutSeconds: SIGTERM at deadline, SIGKILL after 3s grace.
+MCPExecuteResult ExcecuteToolMCPCore(NSString *toolPath, NSArray<NSString*> *arguments,
+                                      const std::string &workingDir, int timeoutSeconds);
 #endif
 
 NS_ASSUME_NONNULL_END

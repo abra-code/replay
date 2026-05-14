@@ -4,21 +4,29 @@ Describes the 14 tools exposed by `replay --mcp-server`, design choices, and err
 
 ---
 
-## Standard filesystem tools (compatible with MCP filesystem spec)
+## Tool summary
 
-| Tool | Required params | Notes |
-|------|----------------|-------|
-| `read_file` | `path` | Returns UTF-8 text or `blob` (base64) for binary. Max 10 MB. |
-| `read_multiple_files` | `paths` | Up to 50 files. Errors are inline per file, not JSON-RPC level. |
-| `write_file` | `path`, `content` | Creates parent dirs automatically. |
-| `create_directory` | `path` | `mkdir -p` semantics. |
-| `list_directory` | `path` | Each entry prefixed `[FILE]` or `[DIR]`. |
-| `directory_tree` | `path` | JSON tree. Optional `depth` (default 10; 0 = root only with empty children). |
-| `move_file` | `source`, `destination` | Creates destination parent dirs. |
-| `delete_file` | `path` | Recursive for directories. |
-| `get_file_info` | `path` | Returns type, size, modified timestamp, permissions. |
-| `list_allowed_directories` | — | Lists configured allowed dirs with read/write mode. |
-| `search_files` | `path`, `pattern` | Glob under root dir. Optional `excludePatterns` array. Max 1000 results. |
+| Tool | Required params | Extended? | Notes |
+|------|----------------|:---------:|-------|
+| `read_file` | `path` | | Returns UTF-8 text or `blob` (base64) for binary. Max 10 MB. |
+| `read_multiple_files` | `paths` | | Up to 50 files. Errors inline per file. |
+| `write_file` | `path`, `content` | | Creates parent dirs automatically. |
+| `create_directory` | `path` | | `mkdir -p` semantics. |
+| `list_directory` | `path` | | Each entry prefixed `[FILE]` or `[DIR]`. |
+| `directory_tree` | `path` | | JSON tree. Optional `depth` (default 10; 0 = root only). |
+| `move_file` | `source`, `destination` | | Creates destination parent dirs. |
+| `delete_file` | `path` | | Recursive for directories. |
+| `get_file_info` | `path` | | type, size, modified timestamp, permissions. |
+| `list_allowed_directories` | — | | Lists configured dirs with access mode. |
+| `search_files` | `path`, `pattern` | | Filename glob under root. Optional `excludePatterns`. Max 1000. |
+| `edit_file` | `path`, `edits` | ✓ | Structured edits: literal/regex, backrefs, limit, caseInsensitive. |
+| `edit_files` | `paths`, `edits` | ✓ | Multi-file edit with glob expansion. |
+| `glob_search` | `path` | ✓ | Multi-pattern array, brace alternation `{a,b}`, `excludePatterns`. |
+| `execute_command` | `command` | ✓ | Shell execution, hard-sandboxed via Seatbelt when `--sandbox` is active. |
+
+---
+
+## Standard filesystem tools (compatible with MCP filesystem spec)
 
 ### Divergences from the MCP filesystem spec
 
@@ -68,6 +76,39 @@ Behavior:
 
 ---
 
+### `execute_command` — sandboxed shell execution
+
+Required: `command`.  
+Optional: `workingDirectory`, `timeout` (default 30s, max 60s).
+
+Runs `command` via `/bin/sh -c <command>`. Captures both stdout and stderr. Supports any shell syntax: pipes, redirects, environment variable expansion, compound commands.
+
+**Response shape** (differs from all other tools):
+- `result.content[0]` — stdout text (or `(no output)` if empty) with `[exit code: N]` footer
+- `result.content[1]` — stderr text prefixed `[stderr]\n`, present only when non-empty
+- `result.isError: true` — set when exit code is non-zero or command timed out
+
+**`workingDirectory`**: validated against allowed dirs (read permission sufficient). Defaults to the first writable allowed dir, or first readable dir if no writable dir is configured. Passed as `chdir` to the shell process before executing.
+
+**Timeout**: SIGTERM sent at deadline; if the process does not exit within 3 seconds, SIGKILL is sent. Partial stdout/stderr collected up to the kill point are included in the response.
+
+**Output cap**: 512 KB per stream. Excess is truncated with a `[output truncated at 512 KB]` notice.
+
+**Why this tool exists**: For filesystem tools, the server can statically validate every path argument before executing the action — the soft (path-checking) and hard (Seatbelt kernel) sandboxes are equivalent in outcome. Shell commands are opaque to static analysis: a command can access paths via symlinks, subprocesses, eval, or file descriptors without those paths appearing in the command string. Only the Seatbelt kernel sandbox can actually enforce filesystem restrictions for shell execution. When replay is started with `--sandbox`, the sandbox profile is inherited by every child process via `fork`, giving shell commands the same filesystem confinement as all other tools.
+
+**Difference from `ExcecuteTool` (replay action system)**:
+
+| Dimension | `ExcecuteTool` (action) | `run_command_mcp` (MCP) |
+|-----------|------------------------|------------------------|
+| Invocation | Binary path + args array | `/bin/sh -c <string>` |
+| stdout | Streamed to OutputSerializer | Captured and returned in response |
+| stderr | Captured only on failure | Always captured |
+| Timeout | None | SIGTERM + SIGKILL with 3s grace |
+| Output sink | replay's ordered output pipeline | JSON-RPC `result.content` |
+| Failure signal | Sets `ReplayContext.lastError` | `result.isError: true` + exit code |
+
+---
+
 ### `glob_search` — multi-pattern file search
 
 Required: `path`.  
@@ -83,11 +124,11 @@ Uses replay's glob engine which supports `**`, `?`, `{a,b}` alternation. Accepts
 
 ### Symlinks and hardlinks
 
-replay's action system supports `symlink` and `hardlink` operations (`ln -s` / `ln`). These are not exposed as MCP tools because AI agents with shell access can create links via `ln` directly — the operation does not benefit from the sandbox-validated path handling that justifies a dedicated MCP tool. Adding them would be surface area with no practical advantage.
+replay's action system supports `symlink` and `hardlink` operations (`ln -s` / `ln`). These are not exposed as MCP tools because agents can create links via `execute_command` (`ln`, `ln -s`) — the operation does not benefit from the dedicated path-validation wrapper that justifies a standalone tool. Adding them would be surface area with no practical advantage.
 
 ### Clone (copy-on-write clone)
 
-Similarly, replay supports `cloneItem` (APFS copy-on-write clone via `clonefile(2)`). Not exposed as an MCP tool for the same reason: shell-accessible via `cp -c`.
+Similarly, replay supports `cloneItem` (APFS copy-on-write clone via `clonefile(2)`). Shell-accessible via `cp -c` through `execute_command`.
 
 ---
 
