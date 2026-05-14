@@ -13,7 +13,7 @@ Describes the 14 tools exposed by `replay --mcp-server`, design choices, and err
 | `write_file` | `path`, `content` | | Creates parent dirs automatically. |
 | `create_directory` | `path` | | `mkdir -p` semantics. |
 | `list_directory` | `path` | | Each entry prefixed `[FILE]` or `[DIR]`. |
-| `directory_tree` | `path` | | JSON tree. Optional `depth` (default 10; 0 = root only). |
+| `directory_tree` | `path` | ✓ | JSON tree. Optional `depth` (omit = unlimited; 0 = root only; `find -maxdepth` semantics). |
 | `move_file` | `source`, `destination` | | Creates destination parent dirs. |
 | `delete_file` | `path` | | Recursive for directories. |
 | `get_file_info` | `path` | | type, size, modified timestamp, permissions. |
@@ -30,9 +30,9 @@ Describes the 14 tools exposed by `replay --mcp-server`, design choices, and err
 
 ### Divergences from the MCP filesystem spec
 
-- **`edit_file`**: the MCP spec takes a unified diff; replay's version takes structured edit operations (see below). Same tool name, different interface.
+- **`edit_file`**: the MCP spec takes `oldText`/`newText` structured edits (same as replay). replay adds `regex`, `caseInsensitive`, `limit`, and back-references on top. `dryRun` returns a unified diff (standard behavior). Whitespace-normalized matching (standard MCP behavior) is used as a fallback for literal edits when exact match fails.
 - **`read_file`**: binary files are returned as a `blob` content item (base64 + mimeType) rather than an error or escaped text, which is an extension beyond the spec.
-- **`search_files`**: spec defines a content-search tool (grep). replay's implementation is now a proper content search, extended with `paths` (explicit files/globs), `regex`, `caseInsensitive`, `contextLines`, and `maxResults`. The `path` param (root directory) follows the standard MCP signature.
+- **`search_files`**: spec defines a content-search tool (grep). replay's implementation is a proper content search, extended with `paths` (explicit files/globs), `regex`, `caseInsensitive`, `contextLines`, and `maxResults`. The `path` param (root directory) follows the standard MCP signature.
 
 ---
 
@@ -64,13 +64,15 @@ Required: `path`, `edits` (array).
 Optional: `dryRun` (default false).
 
 Each edit item has:
-- `oldText` (required) — literal string or POSIX ERE pattern
-- `newText` — replacement (default empty). Supports `\1`–`\9` back-references for regex.
-- `limit` — max replacements (default 1; 0 = unlimited)
-- `regex` — treat `oldText` as ERE pattern (default false)
-- `caseInsensitive` — case-insensitive match (default false)
+- `oldText` (required) — text to find. **Standard mode** (no extended flags): tries exact match first, then falls back to whitespace-normalized line matching (strips common leading indent per block, then compares). **Extended mode** (`regex: true`): POSIX ERE pattern.
+- `newText` — replacement (default empty). In standard mode, indentation of the matched block is preserved. In regex mode, supports `\1`–`\9` back-references.
+- `limit` — max replacements (default 1; 0 = unlimited). Extended: limit ≠ 1 disables whitespace-normalized fallback.
+- `regex` — treat `oldText` as ERE pattern (default false). Extended.
+- `caseInsensitive` — case-insensitive match (default false). Extended. Disables whitespace-normalized fallback.
 
-Writes atomically (temp file + rename). Returns -32603 if any edit with `limit > 0` matched fewer than `limit` times.
+`dryRun: true` reads the file, applies all edits to an in-memory copy, and returns a unified diff (`--- / +++ / @@ ... @@`) without writing. Returns `(no changes)` if the edits produce no difference. If the file does not exist, falls back to listing intended edits.
+
+Writes atomically (temp file + rename). Returns -32603 if any edit with `limit > 0` matched fewer than `limit` times (after exhausting both exact and normalized fallback).
 
 ---
 

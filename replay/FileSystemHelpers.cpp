@@ -95,8 +95,8 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 			{
 				if (lvl == 0)
 				{
-					// Root dir itself
-					if (maxDepth <= 0)
+					// Root dir itself. maxDepth == 0: root only; maxDepth < 0: unlimited.
+					if (maxDepth == 0)
 					{
 						fts_set(fts, ent, FTS_SKIP);
 						break;
@@ -114,7 +114,8 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 					if (parent == nullptr)
 						break;
 					parent->children.push_back({ent->fts_name, true, {}});
-					if (lvl < maxDepth)
+					bool descend = (maxDepth < 0) || (lvl < maxDepth);
+					if (descend)
 					{
 						if ((int)levelToNode.size() <= lvl)
 							levelToNode.resize(lvl + 1);

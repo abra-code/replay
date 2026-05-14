@@ -309,7 +309,7 @@ def test_edit_case_insensitive(tmpdir: str) -> None:
 
 
 def test_edit_dryrun(tmpdir: str) -> None:
-    print("=== MCP: edit_file (dry-run) ===")
+    print("=== MCP: edit_file (dry-run — unified diff) ===")
 
     path = f"{tmpdir}/edit_dr.txt"
     by_id = run_mcp([
@@ -326,8 +326,11 @@ def test_edit_dryrun(tmpdir: str) -> None:
          "params": {"name": "read_file", "arguments": {"path": path}}},
     ], [tmpdir], sequential=True)
 
-    check("dry-run returns plan header",
-          "Dry-run" in text_of(by_id[2]))
+    diff = text_of(by_id[2])
+    check("dry-run returns unified diff header", "---" in diff and "+++" in diff, diff)
+    check("dry-run returns hunk marker", "@@" in diff, diff)
+    check("dry-run shows deleted line",  "-original content" in diff, diff)
+    check("dry-run shows inserted line", "+replaced content" in diff, diff)
     check("dry-run does not modify file",
           "original content" in text_of(by_id[3]))
 
@@ -620,7 +623,7 @@ def test_search_files_exclude_patterns(tmpdir: str) -> None:
 
 
 def test_search_files_missing_pattern(tmpdir: str) -> None:
-    print("=== MCP: search_files (missing pattern → -32602) ===")
+    print("=== MCP: search_files (missing pattern -> -32602) ===")
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -628,7 +631,7 @@ def test_search_files_missing_pattern(tmpdir: str) -> None:
                     "arguments": {"path": tmpdir}}},
     ], [tmpdir])
 
-    check("search_files missing pattern → -32602",
+    check("search_files missing pattern -> -32602",
           is_error(by_id[1], -32602), str(by_id[1]))
 
 
@@ -915,7 +918,7 @@ def test_edit_default_limit(tmpdir: str) -> None:
 
 
 def test_edit_no_match_error(tmpdir: str) -> None:
-    print("=== MCP: edit_file (no match with default limit=1 → -32603) ===")
+    print("=== MCP: edit_file (no match with default limit=1 -> -32603) ===")
 
     path = f"{tmpdir}/edit_nomatch.txt"
     by_id = run_mcp([
@@ -928,12 +931,12 @@ def test_edit_no_match_error(tmpdir: str) -> None:
                                   "edits": [{"oldText": "nonexistent_text"}]}}},
     ], [tmpdir], sequential=True)
 
-    check("no-match with default limit=1 → -32603",
+    check("no-match with default limit=1 -> -32603",
           is_error(by_id[2], -32603), str(by_id[2]))
 
 
 def test_edit_invalid_regex(tmpdir: str) -> None:
-    print("=== MCP: edit_file (invalid regex → -32603) ===")
+    print("=== MCP: edit_file (invalid regex -> -32603) ===")
 
     path = f"{tmpdir}/edit_badre.txt"
     by_id = run_mcp([
@@ -948,12 +951,12 @@ def test_edit_invalid_regex(tmpdir: str) -> None:
                                              "regex": True}]}}},
     ], [tmpdir], sequential=True)
 
-    check("invalid regex → -32603",
+    check("invalid regex -> -32603",
           is_error(by_id[2], -32603), str(by_id[2]))
 
 
 def test_read_file_not_found(tmpdir: str) -> None:
-    print("=== MCP: read_file (file not found → -32002) ===")
+    print("=== MCP: read_file (file not found -> -32002) ===")
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -961,16 +964,16 @@ def test_read_file_not_found(tmpdir: str) -> None:
                     "arguments": {"path": f"{tmpdir}/does_not_exist.txt"}}},
     ], [tmpdir])
 
-    check("read_file nonexistent file → -32002",
+    check("read_file nonexistent file -> -32002",
           is_error(by_id[1], -32002), str(by_id[1]))
 
 
 def test_read_binary_file(tmpdir: str) -> None:
-    print("=== MCP: read_file (binary file → blob) ===")
+    print("=== MCP: read_file (binary file -> blob) ===")
 
     path = os.path.join(tmpdir, "binary.bin")
     with open(path, "wb") as f:
-        f.write(bytes(range(256)))  # 256-byte binary with null bytes → not valid UTF-8 text
+        f.write(bytes(range(256)))  # 256-byte binary with null bytes -> not valid UTF-8 text
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -1193,7 +1196,7 @@ def test_edit_files_mixed(tmpdir: str) -> None:
 
 
 def test_edit_files_no_glob_match(tmpdir: str) -> None:
-    print("=== MCP: edit_files (glob matches no files → -32002) ===")
+    print("=== MCP: edit_files (glob matches no files -> -32002) ===")
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -1202,7 +1205,7 @@ def test_edit_files_no_glob_match(tmpdir: str) -> None:
                                   "edits": [{"oldText": "foo", "newText": "bar"}]}}},
     ], [tmpdir])
 
-    check("edit_files no glob match → -32002",
+    check("edit_files no glob match -> -32002",
           is_error(by_id[1], -32002), str(by_id[1]))
 
 
@@ -1230,10 +1233,10 @@ def test_edit_files_dryrun(tmpdir: str) -> None:
     content = by_id[3].get("result", {}).get("content", [])
     check("edit_files dryRun: two content items",
           len(content) == 2, f"got {len(content)} items")
-    check("edit_files dryRun: first item is dry-run plan",
-          "Dry-run" in content[0].get("text", ""), str(content[0]))
-    check("edit_files dryRun: second item is dry-run plan",
-          "Dry-run" in content[1].get("text", ""), str(content[1]))
+    check("edit_files dryRun: first item is unified diff",
+          "@@" in content[0].get("text", ""), str(content[0]))
+    check("edit_files dryRun: second item is unified diff",
+          "@@" in content[1].get("text", ""), str(content[1]))
     check("edit_files dryRun: file not modified",
           "original A" in text_of(by_id[4]), text_of(by_id[4]))
 
@@ -1256,7 +1259,7 @@ def test_execute_simple(tmpdir: str) -> None:
 
 
 def test_execute_working_dir(tmpdir: str) -> None:
-    print("=== MCP: execute_command (workingDirectory → pwd) ===")
+    print("=== MCP: execute_command (workingDirectory -> pwd) ===")
 
     canonical = os.path.realpath(tmpdir)
     by_id = run_mcp([
@@ -1272,7 +1275,7 @@ def test_execute_working_dir(tmpdir: str) -> None:
 
 
 def test_execute_exit_nonzero(tmpdir: str) -> None:
-    print("=== MCP: execute_command (non-zero exit → isError) ===")
+    print("=== MCP: execute_command (non-zero exit -> isError) ===")
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -1287,7 +1290,7 @@ def test_execute_exit_nonzero(tmpdir: str) -> None:
 
 
 def test_execute_stderr(tmpdir: str) -> None:
-    print("=== MCP: execute_command (stdout + stderr → two content items) ===")
+    print("=== MCP: execute_command (stdout + stderr -> two content items) ===")
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -1325,7 +1328,7 @@ def test_execute_timeout(tmpdir: str) -> None:
 
 
 def test_execute_workdir_invalid(tmpdir: str) -> None:
-    print("=== MCP: execute_command (workingDirectory outside allowed → -32001) ===")
+    print("=== MCP: execute_command (workingDirectory outside allowed -> -32001) ===")
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -1333,19 +1336,19 @@ def test_execute_workdir_invalid(tmpdir: str) -> None:
                     "arguments": {"command": "echo hi", "workingDirectory": "/etc"}}},
     ], [tmpdir])
 
-    check("execute_command invalid workdir → -32001",
+    check("execute_command invalid workdir -> -32001",
           is_error(by_id[1], -32001), str(by_id[1]))
 
 
 def test_execute_missing_command(tmpdir: str) -> None:
-    print("=== MCP: execute_command (missing command → -32602) ===")
+    print("=== MCP: execute_command (missing command -> -32602) ===")
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "execute_command", "arguments": {}}},
     ], [tmpdir])
 
-    check("execute_command missing command → -32602",
+    check("execute_command missing command -> -32602",
           is_error(by_id[1], -32602), str(by_id[1]))
 
 
@@ -1368,6 +1371,69 @@ def test_execute_file_write(tmpdir: str) -> None:
           "from shell" in text_of(by_id[2]), text_of(by_id[2]))
 
 
+def test_edit_whitespace_normalized(tmpdir: str) -> None:
+    """Standard MCP fallback: match oldText by normalized indentation."""
+    print("=== MCP: edit_file (whitespace normalization fallback) ===")
+
+    path = f"{tmpdir}/edit_ws.txt"
+    # File has 4-space indented function body
+    file_content = (
+        "function greet() {\n"
+        "    console.log('hello');\n"
+        "    return 42;\n"
+        "}\n"
+    )
+    # oldText uses no indentation — should still match via normalization
+    old_text = "console.log('hello');\nreturn 42;"
+    new_text = "console.log('world');\nreturn 0;"
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path, "content": file_content}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": old_text,
+                                             "newText": new_text}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[3])
+    check("whitespace normalization: edit succeeds (no -32603)",
+          "error" not in by_id[2], str(by_id[2]))
+    check("whitespace normalization: new content present",
+          "console.log('world')" in text, text)
+    check("whitespace normalization: original indentation preserved (4 spaces)",
+          "    console.log('world')" in text, text)
+    check("whitespace normalization: old content removed",
+          "console.log('hello')" not in text, text)
+
+
+def test_edit_dryrun_no_changes(tmpdir: str) -> None:
+    """dryRun with no-op edit returns (no changes)."""
+    print("=== MCP: edit_file (dry-run, no changes) ===")
+
+    path = f"{tmpdir}/edit_dr_noop.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path, "content": "hello\n"}}},
+        # limit=0 on a pattern that doesn't exist -> count=0, no change
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": "xyz", "newText": "abc",
+                                             "limit": 0}],
+                                  "dryRun": True}}},
+    ], [tmpdir], sequential=True)
+
+    diff = text_of(by_id[2])
+    check("dryRun no-op: returns no-changes message",
+          "no changes" in diff.lower(), diff)
+
+
 def test_missing_required_params(tmpdir: str) -> None:
     print("=== MCP: missing required params (-32602) ===")
 
@@ -1382,11 +1448,11 @@ def test_missing_required_params(tmpdir: str) -> None:
                     "arguments": {"path": f"{tmpdir}/x.txt"}}},
     ], [tmpdir])
 
-    check("read_file missing path → -32602",
+    check("read_file missing path -> -32602",
           is_error(by_id[1], -32602), str(by_id[1]))
-    check("write_file missing content → -32602",
+    check("write_file missing content -> -32602",
           is_error(by_id[2], -32602), str(by_id[2]))
-    check("edit_file missing edits → -32602",
+    check("edit_file missing edits -> -32602",
           is_error(by_id[3], -32602), str(by_id[3]))
 
 
@@ -1415,6 +1481,8 @@ def main() -> int:
         test_edit_default_limit(tmpdir)
         test_edit_no_match_error(tmpdir)
         test_edit_invalid_regex(tmpdir)
+        test_edit_whitespace_normalized(tmpdir)
+        test_edit_dryrun_no_changes(tmpdir)
         test_edit_files_literal(tmpdir)
         test_edit_files_glob(tmpdir)
         test_edit_files_mixed(tmpdir)

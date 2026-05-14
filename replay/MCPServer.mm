@@ -388,8 +388,8 @@ static void dispatch_mcp_tool(const std::string &tool,
     {
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
         if (path.empty()) return;
-        NSInteger depth = 10;
-        if (auto dv = args.obj_get("depth").get_sint(); dv && *dv >= 0)
+        NSInteger depth = -1;  // -1 = unlimited (standard MCP default)
+        if (auto dv = args.obj_get("depth").get_sint(); dv)
             depth = (NSInteger)*dv;
         else if (auto dv2 = args.obj_get("depth").get_uint(); dv2)
             depth = (NSInteger)*dv2;
@@ -1171,13 +1171,18 @@ static std::string build_tools_list_json()
     {
         auto props = doc.new_obj();
         add_str_prop(doc, props, "path", "Absolute path to the root directory");
-        add_int_prop(doc, props, "depth", "Maximum recursion depth (default 10; 0 = root only)");
+        add_int_prop(doc, props, "depth",
+            "Maximum recursion depth. Omit for unlimited (standard MCP). "
+            "0 = root node only (no children), 1 = root + immediate children, "
+            "N = N levels deep. Same semantics as find -maxdepth.");
         auto schema = doc.new_obj();
         doc.obj_add(schema, "type", doc.new_str("object"));
         doc.obj_add(schema, "properties", props);
         doc.obj_add(schema, "required", make_req(doc, {"path"}));
         doc.arr_append(tools, add_tool(doc, "directory_tree",
-            "Recursively list a directory as a JSON tree. Each node has name, type, and children.",
+            "Recursively list a directory as a JSON tree. Each node has name, type, and children. "
+            "Returns the full tree by default (no depth limit). "
+            "[Extended] Optional depth param: 0 = root only, N = N levels (find -maxdepth semantics).",
             schema));
     }
 

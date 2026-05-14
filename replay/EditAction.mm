@@ -12,6 +12,272 @@
 // EditFile — search-replace with literal or POSIX ERE regex (inspired by filt)
 // ============================================================================
 
+// ---------------------------------------------------------------------------
+// Unified diff for dryRun output
+// ---------------------------------------------------------------------------
+
+static std::vector<std::string> split_lines_for_diff(const std::string &s)
+{
+    std::vector<std::string> v;
+    size_t p = 0;
+    while (p <= s.size())
+    {
+        size_t nl = s.find('\n', p);
+        if (nl == std::string::npos)
+        {
+            if (p < s.size()) v.push_back(s.substr(p));
+            break;
+        }
+        v.push_back(s.substr(p, nl - p));
+        p = nl + 1;
+    }
+    return v;
+}
+
+// Single-hunk unified diff using common-prefix/suffix approach.
+// Correct for localized replacements; multi-edit spans collapse into one hunk.
+static std::string make_unified_diff(const char *path,
+                                      const std::string &orig,
+                                      const std::string &modified)
+{
+    if (orig == modified)
+        return "(no changes)\n";
+
+    const auto A = split_lines_for_diff(orig);
+    const auto B = split_lines_for_diff(modified);
+    const int m = (int)A.size(), n = (int)B.size();
+    const int kCtx = 3;
+
+    int prefix = 0;
+    while (prefix < m && prefix < n && A[prefix] == B[prefix])
+        ++prefix;
+
+    int suffix = 0;
+    while (suffix < m - prefix && suffix < n - prefix &&
+           A[m - 1 - suffix] == B[n - 1 - suffix])
+        ++suffix;
+
+    int a_lo = prefix, a_hi = m - suffix;   // deleted: A[a_lo..a_hi)
+    int b_lo = prefix, b_hi = n - suffix;   // inserted: B[b_lo..b_hi)
+
+    int ctx_before = std::min(kCtx, a_lo);
+    int ctx_after  = std::min(kCtx, m - a_hi);
+
+    int ha_start = a_lo - ctx_before + 1;  // 1-based
+    int ha_count = ctx_before + (a_hi - a_lo) + ctx_after;
+    int hb_start = b_lo - ctx_before + 1;
+    int hb_count = ctx_before + (b_hi - b_lo) + ctx_after;
+
+    std::string out;
+    out += "--- "; out += path; out += "\n";
+    out += "+++ "; out += path; out += "\n";
+    out += "@@ -"; out += std::to_string(ha_start);
+    out += ",";    out += std::to_string(ha_count);
+    out += " +";   out += std::to_string(hb_start);
+    out += ",";    out += std::to_string(hb_count);
+    out += " @@\n";
+
+    for (int i = a_lo - ctx_before; i < a_lo; ++i)
+        { out += ' '; out += A[i]; out += '\n'; }
+    for (int i = a_lo; i < a_hi; ++i)
+        { out += '-'; out += A[i]; out += '\n'; }
+    for (int i = b_lo; i < b_hi; ++i)
+        { out += '+'; out += B[i]; out += '\n'; }
+    for (int i = a_hi; i < a_hi + ctx_after; ++i)
+        { out += ' '; out += A[i]; out += '\n'; }
+
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Whitespace-normalized matching — standard MCP fallback when exact fails
+// ---------------------------------------------------------------------------
+
+// Check whether content_lines[start .. start+count) matches old_norm_lines
+// when each side has its common leading whitespace stripped.
+static bool normalized_region_matches(
+    const std::vector<std::string> &content_lines, int start,
+    const std::vector<std::string> &old_norm_lines)
+{
+    int count = (int)old_norm_lines.size();
+    if (start < 0 || start + count > (int)content_lines.size())
+        return false;
+
+    // Minimum indent of the content region (ignoring empty lines)
+    size_t c_min = SIZE_MAX;
+    for (int i = 0; i < count; ++i)
+    {
+        const auto &line = content_lines[start + i];
+        if (line.empty()) continue;
+        size_t ws = 0;
+        while (ws < line.size() && (line[ws] == ' ' || line[ws] == '\t'))
+            ++ws;
+        c_min = std::min(c_min, ws);
+    }
+    if (c_min == SIZE_MAX) c_min = 0;
+
+    for (int i = 0; i < count; ++i)
+    {
+        const auto &cl = content_lines[start + i];
+        const auto &ol = old_norm_lines[i];
+        size_t skip = std::min(c_min, cl.size());
+        std::string_view c_stripped(cl.data() + skip, cl.size() - skip);
+        if (c_stripped != ol)
+            return false;
+    }
+    return true;
+}
+
+// Apply a single literal replacement using whitespace-normalized line matching.
+// Finds the first block of lines in `content` that matches `old_str` lines
+// when both sides are stripped of their common leading indentation.
+// On success modifies `content` in place and returns true.
+// On failure sets *outError and returns false without modifying `content`.
+static bool apply_whitespace_normalized(std::string &content,
+                                         const std::string &old_str,
+                                         const std::string &new_str,
+                                         NSString * __nullable * __nonnull outError)
+{
+    // Split old_str into lines (no trailing-newline element)
+    std::vector<std::string> old_lines;
+    {
+        size_t p = 0;
+        while (true)
+        {
+            size_t nl = old_str.find('\n', p);
+            if (nl == std::string::npos) { if (p < old_str.size()) old_lines.push_back(old_str.substr(p)); break; }
+            old_lines.push_back(old_str.substr(p, nl - p));
+            p = nl + 1;
+        }
+    }
+    if (old_lines.empty())
+    {
+        *outError = @"oldText is empty";
+        return false;
+    }
+
+    // Minimum indent of old_str
+    size_t old_min = SIZE_MAX;
+    for (const auto &line : old_lines)
+    {
+        if (line.empty()) continue;
+        size_t ws = 0;
+        while (ws < line.size() && (line[ws] == ' ' || line[ws] == '\t')) ++ws;
+        old_min = std::min(old_min, ws);
+    }
+    if (old_min == SIZE_MAX) old_min = 0;
+
+    // Normalize old lines (strip common indent)
+    std::vector<std::string> old_norm;
+    for (const auto &line : old_lines)
+        old_norm.push_back(line.size() > old_min ? line.substr(old_min) : "");
+
+    // Split content into lines with byte offsets
+    std::vector<std::string> content_lines;
+    std::vector<size_t> line_starts;
+    {
+        size_t p = 0;
+        while (p <= content.size())
+        {
+            size_t nl = content.find('\n', p);
+            if (nl == std::string::npos)
+            {
+                if (p < content.size()) { line_starts.push_back(p); content_lines.push_back(content.substr(p)); }
+                break;
+            }
+            line_starts.push_back(p);
+            content_lines.push_back(content.substr(p, nl - p));
+            p = nl + 1;
+        }
+    }
+
+    int m = (int)old_norm.size();
+    int n = (int)content_lines.size();
+
+    int match_at = -1;
+    for (int i = 0; i + m <= n; ++i)
+    {
+        if (normalized_region_matches(content_lines, i, old_norm))
+        {
+            match_at = i;
+            break;
+        }
+    }
+
+    if (match_at < 0)
+    {
+        *outError = [NSString stringWithFormat:@"oldText not found: %s", old_str.c_str()];
+        return false;
+    }
+
+    // Determine actual indentation of matched region (min indent of non-empty lines)
+    size_t c_min = SIZE_MAX;
+    for (int i = 0; i < m; ++i)
+    {
+        const auto &cl = content_lines[match_at + i];
+        if (cl.empty()) continue;
+        size_t ws = 0;
+        while (ws < cl.size() && (cl[ws] == ' ' || cl[ws] == '\t')) ++ws;
+        c_min = std::min(c_min, ws);
+    }
+    if (c_min == SIZE_MAX) c_min = 0;
+
+    // Indent string from first non-empty matched line
+    std::string actual_indent;
+    for (int i = 0; i < m; ++i)
+    {
+        const auto &cl = content_lines[match_at + i];
+        if (!cl.empty()) { actual_indent = cl.substr(0, c_min); break; }
+    }
+
+    // Byte range of matched region (including trailing newlines except possibly last)
+    size_t region_start = line_starts[match_at];
+    size_t region_end = (match_at + m < n) ? line_starts[match_at + m] : content.size();
+
+    // Build replacement with adjusted indentation
+    std::string replacement;
+    {
+        std::vector<std::string> new_lines;
+        {
+            size_t p = 0;
+            while (true)
+            {
+                size_t nl = new_str.find('\n', p);
+                if (nl == std::string::npos) { new_lines.push_back(new_str.substr(p)); break; }
+                new_lines.push_back(new_str.substr(p, nl - p));
+                p = nl + 1;
+            }
+        }
+        // Minimum indent of new_str
+        size_t new_min = SIZE_MAX;
+        for (const auto &line : new_lines)
+        {
+            if (line.empty()) continue;
+            size_t ws = 0;
+            while (ws < line.size() && (line[ws] == ' ' || line[ws] == '\t')) ++ws;
+            new_min = std::min(new_min, ws);
+        }
+        if (new_min == SIZE_MAX) new_min = 0;
+
+        bool last_has_nl = !new_str.empty() && new_str.back() == '\n';
+        for (size_t i = 0; i < new_lines.size(); ++i)
+        {
+            const auto &line = new_lines[i];
+            if (!line.empty())
+            {
+                std::string stripped = line.size() > new_min ? line.substr(new_min) : "";
+                replacement += actual_indent + stripped;
+            }
+            bool is_last = (i + 1 == new_lines.size());
+            if (!is_last || last_has_nl)
+                replacement += '\n';
+        }
+    }
+
+    content.replace(region_start, region_end - region_start, replacement);
+    return true;
+}
+
 struct ReplaceChunk {
 	std::string literal;
 	int sub_index; // -1 = literal text, 0-9 = regex back-reference
@@ -200,6 +466,13 @@ static bool apply_one_edit(std::string &content,
 
 		if (limit > 0 && count == 0)
 		{
+			// Standard MCP fallback: whitespace-normalized line matching
+			if (limit == 1 && !case_insensitive)
+			{
+				NSString *normError = nil;
+				if (apply_whitespace_normalized(content, old_text, new_text, &normError))
+					return true;
+			}
 			*outError = [NSString stringWithFormat:@"oldText not found: %s", old_text.c_str()];
 			return false;
 		}
@@ -214,6 +487,42 @@ EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edits, bool dryRu
 {
 	if (dryRun)
 	{
+		// Read file, apply edits to a copy, and return a unified diff.
+		std::ifstream df(filePath, std::ios::binary | std::ios::ate);
+		if (df.is_open())
+		{
+			std::streamoff dfSize = df.tellg();
+			df.seekg(0, std::ios::beg);
+			std::string orig((size_t)dfSize, '\0');
+			if (dfSize > 0 && !df.read(&orig[0], dfSize))
+				return {false, -32002, std::string("dryRun: failed to read \"") + filePath + "\""};
+			df.close();
+
+			std::string modified = orig;
+			for (NSDictionary *edit in edits)
+			{
+				NSString *oldText = edit[@"oldText"];
+				NSString *newText = edit[@"newText"];
+				if (![oldText isKindOfClass:[NSString class]])
+					return {false, -32602, "edit: \"oldText\" must be a string"};
+				if (![newText isKindOfClass:[NSString class]]) newText = @"";
+
+				std::string old_str([oldText UTF8String]);
+				std::string new_str([newText UTF8String]);
+				id limitVal = edit[@"limit"];
+				NSInteger limit = [limitVal isKindOfClass:[NSNumber class]] ? [limitVal integerValue] : 1;
+				id regexVal = edit[@"regex"];
+				bool use_regex = [regexVal isKindOfClass:[NSNumber class]] ? [regexVal boolValue] : false;
+				id caseVal = edit[@"case-insensitive"];
+				bool case_insensitive = [caseVal isKindOfClass:[NSNumber class]] ? [caseVal boolValue] : false;
+
+				NSString *editError = nil;
+				if (!apply_one_edit(modified, old_str, new_str, limit, use_regex, case_insensitive, &editError))
+					return {false, -32603, [editError UTF8String]};
+			}
+			return {true, 0, make_unified_diff(filePath, orig, modified)};
+		}
+		// File does not exist yet — fall back to listing the intended edits.
 		std::string plan = std::string("Dry-run edit plan for ") + filePath + ":\n";
 		for (NSDictionary *edit in edits)
 		{
