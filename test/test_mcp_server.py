@@ -181,6 +181,9 @@ def test_handshake(tmpdir: str) -> None:
           by_id[1].get("result", {}).get("protocolVersion") == "2024-11-05")
     check("initialize returns serverInfo.name == replay-mcp",
           by_id[1].get("result", {}).get("serverInfo", {}).get("name") == "replay-mcp")
+    check("initialize returns capabilities.tools",
+          "tools" in by_id[1].get("result", {}).get("capabilities", {}),
+          str(by_id[1].get("result", {}).get("capabilities")))
     check("initialized notification produces no response",
           len(by_id) == 2,
           f"expected 2 responses, got {len(by_id)}")
@@ -665,34 +668,300 @@ def test_initialized_notification_no_response(tmpdir: str) -> None:
 
 
 def test_concurrent_requests(tmpdir: str) -> None:
-    print("=== MCP: concurrent requests (N writes + reads) ===")
+    print("=== MCP: concurrent requests (N writes then N reads) ===")
 
     n = 10
-    messages = []
-    for i in range(n):
-        messages.append({
-            "jsonrpc": "2.0", "id": i + 1,
-            "method": "tools/call",
-            "params": {"name": "write_file",
-                       "arguments": {"path": f"{tmpdir}/concurrent_{i}.txt",
-                                     "content": f"content-{i}"}},
-        })
-    for i in range(n):
-        messages.append({
-            "jsonrpc": "2.0", "id": n + i + 1,
-            "method": "tools/call",
-            "params": {"name": "read_file",
-                       "arguments": {"path": f"{tmpdir}/concurrent_{i}.txt"}},
-        })
+    write_msgs = [
+        {"jsonrpc": "2.0", "id": i + 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{tmpdir}/concurrent_{i}.txt",
+                                  "content": f"content-{i}"}}}
+        for i in range(n)
+    ]
+    read_msgs = [
+        {"jsonrpc": "2.0", "id": n + i + 1, "method": "tools/call",
+         "params": {"name": "read_file",
+                    "arguments": {"path": f"{tmpdir}/concurrent_{i}.txt"}}}
+        for i in range(n)
+    ]
 
-    by_id = run_mcp(messages, [tmpdir])
+    # Two separate batches guarantee all writes complete before reads start.
+    write_by_id = run_mcp(write_msgs, [tmpdir])
+    read_by_id  = run_mcp(read_msgs,  [tmpdir])
 
-    check(f"concurrent: all {2*n} responses received",
-          len(by_id) == 2 * n, f"got {len(by_id)}")
-    all_writes_ok = all("Successfully wrote" in text_of(by_id[i + 1]) for i in range(n))
-    check("concurrent: all writes succeeded", all_writes_ok)
-    all_reads_ok = all(f"content-{i}" in text_of(by_id[n + i + 1]) for i in range(n))
-    check("concurrent: all reads returned correct content", all_reads_ok)
+    check(f"concurrent writes: all {n} responses received",
+          len(write_by_id) == n, f"got {len(write_by_id)}")
+    all_writes_ok = all("Successfully wrote" in text_of(write_by_id[i + 1]) for i in range(n))
+    check("concurrent writes: all succeeded", all_writes_ok)
+
+    check(f"concurrent reads: all {n} responses received",
+          len(read_by_id) == n, f"got {len(read_by_id)}")
+    all_reads_ok = all(f"content-{i}" in text_of(read_by_id[n + i + 1]) for i in range(n))
+    check("concurrent reads: all returned correct content", all_reads_ok)
+
+
+def test_tools_list_schema(tmpdir: str) -> None:
+    print("=== MCP: tools/list inputSchema validation ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    ], [tmpdir])
+
+    tools = by_id[1].get("result", {}).get("tools", [])
+    # These tools declare at least one required param in their schema.
+    tools_with_required = {
+        "read_file", "read_multiple_files", "write_file", "edit_file",
+        "create_directory", "list_directory", "directory_tree", "move_file",
+        "delete_file", "search_files", "get_file_info", "glob_search",
+    }
+    for tool in tools:
+        name = tool.get("name", "?")
+        schema = tool.get("inputSchema", {})
+        check(f"tool {name}: inputSchema.type == object",
+              schema.get("type") == "object", str(schema))
+        check(f"tool {name}: inputSchema.properties present",
+              isinstance(schema.get("properties"), dict), str(schema))
+        if name in tools_with_required:
+            check(f"tool {name}: inputSchema.required is non-empty list",
+                  isinstance(schema.get("required"), list) and len(schema["required"]) > 0,
+                  str(schema.get("required")))
+
+
+def test_edit_default_limit(tmpdir: str) -> None:
+    print("=== MCP: edit_file (default limit=1, replaces first occurrence only) ===")
+
+    path = f"{tmpdir}/edit_lim1.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path, "content": "foo bar\nfoo qux\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": "foo", "newText": "FOO"}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[3])
+    check("default limit=1: edit succeeds",
+          "error" not in by_id[2], str(by_id[2]))
+    check("default limit=1: first occurrence replaced",
+          "FOO bar" in text, f"got: {text!r}")
+    check("default limit=1: second occurrence untouched",
+          "foo qux" in text, f"got: {text!r}")
+
+
+def test_edit_no_match_error(tmpdir: str) -> None:
+    print("=== MCP: edit_file (no match with default limit=1 → -32603) ===")
+
+    path = f"{tmpdir}/edit_nomatch.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path, "content": "hello world\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": "nonexistent_text"}]}}},
+    ], [tmpdir], sequential=True)
+
+    check("no-match with default limit=1 → -32603",
+          is_error(by_id[2], -32603), str(by_id[2]))
+
+
+def test_edit_invalid_regex(tmpdir: str) -> None:
+    print("=== MCP: edit_file (invalid regex → -32603) ===")
+
+    path = f"{tmpdir}/edit_badre.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path, "content": "some content\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": "[unclosed_bracket",
+                                             "newText": "x",
+                                             "regex": True}]}}},
+    ], [tmpdir], sequential=True)
+
+    check("invalid regex → -32603",
+          is_error(by_id[2], -32603), str(by_id[2]))
+
+
+def test_read_file_not_found(tmpdir: str) -> None:
+    print("=== MCP: read_file (file not found → -32002) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "read_file",
+                    "arguments": {"path": f"{tmpdir}/does_not_exist.txt"}}},
+    ], [tmpdir])
+
+    check("read_file nonexistent file → -32002",
+          is_error(by_id[1], -32002), str(by_id[1]))
+
+
+def test_read_binary_file(tmpdir: str) -> None:
+    print("=== MCP: read_file (binary file → blob) ===")
+
+    path = os.path.join(tmpdir, "binary.bin")
+    with open(path, "wb") as f:
+        f.write(bytes(range(256)))  # 256-byte binary with null bytes → not valid UTF-8 text
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path}}},
+    ], [tmpdir])
+
+    items = by_id[1].get("result", {}).get("content", [{}])
+    check("binary file: content[0].type == blob",
+          items[0].get("type") == "blob", str(items[0]))
+    check("binary file: non-empty base64 data field",
+          len(items[0].get("data", "")) > 0, str(items[0]))
+    check("binary file: mimeType field present",
+          "mimeType" in items[0], str(items[0]))
+
+
+def test_directory_tree_depth(tmpdir: str) -> None:
+    print("=== MCP: directory_tree (depth param) ===")
+
+    d = f"{tmpdir}/depth_tree"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/a/b/c.txt", "content": "deep"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "directory_tree",
+                    "arguments": {"path": d, "depth": 0}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "directory_tree",
+                    "arguments": {"path": d, "depth": 1}}},
+    ], [tmpdir], sequential=True)
+
+    tree0 = json.loads(text_of(by_id[2]))
+    check("depth=0: root is directory", tree0.get("type") == "directory")
+    check("depth=0: no children",
+          tree0.get("children") == [], f"got: {tree0.get('children')}")
+
+    tree1 = json.loads(text_of(by_id[3]))
+    check("depth=1: immediate child 'a' present",
+          any(c["name"] == "a" for c in tree1.get("children", [])),
+          f"got: {tree1.get('children')}")
+    a_node = next((c for c in tree1.get("children", []) if c["name"] == "a"), None)
+    check("depth=1: 'a' has no children (depth limit reached)",
+          a_node is not None and a_node.get("children") == [],
+          f"a_node: {a_node}")
+
+
+def test_delete_directory(tmpdir: str) -> None:
+    print("=== MCP: delete_file (recursive directory delete) ===")
+
+    d = f"{tmpdir}/del_dir"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/a.txt", "content": "a"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/sub/b.txt", "content": "b"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "delete_file", "arguments": {"path": d}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "get_file_info", "arguments": {"path": d}}},
+    ], [tmpdir], sequential=True)
+
+    check("delete directory: succeeds",
+          "Deleted" in text_of(by_id[3]), str(by_id[3]))
+    check("delete directory: dir no longer accessible",
+          is_error(by_id[4]), str(by_id[4]))
+
+
+def test_glob_search_exclude_patterns(tmpdir: str) -> None:
+    print("=== MCP: glob_search / search_files (excludePatterns) ===")
+
+    d = f"{tmpdir}/excl"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/src/main.cpp", "content": ""}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/vendor/lib.cpp", "content": ""}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "glob_search",
+                    "arguments": {"path": d,
+                                  "patterns": ["**/*.cpp"],
+                                  "excludePatterns": ["vendor/**"]}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d,
+                                  "pattern": "**/*.cpp",
+                                  "excludePatterns": ["vendor/**"]}}},
+    ], [tmpdir], sequential=True)
+
+    text3 = text_of(by_id[3])
+    check("glob_search excludePatterns: src/main.cpp included",
+          "main.cpp" in text3, text3)
+    check("glob_search excludePatterns: vendor/lib.cpp excluded",
+          "lib.cpp" not in text3, text3)
+
+    text4 = text_of(by_id[4])
+    check("search_files excludePatterns: src/main.cpp included",
+          "main.cpp" in text4, text4)
+    check("search_files excludePatterns: vendor/lib.cpp excluded",
+          "lib.cpp" not in text4, text4)
+
+
+def test_glob_search_brace(tmpdir: str) -> None:
+    print("=== MCP: glob_search (brace alternation {cpp,h}) ===")
+
+    d = f"{tmpdir}/brace"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/src/main.cpp", "content": ""}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/include/util.h", "content": ""}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/README.txt", "content": ""}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "glob_search",
+                    "arguments": {"path": d, "pattern": "**/*.{cpp,h}"}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[4])
+    check("brace alternation: .cpp file matched",
+          "main.cpp" in text, text)
+    check("brace alternation: .h file matched",
+          "util.h" in text, text)
+    check("brace alternation: .txt file excluded",
+          "README.txt" not in text, text)
+
+
+def test_missing_required_params(tmpdir: str) -> None:
+    print("=== MCP: missing required params (-32602) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{tmpdir}/x.txt"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": f"{tmpdir}/x.txt"}}},
+    ], [tmpdir])
+
+    check("read_file missing path → -32602",
+          is_error(by_id[1], -32602), str(by_id[1]))
+    check("write_file missing content → -32602",
+          is_error(by_id[2], -32602), str(by_id[2]))
+    check("edit_file missing edits → -32602",
+          is_error(by_id[3], -32602), str(by_id[3]))
 
 
 # ---------------------------------------------------------------------------
@@ -711,22 +980,33 @@ def main() -> int:
         test_handshake_isolated(tmpdir)
         test_handshake(tmpdir)
         test_tools_list(tmpdir)
+        test_tools_list_schema(tmpdir)
         test_write_read(tmpdir)
         test_edit_literal(tmpdir)
         test_edit_regex(tmpdir)
         test_edit_case_insensitive(tmpdir)
         test_edit_dryrun(tmpdir)
+        test_edit_default_limit(tmpdir)
+        test_edit_no_match_error(tmpdir)
+        test_edit_invalid_regex(tmpdir)
         test_create_directory(tmpdir)
         test_list_directory(tmpdir)
         test_directory_tree(tmpdir)
+        test_directory_tree_depth(tmpdir)
         test_move_file(tmpdir)
         test_delete_file(tmpdir)
+        test_delete_directory(tmpdir)
         test_search_files(tmpdir)
         test_get_file_info(tmpdir)
+        test_read_file_not_found(tmpdir)
+        test_read_binary_file(tmpdir)
         test_read_multiple_files(tmpdir)
         test_glob_search(tmpdir)
+        test_glob_search_exclude_patterns(tmpdir)
+        test_glob_search_brace(tmpdir)
         test_list_allowed_directories(tmpdir)
         test_path_validation(tmpdir)
+        test_missing_required_params(tmpdir)
         test_readonly_dir(tmpdir)
         test_protocol_errors(tmpdir)
         test_parse_error(tmpdir)
