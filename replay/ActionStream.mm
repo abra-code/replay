@@ -62,13 +62,13 @@ StreamActionsFromStdIn(ReplayContext *context)
 		{
 			if(context->stopOnError)
 			{
-				fprintf(gLogErr, "error: malformed action description on stdin: %s\n", line);
+				LogError("error: malformed action description on stdin: %s\n", line);
 				context->lastError.set("error: malformed action description on stdin", 1);
 				break;
 			}
 			else
 			{
-				fprintf(gLogErr, "warning: ignoring malformed action description on stdin: %s\n", line);
+				LogError("warning: ignoring malformed action description on stdin: %s\n", line);
 			}
 		}
 	}
@@ -117,7 +117,7 @@ AddOptionsToActionDescription(NSMutableDictionary *actionDescription, NSArray<NS
 			}
 			else
 			{
-				fprintf(gLogErr, "warning: invalid option: %s\n", [oneOption UTF8String]);
+				LogError("warning: invalid option: %s\n", [oneOption UTF8String]);
 			}
 		}
 	}

@@ -70,7 +70,7 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 {
 	if(playlistPath == NULL)
 	{
-		fprintf(gLogErr, "error: playlist file path not provided\n");
+		LogError("error: playlist file path not provided\n");
 		return nil;
 	}
 
@@ -134,12 +134,12 @@ LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 			context->lastError.set(std::string("error: playlist file \"") + [[playlistURL path] UTF8String] + "\" cannot be opened: " + ([errorDesc UTF8String] ?: "unknown"), (int)[operationError code]);
-			fprintf(gLogErr, "error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
+			LogError("error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
 		}
 		else
 		{
 			context->lastError.set("error: unknown or invalid playlist type", 1);
-			fprintf(gLogErr, "error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key specified, the root container is expected to be a dictionary\n");
+			LogError("error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key specified, the root container is expected to be a dictionary\n");
 		}
 	}
 
@@ -154,7 +154,7 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 {
 	if(playlistPath == NULL)
 	{
-		fprintf(gLogErr, "error: playlist file path not provided\n");
+		LogError("error: playlist file path not provided\n");
 		return nil;
 	}
 
@@ -217,12 +217,12 @@ GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
 			context->lastError.set(std::string("error: playlist file \"") + [[playlistURL path] UTF8String] + "\" cannot be opened: " + ([errorDesc UTF8String] ?: "unknown"), (int)[operationError code]);
-			fprintf(gLogErr, "error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
+			LogError("error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
 		}
 		else
 		{
 			context->lastError.set("error: unknown or invalid playlist type", 1);
-			fprintf(gLogErr, "error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key not specified, the root container is expected to be an array.\n");
+			LogError("error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key not specified, the root container is expected to be an array.\n");
 		}
 	}
 
@@ -916,7 +916,7 @@ int main(int argc, const char * argv[])
 		NSDictionary<NSString *, NSArray *> *playlistRootDict = LoadPlaylistRootDictionary(playlistPath, &context);
 		if(playlistRootDict == nil)
 		{
-			fprintf(gLogErr, "Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
+			LogError("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
 			safe_exit(EXIT_SUCCESS);
 		}
 		
@@ -927,7 +927,7 @@ int main(int argc, const char * argv[])
 			NSArray<NSDictionary*> *playlist = playlistRootDict[oneKey];
 			if((playlist == nil) || !([playlist isKindOfClass:arrayClass]))
 			{
-				fprintf(gLogErr, "Invalid or empty playlist for key \"%s\". No steps to replay\n", [oneKey UTF8String]);
+				LogError("Invalid or empty playlist for key \"%s\". No steps to replay\n", [oneKey UTF8String]);
 				if(context.stopOnError)
 					break;
 			}
@@ -939,7 +939,7 @@ int main(int argc, const char * argv[])
 		NSArray<NSDictionary*> *playlist = GetPlaylistFromRootArray(playlistPath, &context);
 		if(playlist == nil)
 		{
-			fprintf(gLogErr, "Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
+			LogError("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
 			safe_exit(EXIT_SUCCESS);
 		}
 		ProcessPlaylist(playlist, &context);

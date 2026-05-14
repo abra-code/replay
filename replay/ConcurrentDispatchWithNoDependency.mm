@@ -44,7 +44,7 @@ DispatchTasksConcurrentlyWithNoDependency(NSArray<NSDictionary*> *playlist, Repl
 		}
 		else
 		{
-			fprintf(gLogErr, "error: invalid non-dictionary step in the playlist\n");
+			LogError("error: invalid non-dictionary step in the playlist\n");
 		}
 	}
 

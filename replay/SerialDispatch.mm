@@ -51,7 +51,7 @@ DispatchTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 		}
 		else
 		{
-			fprintf(gLogErr, "error: invalid non-dictionary step in the playlist\n");
+			LogError("error: invalid non-dictionary step in the playlist\n");
 		}
 	}
 

@@ -130,7 +130,7 @@ void OutputSerializer::drainPendingForFlush()
     if (_pendingOutputs.empty())
         return;
 
-    fprintf(gLogErr, "Not all task outputs have been printed before \"replay\" finished playlist execution\n");
+    LogError("Not all task outputs have been printed before \"replay\" finished playlist execution\n");
 
     while (!_pendingOutputs.empty())
     {

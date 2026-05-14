@@ -17,7 +17,7 @@ CreateCallbackPort(NSString *batchName)
 	CFStringRef portName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kDispatchListenerPortFormat, GetAppGroupIdentifier(), batchName);
 	if(portName == NULL)
 	{
-		fprintf(gLogErr, "error: could not create port name %s\n", ((__bridge NSString *)portName).UTF8String);
+		LogError("error: could not create port name %s\n", ((__bridge NSString *)portName).UTF8String);
 		return remotePort;
 	}
 	remotePort = CFMessagePortCreateRemote(kCFAllocatorDefault, portName);//should return non-null if listener port created
@@ -68,7 +68,7 @@ ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 		{
 			if(error != NULL)
 				CFRelease(error);
-			fprintf(gLogErr, "error: corrupt mesage - cannot unpack property list dictionary from data\n");
+			LogError("error: corrupt mesage - cannot unpack property list dictionary from data\n");
 			if(context->stopOnError)
 			{
 				context->lastError.set("error: corrupt message - cannot unpack property list dictionary from data", 1);
@@ -78,7 +78,7 @@ ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 		{
 			CFRelease(replayMessage);
 			replayMessage = NULL;
-			fprintf(gLogErr, "error: invalid message - cannot unpack property list dictionary from data\n");
+			LogError("error: invalid message - cannot unpack property list dictionary from data\n");
 			if(context->stopOnError)
 			{
 				context->lastError.set("error: invalid message - cannot unpack property list dictionary from data", 1);
@@ -132,7 +132,7 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 
 		default:
 		{
-			fprintf(gLogErr, "error: unknown action request received\n");
+			LogError("error: unknown action request received\n");
 			if(context->stopOnError)
 			{
 				context->lastError.set("error: unknown message request received", 1);
@@ -153,7 +153,7 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 		}
 		else
 		{
-			fprintf(gLogErr, "error: invalid null action request received\n");
+			LogError("error: invalid null action request received\n");
 			if(context->stopOnError)
 			{
 				context->lastError.set("error: invalid null action request received", 1);
@@ -188,7 +188,7 @@ StartServerAndRunLoop(ReplayContext *context)
 	CFStringRef portName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kReplayServerPortFormat, GetAppGroupIdentifier(), context->batchName);
 	if(portName == NULL)
 	{
-		fprintf(gLogErr, "error: could not create port name %s\n", ((__bridge NSString *)portName).UTF8String);
+		LogError("error: could not create port name %s\n", ((__bridge NSString *)portName).UTF8String);
 		safe_exit(EXIT_FAILURE);
 	}
 
@@ -197,14 +197,14 @@ StartServerAndRunLoop(ReplayContext *context)
 	CFRelease(portName);
 	if(localPort == NULL)
 	{
-		fprintf(gLogErr, "error: could not create a local message port\n");
+		LogError("error: could not create a local message port\n");
 		safe_exit(EXIT_FAILURE);
 	}
 	
 	CFRunLoopSourceRef runLoopSource = CFMessagePortCreateRunLoopSource(kCFAllocatorDefault, localPort, 0);
 	if(runLoopSource == NULL)
 	{
-		fprintf(gLogErr, "error: could not create a runloop source\n");
+		LogError("error: could not create a runloop source\n");
 		safe_exit(EXIT_FAILURE);
 	}
 

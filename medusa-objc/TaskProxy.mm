@@ -83,7 +83,7 @@
 	BOOL isCircularDependency = [nextTask taskExistsInNextTaskTree:self];
 	if(isCircularDependency)
 	{
-		fprintf(gLogErr, "error: circular dependency has been detected in the action graph.\n");
+		LogError("error: circular dependency has been detected in the action graph.\n");
 		safe_exit(EXIT_FAILURE);
 	}
 #endif
@@ -194,21 +194,21 @@
 	char path[2048];
 
 	NSString *actionName = self.stepDescription[@"action"];
-	fprintf(gLogErr, "[%s]\n", actionName.UTF8String);
-	fprintf(gLogErr, "  unsatisfied dependency count: %ld\n", _pendingDependenciesCount);
+	LogError("[%s]\n", actionName.UTF8String);
+	LogError("  unsatisfied dependency count: %ld\n", _pendingDependenciesCount);
 
-	fprintf(gLogErr, "  inputs:\n");
+	LogError("  inputs:\n");
 	for(NSUInteger i = 0; i < _inputCount; i++)
 	{
 		GetPathForNode(_inputs[i], path, sizeof(path));
-		fprintf(gLogErr, "    %s\n", path);
+		LogError("    %s\n", path);
 	}
 
-	fprintf(gLogErr, "  outputs:\n");
+	LogError("  outputs:\n");
 	for(NSUInteger i = 0; i < _outputCount; i++)
 	{
 		GetPathForNode(_outputs[i], path, sizeof(path));
-		fprintf(gLogErr, "    %s\n", path);
+		LogError("    %s\n", path);
 	}
 }
 

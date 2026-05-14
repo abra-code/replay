@@ -17,7 +17,7 @@ static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path
 		if(outNode->producer != NULL)
 		{
 			posixPath = [path fileSystemRepresentation];
-			fprintf(gLogErr, "error: invalid playlist for concurrent execution.\n"
+			LogError("error: invalid playlist for concurrent execution.\n"
 				"The output path: \"%s\"\n"
 				"is specified as a product of two or more actions.\n"
 				"See \"replay --help\" for more information about concurrent execution constraints.\n", posixPath);
@@ -33,7 +33,7 @@ static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path
 		if((outNode->isExclusiveInput != 0) && (outNode->hasConsumer != 0))
 		{//this input is marked as exclusive and now we are adding a second consumer. This is not allowed
 			posixPath = [path fileSystemRepresentation];
-			fprintf(gLogErr, "error: invalid playlist for concurrent execution.\n"
+			LogError("error: invalid playlist for concurrent execution.\n"
 				"The path: \"%s\"\n"
 				"is specified as an exclusive input for one action (like move or delete) but\n"
 				"there is more than one action consuming it.\n"
@@ -155,7 +155,7 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 					if(node->isExclusiveInput != 0)
 					{
 						posixPath = [oneInput fileSystemRepresentation];
-						fprintf(gLogErr, "error: invalid playlist for concurrent execution.\n"
+						LogError("error: invalid playlist for concurrent execution.\n"
 							"The path: \"%s\"\n"
 							"is specified as a mutating input (e.g. edit) but another action has marked it\n"
 							"as an exclusive input (delete or move). These cannot apply to the same path.\n"
@@ -268,7 +268,7 @@ VerifyAllTasksExecuted(NSArray<TaskProxy*> *allTasks)
 		{
 			if(atLeastOneNotExecuted == NO)
 			{ //the first one we encountered
-				fprintf(gLogErr, "error: not all tasks have been executed.\n"
+				LogError("error: not all tasks have been executed.\n"
 				"Most likely there are circular dependencies in the action tree.\n"
 				"See \"replay --help\" for more information about action graph restictions.\n"
 				"Not executed tasks:\n"
@@ -312,7 +312,7 @@ DispatchTasksConcurrentlyWithDependencyAnalysis(NSArray<NSDictionary*> *playlist
 		}
 		else
 		{
-			fprintf(gLogErr, "error: invalid non-dictionary step in the playlist\n");
+			LogError("error: invalid non-dictionary step in the playlist\n");
 		}
 	}
 	

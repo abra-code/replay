@@ -62,7 +62,7 @@ StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSStrin
 				NSString *envValue = environment[envVarName];
 				if(envValue == nil)
 				{
-					fprintf(gLogErr, "error: referenced environment variable \"%s\" not found\n", [envVarName UTF8String]);
+					LogError("error: referenced environment variable \"%s\" not found\n", [envVarName UTF8String]);
 					isMalformedOrInvalid = true;
 					break;
 				}
@@ -75,7 +75,7 @@ StringByExpandingEnvironmentVariables(NSString *origString, NSDictionary<NSStrin
 			else //unterminated ${} sequence - return nil
 			{
 				// translate the error to 1-based index
-				fprintf(gLogErr, "error: unterminated environment variable sequence at character %lu in string \"%s\"\n", chunkStart-1, [origString UTF8String]);
+				LogError("error: unterminated environment variable sequence at character %lu in string \"%s\"\n", chunkStart-1, [origString UTF8String]);
 				isMalformedOrInvalid = true;
 				break;
 			}

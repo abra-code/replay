@@ -45,7 +45,7 @@ static void FileNodeCFSetConnector(const void *value, void *inParentContext)
 			char posixPath[2048];
 			posixPath[0] = 0;
 			GetPathForNode(node, posixPath, sizeof(posixPath));
-			fprintf(gLogErr, "error: invalid playlist for concurrent execution.\n"
+			LogError("error: invalid playlist for concurrent execution.\n"
 				"The input path: \"%s\"\n"
 				"is used by one action but its parent path is specified as an exclusive input for other action.\n"
 				"See \"replay --help\" for more information about exclusive inputs.\n", posixPath);
@@ -59,7 +59,7 @@ static void FileNodeCFSetConnector(const void *value, void *inParentContext)
 			char posixPath[2048];
 			posixPath[0] = 0;
 			GetPathForNode(node, posixPath, sizeof(posixPath));
-			fprintf(gLogErr, "error: invalid playlist for concurrent execution.\n"
+			LogError("error: invalid playlist for concurrent execution.\n"
 				"The input path: \"%s\"\n"
 				"is produced by one action (declared as an output) but it has a parent directory\n"
 				"specified as an exclusive input for another action (like delete of move)\n"

@@ -7,7 +7,7 @@ ActionFromName(NSString *actionName, bool *isSrcDestActionPtr)
 {
 	if(actionName == nil)
 	{
-		fprintf(gLogErr, "error: action not specified in a step.\n");
+		LogError("error: action not specified in a step.\n");
 		return kActionInvalid;
 	}
 
@@ -97,7 +97,7 @@ ActionFromName(NSString *actionName, bool *isSrcDestActionPtr)
 	else
 	{
 		replayAction = kActionInvalid;
-		fprintf(gLogErr, "error: unrecognized step action: %s\n", [actionName UTF8String]);
+		LogError("error: unrecognized step action: %s\n", [actionName UTF8String]);
 	}
 
 	*isSrcDestActionPtr = isSrcDestAction;
