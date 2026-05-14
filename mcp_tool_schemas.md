@@ -210,24 +210,44 @@ Same matching strategy and `dryRun` behavior as `edit_file`.
 
 ## `search_files`
 
+Standard MCP tool: case-insensitive filename/dirname substring match.
+
 ```json
 {
-  "path":            "<string>",    // [std] Root directory (walk recursively)
+  "path":            "<string>",    // [std] Root directory to search recursively (required)
+  "pattern":         "<string>",    // [std] Literal substring to match against basenames (required)
+  "excludePatterns": ["<string>", ...] // [std+] Glob exclusions
+}
+```
+
+`pattern` is a **plain literal string** — not a glob, not a regex. It is matched as a case-insensitive substring against each entry's basename (`strcasestr` semantics). To search by glob pattern, use `glob_search`. To search file contents, use `grep_files`.
+
+Walks `path` recursively. Returns the absolute path of every file or directory whose basename contains `pattern`. No result cap — all matches are returned.
+
+**Output:** one absolute path per line, or `(no matches found)`.
+
+**Errors:** `-32001` · `-32602` missing `path` or `pattern`
+
+---
+
+## `grep_files` [ext]
+
+Extended tool: content search (grep-style) inside files.
+
+```json
+{
+  "path":            "<string>",    // [ext] Root directory (walk recursively)
   "paths":           ["<string>", ...], // [ext] Explicit paths/globs (overrides path)
-  "pattern":         "<string>",    // [std] Content search pattern (required)
-  "regex":           <boolean>,     // [std+] POSIX ERE (default false)
-  "caseInsensitive": <boolean>,     // [std+] Case-insensitive (default false)
+  "pattern":         "<string>",    // [ext] Content search pattern (required)
+  "regex":           <boolean>,     // [ext] POSIX ERE (default false)
+  "caseInsensitive": <boolean>,     // [ext] Case-insensitive (default false)
   "contextLines":    <integer>,     // [ext] Lines before/after each match, grep -C style (default 0, max 50)
   "maxResults":      <integer>,     // [ext] Total match cap (default 500, max 10000)
   "excludePatterns": ["<string>", ...] // [ext] Glob exclusions (applied with path root dir)
 }
 ```
 
-**Standard MCP:** `path` + `pattern` + `regex`. replay adds `paths`, `caseInsensitive`, `contextLines`, `maxResults`, `excludePatterns`.
-
-**`path` vs `paths`:**
-- `path` (string) — root directory; all files beneath are searched recursively (standard).
-- `paths` (array) — explicit absolute paths and/or glob patterns; overrides `path` (extended).
+Either `path` or `paths` is required. `paths` entries may be literal absolute paths or glob patterns that expand at runtime.
 
 **Output format:** grep-style lines:
 ```
@@ -256,7 +276,7 @@ Binary files (containing null bytes in the first 4 KB) are skipped silently.
 }
 ```
 
-Finds files by **filename pattern**, not content. Glob syntax: `**` (recursive), `?` (single char), `{a,b}` (alternation). Either `pattern` (string) or `patterns` (array) is required.
+Finds **files** by filename pattern (directories are not returned). Glob syntax: `**` (recursive), `?` (single char), `{a,b}` (alternation). Case-insensitive on APFS. Either `pattern` (string) or `patterns` (array) is required.
 
 **Errors:** `-32001` · `-32602` missing patterns
 

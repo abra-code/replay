@@ -599,12 +599,12 @@ EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edits, bool dryRu
 	return {true, 0, std::string("Successfully edited ") + filePath};
 }
 
-MCPSearchResult
-SearchFileMCPCore(const char *filePath, const std::string &pattern,
+MCPGrepResult
+GrepFileMCPCore(const char *filePath, const std::string &pattern,
                   bool use_regex, bool case_insensitive,
                   int context_lines, int max_matches)
 {
-    MCPSearchResult result;
+    MCPGrepResult result;
 
     std::ifstream f(filePath, std::ios::binary | std::ios::ate);
     if (!f.is_open())

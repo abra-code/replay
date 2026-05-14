@@ -1,6 +1,6 @@
 # replay MCP Tools Reference
 
-Describes the 14 tools exposed by `replay --mcp-server`, design choices, and error codes.
+Describes the 15 tools exposed by `replay --mcp-server`, design choices, and error codes.
 
 ---
 
@@ -18,10 +18,11 @@ Describes the 14 tools exposed by `replay --mcp-server`, design choices, and err
 | `delete_file` | `path` | | Recursive for directories. |
 | `get_file_info` | `path` | | type, size, modified timestamp, permissions. |
 | `list_allowed_directories` | — | | Lists configured dirs with access mode. |
-| `search_files` | `pattern` | ✓ | Content search (grep). Requires `path` or `paths`. Regex, case-insensitive, context lines. |
+| `search_files` | `path`, `pattern` | | Standard MCP: case-insensitive literal substring match against basenames. No result cap. `pattern` is not a glob or regex. |
 | `edit_file` | `path`, `edits` | ✓ | Structured edits: literal/regex, backrefs, limit, caseInsensitive. |
 | `edit_files` | `paths`, `edits` | ✓ | Multi-file edit with glob expansion. |
-| `glob_search` | `path` | ✓ | Multi-pattern array, brace alternation `{a,b}`, `excludePatterns`. |
+| `glob_search` | `path` | ✓ | Multi-pattern array, brace alternation `{a,b}`, `excludePatterns`. Returns files only (not directories). |
+| `grep_files` | `pattern` | ✓ | Content search (grep). Requires `path` or `paths`. Regex, case-insensitive, context lines. |
 | `execute_command` | `command` | ✓ | Shell execution, hard-sandboxed via Seatbelt when `--sandbox` is active. |
 
 ---
@@ -32,13 +33,13 @@ Describes the 14 tools exposed by `replay --mcp-server`, design choices, and err
 
 - **`edit_file`**: the MCP spec takes `oldText`/`newText` structured edits (same as replay). replay adds `regex`, `caseInsensitive`, `limit`, and back-references on top. `dryRun` returns a unified diff (standard behavior). Whitespace-normalized matching (standard MCP behavior) is used as a fallback for literal edits when exact match fails.
 - **`read_file`**: binary files are returned as a `blob` content item (base64 + mimeType) rather than an error or escaped text, which is an extension beyond the spec.
-- **`search_files`**: spec defines a content-search tool (grep). replay's implementation is a proper content search, extended with `paths` (explicit files/globs), `regex`, `caseInsensitive`, `contextLines`, and `maxResults`. The `path` param (root directory) follows the standard MCP signature.
+- **`search_files`**: standard MCP defines filename pattern matching (case-insensitive substring match against basenames). replay implements this correctly. The content-search capability is provided as the separate `grep_files` extension tool.
 
 ---
 
 ## Extended tools (replay-specific capabilities)
 
-### `search_files` — content search (grep-style)
+### `grep_files` — content search (grep-style)
 
 Required: `pattern` (content pattern). Either `path` or `paths` is also required.  
 Optional: `regex`, `caseInsensitive`, `contextLines` (default 0, max 50), `maxResults` (default 500, max 10000), `excludePatterns`.
@@ -54,7 +55,9 @@ Search:
 
 Output is grep-style `file:linenum:content`. Context lines use `-` separators (`file-linenum-context`). Groups separated by `--`. Binary files are skipped silently. A `[N matches]` footer is always appended. When results are truncated by `maxResults`, a truncation notice is prepended.
 
-**vs. `glob_search`**: `glob_search` finds files by *filename pattern*. `search_files` finds text *inside* files.
+**vs. `glob_search`**: `glob_search` finds files by *filename pattern*. `grep_files` finds text *inside* files.
+
+**vs. `search_files`**: `search_files` is the standard MCP tool — it matches file and directory *names* as a substring. `grep_files` is the extended tool that searches file *contents*.
 
 ---
 
@@ -136,9 +139,11 @@ Runs `command` via `/bin/sh -c <command>`. Captures both stdout and stderr. Supp
 Required: `path`.  
 Optional: `patterns` (array), `pattern` (single string), `excludePatterns`, `max` (default 1000).
 
-Uses replay's glob engine which supports `**`, `?`, `{a,b}` alternation. Accepts either a `patterns` array or a single `pattern` string.
+Uses replay's glob engine which supports `**`, `?`, `{a,b}` alternation. Accepts either a `patterns` array or a single `pattern` string. **Returns files only — directories are not included in results**, even when a directory's name matches the pattern.
 
-**vs. `search_files`**: `search_files` searches file *contents* (text/regex inside files). `glob_search` finds files by *filename pattern*. `glob_search` is the extended version of the filename-search concept, adding multi-pattern arrays, brace alternation, and a `max` cap. AI agents that inspect schemas will discover the richer capabilities from `glob_search`'s description and schema.
+**vs. `search_files`**: `search_files` does a literal substring match against basenames (no glob syntax). `glob_search` interprets patterns as globs with wildcards and alternation.
+
+**vs. `grep_files`**: `grep_files` searches file *contents*. `glob_search` finds files by *filename pattern*.
 
 ---
 

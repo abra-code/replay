@@ -349,6 +349,73 @@ glob_walk_one(const std::string &dir,
 	}
 }
 
+std::vector<std::string> find_entries_by_name(
+	const std::string &root_dir,
+	const std::string &name_substr,
+	const std::vector<std::string> &exclude_patterns,
+	size_t max_results)
+{
+	std::string root = root_dir;
+	while (!root.empty() && root.back() == '/')
+		root.pop_back();
+
+	std::unordered_set<std::string> excl_set(exclude_patterns.begin(), exclude_patterns.end());
+	CompiledExcludes compiled_excl = compile_excludes(excl_set);
+
+	std::vector<std::string> results;
+
+	char *paths[2] = { const_cast<char *>(root.c_str()), nullptr };
+	FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, fts_name_compar);
+	if (fts == nullptr)
+		return results;
+
+	FTSENT *ent;
+	while ((ent = fts_read(fts)) != nullptr)
+	{
+		switch (ent->fts_info)
+		{
+			case FTS_D:
+			{
+				if (ent->fts_level == 0)
+					break; // root itself — not a result candidate
+				if (is_path_excluded(ent->fts_path, compiled_excl, root.c_str()))
+				{
+					fts_set(fts, ent, FTS_SKIP);
+					break;
+				}
+				if (max_results > 0 && results.size() >= max_results)
+				{
+					fts_set(fts, ent, FTS_SKIP);
+					break;
+				}
+				if (strcasestr(ent->fts_name, name_substr.c_str()) != nullptr)
+					results.push_back(ent->fts_path);
+				break;
+			}
+			case FTS_F:
+			case FTS_SL:
+			case FTS_SLNONE:
+			{
+				if (max_results > 0 && results.size() >= max_results)
+					break;
+				if (is_path_excluded(ent->fts_path, compiled_excl, root.c_str()))
+					break;
+				if (strcasestr(ent->fts_name, name_substr.c_str()) != nullptr)
+					results.push_back(ent->fts_path);
+				break;
+			}
+			case FTS_ERR:
+			case FTS_DNR:
+				break;
+			default:
+				break;
+		}
+	}
+
+	fts_close(fts);
+	return results;
+}
+
 std::vector<std::string> glob_files_in_dir(
 	const std::string &root_dir,
 	const std::vector<std::string> &relative_glob_patterns,

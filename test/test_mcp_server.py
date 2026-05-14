@@ -207,7 +207,7 @@ def test_tools_list(tmpdir: str) -> None:
         "read_file", "read_multiple_files", "write_file", "edit_file", "edit_files",
         "create_directory", "list_directory", "directory_tree", "move_file",
         "delete_file", "search_files", "get_file_info",
-        "list_allowed_directories", "glob_search", "execute_command",
+        "list_allowed_directories", "glob_search", "grep_files", "execute_command",
     }
     missing = required - tools
     check("tools/list includes all required tools",
@@ -452,10 +452,180 @@ def test_delete_file(tmpdir: str) -> None:
 
 
 def test_search_files(tmpdir: str) -> None:
-    """search_files performs content search (grep), not filename glob."""
-    print("=== MCP: search_files (content search, literal) ===")
+    """Standard MCP search_files: case-insensitive filename substring match."""
+    print("=== MCP: search_files (filename substring match) ===")
 
-    d = f"{tmpdir}/sf_basic"
+    d = f"{tmpdir}/sf_name"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/alpha.txt", "content": "x"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/alphabet_soup.conf", "content": "x"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/beta.log", "content": "x"}}},
+        # Case-insensitive: "ALPHA" should match alpha.txt and alphabet_soup.conf
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "ALPHA"}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[4])
+    check("search_files name: alpha.txt matched", "alpha.txt" in text, text)
+    check("search_files name: alphabet_soup.conf matched", "alphabet_soup.conf" in text, text)
+    check("search_files name: beta.log not matched", "beta.log" not in text, text)
+
+
+def test_search_files_no_match(tmpdir: str) -> None:
+    print("=== MCP: search_files (no filename matches) ===")
+
+    d = f"{tmpdir}/sf_nomatch"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/readme.txt", "content": "x"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "xyzzy_no_such_file"}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[2])
+    check("search_files no match: returns no-matches message",
+          "no match" in text.lower(), text)
+
+
+def test_search_files_exclude_patterns(tmpdir: str) -> None:
+    print("=== MCP: search_files (excludePatterns) ===")
+
+    d = f"{tmpdir}/sf_excl"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/src/helper.c", "content": "x"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/vendor/helper.c", "content": "x"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "helper",
+                                  "excludePatterns": ["vendor/**"]}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[3])
+    check("search_files excludePatterns: src/helper.c matched", "src" in text, text)
+    check("search_files excludePatterns: vendor/helper.c excluded", "vendor" not in text, text)
+
+
+def test_search_files_missing_params(tmpdir: str) -> None:
+    print("=== MCP: search_files (missing required params -> -32602) ===")
+
+    # Missing pattern
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": tmpdir}}},
+    ], [tmpdir])
+    check("search_files missing pattern -> -32602",
+          is_error(by_id[1], -32602), str(by_id[1]))
+
+    # Missing path
+    by_id2 = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"pattern": "foo"}}},
+    ], [tmpdir])
+    check("search_files missing path -> -32602",
+          is_error(by_id2[1], -32602), str(by_id2[1]))
+
+
+def test_search_files_literal_pattern(tmpdir: str) -> None:
+    """search_files: pattern is a literal string, glob metacharacters are not interpreted."""
+    print("=== MCP: search_files (pattern is literal, not glob) ===")
+
+    d = f"{tmpdir}/sf_literal"
+    # File whose name contains the literal asterisk character
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/foo.star.txt", "content": "x"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/foobar.txt", "content": "x"}}},
+        # Pattern "foo.s" is a literal: matches "foo.star.txt" (contains "foo.s") but
+        # must NOT be treated as a glob where '.' is any char (which would also match "fooXstar").
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "foo.s"}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[3])
+    check("search_files literal: foo.star.txt matched (contains 'foo.s')",
+          "foo.star.txt" in text, text)
+    check("search_files literal: foobar.txt not matched (no 'foo.s' substring)",
+          "foobar.txt" not in text, text)
+
+
+def test_search_files_matches_directories(tmpdir: str) -> None:
+    """search_files: returns matching directory names, not just files."""
+    print("=== MCP: search_files (matches directories, not files only) ===")
+
+    d = f"{tmpdir}/sf_dirs"
+    by_id = run_mcp([
+        # Create a directory named "widgets" and a file named "gadgets.txt"
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/widgets/readme.txt", "content": "x"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/gadgets.txt", "content": "x"}}},
+        # "get" matches both the directory "widgets" and the file "gadgets.txt"
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "get"}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[3])
+    check("search_files dirs: gadgets.txt (file) matched", "gadgets.txt" in text, text)
+    check("search_files dirs: widgets (directory) matched", "widgets" in text, text)
+
+
+def test_glob_search_files_only(tmpdir: str) -> None:
+    """glob_search returns files only — matching directories are not in results."""
+    print("=== MCP: glob_search (files only, directories excluded from results) ===")
+
+    d = f"{tmpdir}/gs_dirs"
+    by_id = run_mcp([
+        # "src" directory contains a file; "src" dir name would match **src* glob
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/src/main.c", "content": "x"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/srcfile.c", "content": "x"}}},
+        # Pattern "src*" would match both the directory "src" and the file "srcfile.c";
+        # glob_search must return only files.
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "glob_search",
+                    "arguments": {"path": d, "pattern": "src*"}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[3])
+    check("glob_search files only: srcfile.c present", "srcfile.c" in text, text)
+    # The directory "src" itself must not appear as a result entry (files only)
+    # We check that no line in the result is the bare directory path (ends with /src or is /src)
+    lines = [l for l in text.splitlines() if l.strip()]
+    dir_lines = [l for l in lines if l.rstrip('/').endswith("/src")]
+    check("glob_search files only: directory 'src' not in results",
+          len(dir_lines) == 0, str(lines))
+
+
+def test_grep_files(tmpdir: str) -> None:
+    """grep_files: content search (grep-style), literal pattern."""
+    print("=== MCP: grep_files (content search, literal) ===")
+
+    d = f"{tmpdir}/gf_basic"
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "write_file",
@@ -469,95 +639,91 @@ def test_search_files(tmpdir: str) -> None:
          "params": {"name": "write_file",
                     "arguments": {"path": f"{d}/c.txt",
                                   "content": "no match\n"}}},
-        # Standard MCP style: root dir + content pattern
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-         "params": {"name": "search_files",
+         "params": {"name": "grep_files",
                     "arguments": {"path": d, "pattern": "hello"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[4])
-    check("search_files literal: matches in a.txt", "a.txt" in text, text)
-    check("search_files literal: matches in b.txt", "b.txt" in text, text)
-    check("search_files literal: c.txt not in output (no match)", "c.txt" not in text, text)
-    check("search_files literal: matching line content shown", "hello world" in text, text)
-    check("search_files literal: match count footer", "match" in text, text)
-    # grep format: file:linenum:content
-    check("search_files literal: grep-style file:line format",
+    check("grep_files literal: matches in a.txt", "a.txt" in text, text)
+    check("grep_files literal: matches in b.txt", "b.txt" in text, text)
+    check("grep_files literal: c.txt not in output (no match)", "c.txt" not in text, text)
+    check("grep_files literal: matching line content shown", "hello world" in text, text)
+    check("grep_files literal: match count footer", "match" in text, text)
+    check("grep_files literal: grep-style file:line format",
           ":1:hello world" in text or ":2:hello again" in text, text)
 
 
-def test_search_files_regex(tmpdir: str) -> None:
-    print("=== MCP: search_files (regex pattern) ===")
+def test_grep_files_regex(tmpdir: str) -> None:
+    print("=== MCP: grep_files (regex pattern) ===")
 
-    d = f"{tmpdir}/sf_regex"
+    d = f"{tmpdir}/gf_regex"
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "write_file",
                     "arguments": {"path": f"{d}/src.cpp",
                                   "content": "int foo = 1;\nfloat bar = 2.0;\nchar baz;\n"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-         "params": {"name": "search_files",
+         "params": {"name": "grep_files",
                     "arguments": {"path": d, "pattern": "^(int|float)",
                                   "regex": True}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[2])
-    check("search_files regex: int line matched", "int foo" in text, text)
-    check("search_files regex: float line matched", "float bar" in text, text)
-    check("search_files regex: char line not matched", "char baz" not in text, text)
-    check("search_files regex: 2 matches footer", "2 match" in text, text)
+    check("grep_files regex: int line matched", "int foo" in text, text)
+    check("grep_files regex: float line matched", "float bar" in text, text)
+    check("grep_files regex: char line not matched", "char baz" not in text, text)
+    check("grep_files regex: 2 matches footer", "2 match" in text, text)
 
 
-def test_search_files_case_insensitive(tmpdir: str) -> None:
-    print("=== MCP: search_files (caseInsensitive) ===")
+def test_grep_files_case_insensitive(tmpdir: str) -> None:
+    print("=== MCP: grep_files (caseInsensitive) ===")
 
-    d = f"{tmpdir}/sf_ci"
+    d = f"{tmpdir}/gf_ci"
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "write_file",
                     "arguments": {"path": f"{d}/mixed.txt",
                                   "content": "Hello World\nhello world\nHELLO WORLD\n"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-         "params": {"name": "search_files",
+         "params": {"name": "grep_files",
                     "arguments": {"path": d, "pattern": "hello",
                                   "caseInsensitive": True}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[2])
-    check("search_files caseInsensitive: all 3 variants matched",
+    check("grep_files caseInsensitive: all 3 variants matched",
           "3 match" in text, text)
 
 
-def test_search_files_context_lines(tmpdir: str) -> None:
-    print("=== MCP: search_files (contextLines) ===")
+def test_grep_files_context_lines(tmpdir: str) -> None:
+    print("=== MCP: grep_files (contextLines) ===")
 
-    d = f"{tmpdir}/sf_ctx"
+    d = f"{tmpdir}/gf_ctx"
     content = "\n".join([f"line{i}" for i in range(1, 11)]) + "\n"
-    # line5 is the match; with contextLines=2 we expect lines 3-7
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "write_file",
                     "arguments": {"path": f"{d}/file.txt", "content": content}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-         "params": {"name": "search_files",
+         "params": {"name": "grep_files",
                     "arguments": {"path": d, "pattern": "line5",
                                   "contextLines": 2}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[2])
-    check("search_files contextLines: match line present", "line5" in text, text)
-    check("search_files contextLines: before context present", "line3" in text, text)
-    check("search_files contextLines: after context present", "line7" in text, text)
-    # Context lines use '-' separator, match lines use ':'
-    check("search_files contextLines: context uses '-' separator",
+    check("grep_files contextLines: match line present", "line5" in text, text)
+    check("grep_files contextLines: before context present", "line3" in text, text)
+    check("grep_files contextLines: after context present", "line7" in text, text)
+    check("grep_files contextLines: context uses '-' separator",
           "-3-" in text or "-4-" in text, text)
-    check("search_files contextLines: match uses ':' separator", ":5:" in text, text)
+    check("grep_files contextLines: match uses ':' separator", ":5:" in text, text)
 
 
-def test_search_files_paths_glob(tmpdir: str) -> None:
-    print("=== MCP: search_files (paths array with glob, extended) ===")
+def test_grep_files_paths_glob(tmpdir: str) -> None:
+    print("=== MCP: grep_files (paths array with glob, extended) ===")
 
-    d = f"{tmpdir}/sf_glob"
+    d = f"{tmpdir}/gf_glob"
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "write_file",
@@ -568,41 +734,40 @@ def test_search_files_paths_glob(tmpdir: str) -> None:
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "write_file",
                     "arguments": {"path": f"{d}/c.log", "content": "needle\n"}}},
-        # Use paths glob: search only .txt files
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-         "params": {"name": "search_files",
+         "params": {"name": "grep_files",
                     "arguments": {"paths": [f"{d}/*.txt"], "pattern": "needle"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[4])
-    check("search_files paths glob: a.txt matched", "a.txt" in text, text)
-    check("search_files paths glob: b.txt matched", "b.txt" in text, text)
-    check("search_files paths glob: c.log excluded (not in glob)", "c.log" not in text, text)
-    check("search_files paths glob: 2 matches", "2 match" in text, text)
+    check("grep_files paths glob: a.txt matched", "a.txt" in text, text)
+    check("grep_files paths glob: b.txt matched", "b.txt" in text, text)
+    check("grep_files paths glob: c.log excluded (not in glob)", "c.log" not in text, text)
+    check("grep_files paths glob: 2 matches", "2 match" in text, text)
 
 
-def test_search_files_no_match(tmpdir: str) -> None:
-    print("=== MCP: search_files (no matches) ===")
+def test_grep_files_no_match(tmpdir: str) -> None:
+    print("=== MCP: grep_files (no content matches) ===")
 
-    d = f"{tmpdir}/sf_nomatch"
+    d = f"{tmpdir}/gf_nomatch"
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "write_file",
                     "arguments": {"path": f"{d}/file.txt", "content": "some content\n"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-         "params": {"name": "search_files",
+         "params": {"name": "grep_files",
                     "arguments": {"path": d, "pattern": "xyzzy_not_here"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[2])
-    check("search_files no match: returns no-matches message",
+    check("grep_files no match: returns no-matches message",
           "no match" in text.lower(), text)
 
 
-def test_search_files_exclude_patterns(tmpdir: str) -> None:
-    print("=== MCP: search_files (excludePatterns with root dir) ===")
+def test_grep_files_exclude_patterns(tmpdir: str) -> None:
+    print("=== MCP: grep_files (excludePatterns with root dir) ===")
 
-    d = f"{tmpdir}/sf_excl"
+    d = f"{tmpdir}/gf_excl"
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "write_file",
@@ -611,27 +776,27 @@ def test_search_files_exclude_patterns(tmpdir: str) -> None:
          "params": {"name": "write_file",
                     "arguments": {"path": f"{d}/vendor/lib.cpp", "content": "needle\n"}}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-         "params": {"name": "search_files",
+         "params": {"name": "grep_files",
                     "arguments": {"path": d, "pattern": "needle",
                                   "excludePatterns": ["vendor/**"]}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[3])
-    check("search_files excludePatterns: main.cpp matched", "main.cpp" in text, text)
-    check("search_files excludePatterns: vendor/lib.cpp excluded", "lib.cpp" not in text, text)
-    check("search_files excludePatterns: 1 match", "1 match" in text, text)
+    check("grep_files excludePatterns: main.cpp matched", "main.cpp" in text, text)
+    check("grep_files excludePatterns: vendor/lib.cpp excluded", "lib.cpp" not in text, text)
+    check("grep_files excludePatterns: 1 match", "1 match" in text, text)
 
 
-def test_search_files_missing_pattern(tmpdir: str) -> None:
-    print("=== MCP: search_files (missing pattern -> -32602) ===")
+def test_grep_files_missing_pattern(tmpdir: str) -> None:
+    print("=== MCP: grep_files (missing pattern -> -32602) ===")
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-         "params": {"name": "search_files",
+         "params": {"name": "grep_files",
                     "arguments": {"path": tmpdir}}},
     ], [tmpdir])
 
-    check("search_files missing pattern -> -32602",
+    check("grep_files missing pattern -> -32602",
           is_error(by_id[1], -32602), str(by_id[1]))
 
 
@@ -877,7 +1042,8 @@ def test_tools_list_schema(tmpdir: str) -> None:
     tools_with_required = {
         "read_file", "read_multiple_files", "write_file", "edit_file", "edit_files",
         "create_directory", "list_directory", "directory_tree", "move_file",
-        "delete_file", "search_files", "get_file_info", "glob_search", "execute_command",
+        "delete_file", "search_files", "get_file_info", "glob_search",
+        "grep_files", "execute_command",
     }
     for tool in tools:
         name = tool.get("name", "?")
@@ -1018,6 +1184,61 @@ def test_directory_tree_depth(tmpdir: str) -> None:
     check("depth=1: 'a' has no children (depth limit reached)",
           a_node is not None and a_node.get("children") == [],
           f"a_node: {a_node}")
+
+
+def test_directory_tree_unlimited(tmpdir: str) -> None:
+    print("=== MCP: directory_tree (omitted depth = unlimited; explicit depth cap) ===")
+
+    # 3-level deep structure: d/a/b/c/leaf.txt
+    d = f"{tmpdir}/dtree_ul"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/a/b/c/leaf.txt", "content": "deep"}}},
+        # No depth param → unlimited
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "directory_tree",
+                    "arguments": {"path": d}}},
+        # depth: 2 → root + 2 levels (a and b visible, c is not)
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "directory_tree",
+                    "arguments": {"path": d, "depth": 2}}},
+    ], [tmpdir], sequential=True)
+
+    def find_node(tree: dict, name: str) -> dict | None:
+        if tree.get("name") == name:
+            return tree
+        for child in tree.get("children", []):
+            found = find_node(child, name)
+            if found is not None:
+                return found
+        return None
+
+    # Unlimited: all levels present
+    tree_full = json.loads(text_of(by_id[2]))
+    check("unlimited depth: 'a' present",
+          find_node(tree_full, "a") is not None, str(tree_full))
+    check("unlimited depth: 'b' present",
+          find_node(tree_full, "b") is not None, str(tree_full))
+    check("unlimited depth: 'c' present",
+          find_node(tree_full, "c") is not None, str(tree_full))
+    check("unlimited depth: leaf.txt present",
+          find_node(tree_full, "leaf.txt") is not None, str(tree_full))
+
+    # depth=2: a and b visible, c is cut off
+    tree2 = json.loads(text_of(by_id[3]))
+    check("depth=2: 'a' present",
+          find_node(tree2, "a") is not None, str(tree2))
+    check("depth=2: 'b' present (2nd level)",
+          find_node(tree2, "b") is not None, str(tree2))
+    check("depth=2: 'c' absent (3rd level, beyond cap)",
+          find_node(tree2, "c") is None, str(tree2))
+    check("depth=2: leaf.txt absent",
+          find_node(tree2, "leaf.txt") is None, str(tree2))
+    b_node = find_node(tree2, "b")
+    check("depth=2: 'b' has no children (depth limit reached)",
+          b_node is not None and b_node.get("children") == [],
+          f"b_node: {b_node}")
 
 
 def test_delete_directory(tmpdir: str) -> None:
@@ -1500,17 +1721,25 @@ def main() -> int:
         test_list_directory(tmpdir)
         test_directory_tree(tmpdir)
         test_directory_tree_depth(tmpdir)
+        test_directory_tree_unlimited(tmpdir)
         test_move_file(tmpdir)
         test_delete_file(tmpdir)
         test_delete_directory(tmpdir)
         test_search_files(tmpdir)
-        test_search_files_regex(tmpdir)
-        test_search_files_case_insensitive(tmpdir)
-        test_search_files_context_lines(tmpdir)
-        test_search_files_paths_glob(tmpdir)
         test_search_files_no_match(tmpdir)
         test_search_files_exclude_patterns(tmpdir)
-        test_search_files_missing_pattern(tmpdir)
+        test_search_files_missing_params(tmpdir)
+        test_search_files_literal_pattern(tmpdir)
+        test_search_files_matches_directories(tmpdir)
+        test_glob_search_files_only(tmpdir)
+        test_grep_files(tmpdir)
+        test_grep_files_regex(tmpdir)
+        test_grep_files_case_insensitive(tmpdir)
+        test_grep_files_context_lines(tmpdir)
+        test_grep_files_paths_glob(tmpdir)
+        test_grep_files_no_match(tmpdir)
+        test_grep_files_exclude_patterns(tmpdir)
+        test_grep_files_missing_pattern(tmpdir)
         test_get_file_info(tmpdir)
         test_read_file_not_found(tmpdir)
         test_read_binary_file(tmpdir)

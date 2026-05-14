@@ -656,11 +656,51 @@ static void dispatch_mcp_tool(const std::string &tool,
     }
     else if (tool == "search_files")
     {
-        // Content search (grep-style). Accepts:
-        //   path      — root directory, search all files recursively (standard MCP)
-        //   paths     — array of absolute paths / glob patterns (extended, overrides path)
+        // Standard MCP: case-insensitive basename substring match (files and directories).
+        auto path_sv = args.obj_get("path").get_str();
+        if (!path_sv)
+        {
+            PrintMCPError(context, ac, -32602, "Missing required param: path");
+            return;
+        }
+        auto pat_sv = args.obj_get("pattern").get_str();
+        if (!pat_sv)
+        {
+            PrintMCPError(context, ac, -32602, "Missing required param: pattern");
+            return;
+        }
+
+        auto vr = validate_path(std::string(*path_sv), *opts, false);
+        if (!vr.ok) { PrintMCPError(context, ac, -32001, vr.error); return; }
+
+        std::vector<std::string> exclude_strs;
+        {
+            auto excl_val = args.obj_get("excludePatterns");
+            if (excl_val.is_arr())
+            {
+                Json::ArrIter it(excl_val);
+                while (it.has_next())
+                {
+                    auto ev = it.next();
+                    if (auto s = ev.get_str(); s)
+                        exclude_strs.push_back(std::string(*s));
+                }
+            }
+        }
+
+        auto matches = find_entries_by_name(vr.canonical, std::string(*pat_sv),
+                                             exclude_strs, 0);
+        std::string text;
+        for (const auto &p : matches) { text += p; text += '\n'; }
+        PrintMCPTextResult(context, ac, text.empty() ? "(no matches found)" : std::move(text));
+    }
+    else if (tool == "grep_files")
+    {
+        // [ext] Content search (grep-style). Accepts:
+        //   path      — root directory, search all files recursively
+        //   paths     — array of absolute paths / glob patterns (overrides path)
         //   pattern   — content pattern (required)
-        //   excludePatterns — file glob exclusions (applied when using path root dir)
+        //   excludePatterns — file glob exclusions (applied with path root dir)
         //   regex, caseInsensitive, contextLines, maxResults
 
         auto pat_sv = args.obj_get("pattern").get_str();
@@ -757,7 +797,6 @@ static void dispatch_mcp_tool(const std::string &tool,
         }
         else
         {
-            // Standard MCP: root directory — walk all files recursively
             auto path_sv = args.obj_get("path").get_str();
             if (!path_sv)
             {
@@ -794,9 +833,9 @@ static void dispatch_mcp_tool(const std::string &tool,
                 truncated = true;
                 break;
             }
-            auto r = SearchFileMCPCore(file_path.c_str(), pattern, use_regex,
-                                        case_insensitive, context_lines,
-                                        max_results - total_matches);
+            auto r = GrepFileMCPCore(file_path.c_str(), pattern, use_regex,
+                                      case_insensitive, context_lines,
+                                      max_results - total_matches);
             if (r.is_binary || !r.error.empty() || r.text.empty())
                 continue;
             all_text += r.text;
@@ -1211,7 +1250,33 @@ static std::string build_tools_list_json()
             "Delete a file or directory (recursively). No confirmation requested.", schema));
     }
 
-    // search_files — content search (grep-style)
+    // search_files — standard MCP: case-insensitive filename substring match
+    {
+        auto excl_prop = doc.new_obj();
+        doc.obj_add(excl_prop, "type", doc.new_str("array"));
+        auto excl_items = doc.new_obj();
+        doc.obj_add(excl_items, "type", doc.new_str("string"));
+        doc.obj_add(excl_prop, "items", excl_items);
+        doc.obj_add(excl_prop, "description",
+            doc.new_str("Glob patterns to exclude from the search"));
+        auto props = doc.new_obj();
+        add_str_prop(doc, props, "path",
+            "Absolute root directory to search recursively (required)");
+        add_str_prop(doc, props, "pattern",
+            "Literal string to match against file and directory names (case-insensitive "
+            "substring match; not a glob or regex). Required.");
+        doc.obj_add(props, "excludePatterns", excl_prop);
+        auto schema = doc.new_obj();
+        doc.obj_add(schema, "type", doc.new_str("object"));
+        doc.obj_add(schema, "properties", props);
+        doc.obj_add(schema, "required", make_req(doc, {"path", "pattern"}));
+        doc.arr_append(tools, add_tool(doc, "search_files",
+            "Search for files and directories whose name contains pattern "
+            "(case-insensitive literal substring match — not a glob or regex). "
+            "Returns one absolute path per line. Searches recursively under path.", schema));
+    }
+
+    // grep_files — [ext] content search (grep-style)
     {
         auto excl_prop = doc.new_obj();
         doc.obj_add(excl_prop, "type", doc.new_str("array"));
@@ -1248,12 +1313,12 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "type", doc.new_str("object"));
         doc.obj_add(schema, "properties", props);
         doc.obj_add(schema, "required", make_req(doc, {"pattern"}));
-        doc.arr_append(tools, add_tool(doc, "search_files",
-            "Search file contents for a text or regex pattern (grep-style). "
+        doc.arr_append(tools, add_tool(doc, "grep_files",
+            "[Extended] Search file contents for a text or regex pattern (grep-style). "
             "Returns file:line:content matches. "
             "Provide path to walk a directory recursively, or paths for explicit files/globs. "
             "Supports regex (POSIX ERE), case-insensitive, and context lines. "
-            "Binary files are skipped. Extended beyond standard MCP search_files.", schema));
+            "Binary files are skipped.", schema));
     }
 
     // get_file_info
@@ -1304,7 +1369,8 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "properties", props);
         doc.obj_add(schema, "required", make_req(doc, {"path"}));
         doc.arr_append(tools, add_tool(doc, "glob_search",
-            "[Extended] Search files using replay's glob engine. Supports "
+            "[Extended] Search for files by filename pattern using replay's glob engine. "
+            "Returns matching files only (not directories). Supports "
             "** (recursive), ? (single char), {a,b} (alternation). "
             "Accepts a single pattern or an array of patterns relative to path.", schema));
     }

@@ -52,3 +52,13 @@ std::vector<std::string> glob_files_in_dir(
 	const std::vector<std::string> &relative_glob_patterns,
 	const std::vector<std::string> &exclude_patterns,
 	size_t max_results = 1000);
+
+// Walk root_dir recursively, returning absolute paths of files and directories whose
+// basename contains name_substr (case-insensitive substring match).
+// Exclude patterns follow the same rules as glob_files_in_dir.
+// max_results=0 means unlimited. Results are in FTS traversal order (approximately alphabetical).
+std::vector<std::string> find_entries_by_name(
+	const std::string &root_dir,
+	const std::string &name_substr,
+	const std::vector<std::string> &exclude_patterns,
+	size_t max_results = 0);
