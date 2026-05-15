@@ -45,9 +45,8 @@ void IndexAllOutputsForRecursiveExecution(NSArray< id<MedusaTask> > *allTasks,
 }
 
 
-static void FileNodeCFSetConnectConsumers(const void *value, void *producerContext)
+static void FileNodeCFSetConnectConsumers(FileNode *node, void *producerContext)
 {
-	FileNode *node = (FileNode *)value;
 	if(producerContext != NULL)
 	{
 		node->anyParentHasProducer = 1;
@@ -66,7 +65,10 @@ static void FileNodeCFSetConnectConsumers(const void *value, void *producerConte
 		if(node->producer != NULL) //and we have a new context to pass to child nodes
 			producerContext = node->producer;
 
-		CFSetApplyFunction(node->children, FileNodeCFSetConnectConsumers, producerContext);
+		for (FileNode *child : *node->children)
+		{
+			FileNodeCFSetConnectConsumers(child, producerContext);
+		}
 	}
 }
 
@@ -83,7 +85,10 @@ ConnectImplicitProducersForRecursiveExecution(FileNode *treeRoot)
 	if(treeRoot->children != NULL)
 	{
 		void *producerContext = treeRoot->producer;
-		CFSetApplyFunction(treeRoot->children, FileNodeCFSetConnectConsumers, producerContext);
+		for (FileNode *child : *treeRoot->children)
+		{
+			FileNodeCFSetConnectConsumers(child, producerContext);
+		}
 	}
 
 	clock_t end = clock();

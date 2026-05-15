@@ -30,7 +30,7 @@
 		1DB17A212F7DFD0900E67624 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				main.m,
+				main.cpp,
 			);
 			target = 1D34D699259477BB00167241 /* dispatch */;
 		};

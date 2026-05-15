@@ -19,10 +19,8 @@ typedef struct _FileNodeVisitorContext
 	uint8_t parentHasConsumer;
 } FileNodeVisitorContext;
 
-static void FileNodeCFSetConnector(const void *value, void *inParentContext)
+static void FileNodeCFSetConnector(FileNode *node, FileNodeVisitorContext *parentContext)
 {
-	FileNode *node = (FileNode *)value;
-	FileNodeVisitorContext *parentContext = (FileNodeVisitorContext *)inParentContext;
 	if(parentContext->parentNodeTask != NULL)
 	{
 		node->anyParentHasProducer = 1;
@@ -81,7 +79,10 @@ static void FileNodeCFSetConnector(const void *value, void *inParentContext)
 			(node->hasConsumer != 0)      ? (uint8_t)1 : parentContext->parentHasConsumer
 		};
 
-		CFSetApplyFunction(node->children, FileNodeCFSetConnector, &visitorContext);
+		for (FileNode *child : *node->children)
+		{
+			FileNodeCFSetConnector(child, &visitorContext);
+		}
 	}
 }
 
@@ -105,7 +106,10 @@ ConnectImplicitProducers(FileNode *treeRoot)
 			(uint8_t)(treeRoot->isExclusiveInput != 0),
 			(uint8_t)(treeRoot->hasConsumer != 0)
 		};
-		CFSetApplyFunction(treeRoot->children, FileNodeCFSetConnector, &visitorContext);
+		for (FileNode *child : *treeRoot->children)
+		{
+			FileNodeCFSetConnector(child, &visitorContext);
+		}
 	}
 
 #if TRACE

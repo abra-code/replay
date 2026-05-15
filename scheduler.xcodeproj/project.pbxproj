@@ -34,7 +34,7 @@
 		1DDD18822F7C3CF300DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				main.m,
+				main.cpp,
 			);
 			target = 1D44722125045B7F00AD4746 /* scheduler */;
 		};

@@ -31,7 +31,7 @@
 		1DA1C8F12F7C3DC1000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				main.m,
+				main.cpp,
 			);
 			target = 1D19043324DE9EE900276D83 /* replay */;
 		};

@@ -81,7 +81,10 @@ let package = Package(
         .target(
             name: "FileTree",
             path: "file-tree",
-            exclude: ["main.m"],
+            exclude: ["main.cpp"],
+            cxxSettings: [
+                .unsafeFlags(["-std=c++20"]),
+            ]
         ),
 
         .target(

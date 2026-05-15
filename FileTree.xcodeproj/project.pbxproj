@@ -23,19 +23,9 @@
 		1DB17E642F7E4E9F00E67624 /* ReplayProjectCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = ReplayProjectCommon.xcconfig; path = xcconfigs/ReplayProjectCommon.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		1DDD18172F7C3AEE00DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				AsyncDispatch.m,
-			);
-			target = 1D4070D8252B340200C9B7F0 /* FileTree */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		1DDD17EB2F7C385100DB718A /* file-tree */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "file-tree"; sourceTree = "<group>"; };
-		1DDD18142F7C3AE300DB718A /* common */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DDD18172F7C3AEE00DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = common; sourceTree = "<group>"; };
+		1DDD18142F7C3AE300DB718A /* common */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = common; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -165,6 +155,10 @@
 		1D4070E1252B340200C9B7F0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				OTHER_LDFLAGS = (
+					"-framework",
+					CoreFoundation,
+				);
 			};
 			name = Debug;
 		};
@@ -172,6 +166,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				GCC_OPTIMIZATION_LEVEL = fast;
+				OTHER_LDFLAGS = (
+					"-framework",
+					CoreFoundation,
+				);
 			};
 			name = Release;
 		};
