@@ -6,6 +6,7 @@
 #include <atomic>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 // Thread-safe error holder. hasError() is a lock-free atomic read — hot path in
 // every action guard. set/clear/description take a mutex for the string payload.
@@ -82,7 +83,7 @@ extern "C" {
 
 typedef struct
 {
-	NSDictionary<NSString *,NSString *> *environment;
+	std::unordered_map<std::string, std::string> environment;
 	ReplayError lastError;
 	FileNode * __nullable fileTreeRoot;
 	OutputSerializer* outputSerializer; // always non-null during execution

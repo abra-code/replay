@@ -3,12 +3,15 @@
 //
 
 #import <Foundation/Foundation.h>
-#import "StringAndPath.h"
 #include "PlaylistSandboxPaths.h"
+#include "FileHelpers.h"
 #include "FileSystemHelpers.h"
 #include "GlobOverlap.h"
+#include "PosixFileOps.h"
+#include "env_var_expand.h"
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 
@@ -26,7 +29,7 @@
 //   Endnode-only patterns with no '/' before the first metachar are skipped: they
 //   have no useful directory prefix (the caller already added the search root).
 static void AddPathToSandbox(NSString *rawPath,
-                               NSDictionary<NSString*, NSString*> *env,
+                               const std::unordered_map<std::string, std::string> &env,
                                bool is_write,
                                std::vector<std::string>& reads,
                                std::vector<std::string>& writes)
@@ -34,18 +37,16 @@ static void AddPathToSandbox(NSString *rawPath,
     if (![rawPath isKindOfClass:[NSString class]] || [rawPath length] == 0)
         return;
 
-    NSString *path = StringByExpandingEnvironmentVariables(rawPath, env);
-    if (path == nil || [path length] == 0)
+    auto expanded = expand_env_vars([rawPath UTF8String], env);
+    if (!expanded.has_value() || expanded->empty())
         return;
 
-    if (![path isAbsolutePath])
-    {
-        NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
-        path = [cwd stringByAppendingPathComponent:path];
-    }
-    path = [path stringByStandardizingPath];
-
-    std::string p([path UTF8String]);
+    // resolve_literal_path: realpath on the existing ancestor + textual append for
+    // the non-existing tail. Handles relative paths via getcwd internally. Safe for
+    // paths that don't exist yet (unlike raw realpath).
+    std::string p = file_helpers::resolve_literal_path(*expanded);
+    if (p.empty())
+        return;
 
     if (globoverlap::is_glob_pattern(p))
     {
@@ -64,19 +65,19 @@ static void AddPathToSandbox(NSString *rawPath,
     // Concrete (non-glob) path.
     if (is_write)
     {
-        NSString *parent = [path stringByDeletingLastPathComponent];
-        // [parent length] > 1 skips "/" — see header comment.
-        if (parent != nil && [parent length] > 1)
-            writes.push_back([parent UTF8String]);
+        // posix_parent_dir returns "/" when there is no parent — size() > 1 skips it.
+        std::string parent = posix_parent_dir(p);
+        if (parent.size() > 1)
+            writes.push_back(parent);
     }
     else
     {
-        reads.push_back([path UTF8String]);
+        reads.push_back(p);
     }
 }
 
 static void AddFieldToSandbox(NSDictionary *action, NSString *key,
-                                NSDictionary<NSString*, NSString*> *env,
+                                const std::unordered_map<std::string, std::string> &env,
                                 bool is_write,
                                 std::vector<std::string>& reads,
                                 std::vector<std::string>& writes)
@@ -99,7 +100,7 @@ static void AddFieldToSandbox(NSDictionary *action, NSString *key,
 }
 
 static void ExtractPathsFromAction(NSDictionary *action,
-                                    NSDictionary<NSString*, NSString*> *env,
+                                    const std::unordered_map<std::string, std::string> &env,
                                     std::vector<std::string>& reads,
                                     std::vector<std::string>& writes)
 {
@@ -163,18 +164,13 @@ static void ExtractPathsFromAction(NSDictionary *action,
         NSString *tool = action[@"tool"];
         if ([tool isKindOfClass:[NSString class]])
         {
-            NSString *expanded = StringByExpandingEnvironmentVariables(tool, env);
-            if (expanded != nil && [expanded length] > 0)
+            auto toolExpanded = expand_env_vars([tool UTF8String], env);
+            if (toolExpanded.has_value() && !toolExpanded->empty())
             {
-                if (![expanded isAbsolutePath])
-                {
-                    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
-                    expanded = [cwd stringByAppendingPathComponent:expanded];
-                }
-                NSString *toolParent = [[expanded stringByStandardizingPath]
-                                        stringByDeletingLastPathComponent];
-                if (toolParent != nil && [toolParent length] > 0)
-                    reads.push_back([toolParent UTF8String]);
+                std::string toolPath = file_helpers::resolve_literal_path(*toolExpanded);
+                std::string toolParent = posix_parent_dir(toolPath);
+                if (toolParent.size() > 1)
+                    reads.push_back(toolParent);
             }
         }
         AddFieldToSandbox(action, @"inputs",           env, false, reads, writes);
@@ -194,7 +190,7 @@ static void ExtractPathsFromAction(NSDictionary *action,
 
 void ExtractPlaylistSandboxPaths(const char *playlist_path,
                                   NSArray<NSString*> *playlist_keys,
-                                  NSDictionary<NSString*, NSString*> *env,
+                                  const std::unordered_map<std::string, std::string> &env,
                                   std::vector<std::string>& reads,
                                   std::vector<std::string>& writes)
 {

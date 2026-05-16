@@ -23,6 +23,7 @@
 #import "PlaylistSandboxPaths.h"
 #include "FileHelpers.h"
 #include "MCPServer.h"
+#include "env_var_expand.h"
 
 #include <limits.h>
 
@@ -705,7 +706,7 @@ ProcessPlaylist(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 int main(int argc, const char * argv[])
 {
 	ReplayContext context;
-	context.environment = [[NSProcessInfo processInfo] environment];
+	context.environment = env_map_from_environ();
 	context.fileTreeRoot = NULL;
 	context.outputSerializer = &OutputSerializer::shared();
 	context.queue = nil;

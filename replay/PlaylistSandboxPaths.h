@@ -15,11 +15,12 @@
 
 #ifdef __cplusplus
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 void ExtractPlaylistSandboxPaths(const char *playlist_path,
                                   NSArray<NSString*> *playlist_keys,
-                                  NSDictionary<NSString*, NSString*> *env,
+                                  const std::unordered_map<std::string, std::string> &env,
                                   std::vector<std::string>& reads,
                                   std::vector<std::string>& writes);
 
