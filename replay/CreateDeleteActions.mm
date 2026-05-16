@@ -2,7 +2,9 @@
 #import "ReplayAction.h"
 #import "ReplayActionPrivate.h"
 #include "ABase64.h"
+#include "PosixFileOps.h"
 #include <cerrno>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -11,40 +13,56 @@ bool
 CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
+	{
 		return false;
+	}
+
+	const char *path = [[itemURL path] UTF8String];
+	const char *utf8 = [content UTF8String];
+	size_t len = (utf8 != nullptr) ? strlen(utf8) : 0;
+
+	auto tryWrite = [&](const char *p) -> bool {
+		std::ofstream f(p, std::ios::binary);
+		if(!f.is_open())
+		{
+			return false;
+		}
+		if(len > 0)
+		{
+			f.write(utf8, (std::streamsize)len);
+		}
+		return f.good();
+	};
 
 	if(context->mcpServer)
 	{
-		NSError *operationError = nil;
-		bool isSuccessful = [content writeToURL:itemURL atomically:NO
-		                               encoding:NSUTF8StringEncoding error:&operationError];
+		bool isSuccessful = tryWrite(path);
 		if(!isSuccessful && context->force)
 		{
-			NSFileManager *fm = [NSFileManager defaultManager];
-			[fm removeItemAtURL:itemURL error:nil];
-			NSURL *parentDirURL = [itemURL URLByDeletingLastPathComponent];
-			[fm createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
-			isSuccessful = [content writeToURL:itemURL atomically:NO
-			                          encoding:NSUTF8StringEncoding error:&operationError];
+			if(!posix_remove_recursive(path))
+			{
+				std::string parentPath = posix_parent_dir(path);
+				posix_mkdir_p(parentPath.c_str());
+			}
+			isSuccessful = tryWrite(path);
 		}
 		if(!isSuccessful)
 		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil) errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("failed to create file \"") + [[itemURL path] UTF8String] + "\": " + ([errorDesc UTF8String] ?: "unknown");
+			int err = errno;
+			std::string errStr = std::string("failed to create file \"") + path + "\": " + strerror(err);
 			PrintMCPError(context, actionContext, -32603, std::move(errStr));
 			return false;
 		}
-		PrintMCPTextResult(context, actionContext,
-		                   std::string("Successfully wrote ") + [[itemURL path] UTF8String]);
+		PrintMCPTextResult(context, actionContext, std::string("Successfully wrote ") + path);
 		return true;
 	}
 
 	if(context->verbose || context->dryRun)
 	{
+		// settings access stays ObjC until Phase 5
 		id useRawText = actionContext->settings[@"raw"];
 		const char *settingsCStr = ([useRawText isKindOfClass:[NSNumber class]]) ? ([useRawText boolValue] ? " raw=true" : " raw=false") : "";
-		std::string desc = std::string("[create file") + settingsCStr + "]\t" + [[itemURL path] UTF8String] + "\t" + [content UTF8String] + "\n";
+		std::string desc = std::string("[create file") + settingsCStr + "]\t" + path + "\t" + (utf8 != nullptr ? utf8 : "") + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -55,28 +73,23 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		NSError *operationError = nil;
-		isSuccessful = [content writeToURL:itemURL atomically:NO encoding:NSUTF8StringEncoding error:&operationError];
+		isSuccessful = tryWrite(path);
 
 		if(!isSuccessful && context->force)
 		{
-			NSFileManager *fileManager = [NSFileManager defaultManager];
-			bool removalOK = [fileManager removeItemAtURL:itemURL error:nil];
-			if(!removalOK)
+			if(!posix_remove_recursive(path))
 			{
-				NSURL *parentDirURL = [itemURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
+				std::string parentPath = posix_parent_dir(path);
+				posix_mkdir_p(parentPath.c_str());
 			}
-			isSuccessful = [content writeToURL:itemURL atomically:NO encoding:NSUTF8StringEncoding error:&operationError];
+			isSuccessful = tryWrite(path);
 		}
 
 		if(!isSuccessful)
 		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-				errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("error: failed to create file \"") + [[itemURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
-			context->lastError.set(errStr, (int)[operationError code]);
+			int err = errno;
+			std::string errStr = std::string("error: failed to create file \"") + path + "\". Error: " + strerror(err) + "\n";
+			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -87,7 +100,9 @@ bool
 CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
+	{
 		return false;
+	}
 
 	if(context->verbose || context->dryRun)
 	{
@@ -103,7 +118,7 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 	if(!context->dryRun)
 	{
 		const char *encoded = [base64Content UTF8String];
-		unsigned long encodedLen = encoded ? strlen(encoded) : 0;
+		unsigned long encodedLen = (encoded != nullptr) ? strlen(encoded) : 0;
 		unsigned long maxDecoded = CalculateDecodedBufferMaxSize(encodedLen);
 		std::vector<unsigned char> decoded(maxDecoded > 0 ? maxDecoded : 1);
 		unsigned long decodedLen = encodedLen > 0
@@ -113,25 +128,30 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 		const char *path = [[itemURL path] UTF8String];
 		auto tryWrite = [&](const char *p) -> bool {
 			std::ofstream f(p, std::ios::binary);
-			if(!f.is_open()) return false;
-			if(decodedLen > 0) f.write((const char *)decoded.data(), decodedLen);
+			if(!f.is_open())
+			{
+				return false;
+			}
+			if(decodedLen > 0)
+			{
+				f.write((const char *)decoded.data(), decodedLen);
+			}
 			return f.good();
 		};
 
 		isSuccessful = tryWrite(path);
 		if(!isSuccessful && context->force)
 		{
-			NSFileManager *fm = [NSFileManager defaultManager];
-			[fm removeItemAtURL:itemURL error:nil];
-			NSURL *parentDirURL = [itemURL URLByDeletingLastPathComponent];
-			[fm createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
+			posix_remove_recursive(path);
+			std::string parentPath = posix_parent_dir(path);
+			posix_mkdir_p(parentPath.c_str());
 			isSuccessful = tryWrite(path);
 		}
 
 		if(!isSuccessful)
 		{
 			int err = errno;
-			std::string errStr = std::string("error: failed to create file \"") + [[itemURL path] UTF8String] + "\". Error: " + strerror(err) + "\n";
+			std::string errStr = std::string("error: failed to create file \"") + path + "\". Error: " + strerror(err) + "\n";
 			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
@@ -143,30 +163,29 @@ bool
 CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
+	{
 		return false;
+	}
+
+	const char *path = [[itemURL path] UTF8String];
 
 	if(context->mcpServer)
 	{
-		NSFileManager *fm = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		bool isSuccessful = [fm createDirectoryAtURL:itemURL withIntermediateDirectories:YES
-		                                  attributes:nil error:&operationError];
+		bool isSuccessful = posix_mkdir_p(path);
 		if(!isSuccessful)
 		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil) errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("failed to create directory \"") + [[itemURL path] UTF8String] + "\": " + ([errorDesc UTF8String] ?: "unknown");
+			int err = errno;
+			std::string errStr = std::string("failed to create directory \"") + path + "\": " + strerror(err);
 			PrintMCPError(context, actionContext, -32603, std::move(errStr));
 			return false;
 		}
-		PrintMCPTextResult(context, actionContext,
-		                   std::string("Created directory ") + [[itemURL path] UTF8String]);
+		PrintMCPTextResult(context, actionContext, std::string("Created directory ") + path);
 		return true;
 	}
 
 	if(context->verbose || context->dryRun)
 	{
-		std::string desc = std::string("[create directory]\t") + [[itemURL path] UTF8String] + "\n";
+		std::string desc = std::string("[create directory]\t") + path + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -177,17 +196,12 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = [fileManager createDirectoryAtURL:itemURL withIntermediateDirectories:YES attributes:nil error:&operationError];
-
+		isSuccessful = posix_mkdir_p(path);
 		if(!isSuccessful)
 		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-				errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("error: failed to create directory \"") + [[itemURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
-			context->lastError.set(errStr, (int)[operationError code]);
+			int err = errno;
+			std::string errStr = std::string("error: failed to create directory \"") + path + "\". Error: " + strerror(err) + "\n";
+			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -198,35 +212,34 @@ bool
 DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
+	{
 		return false;
+	}
+
+	const char *path = [[itemURL path] UTF8String];
 
 	if(context->mcpServer)
 	{
-		NSFileManager *fm = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		bool isSuccessful = (bool)[fm removeItemAtURL:itemURL error:&operationError];
+		bool isSuccessful = posix_remove_recursive(path);
 		if(!isSuccessful)
 		{
-			if(![fm fileExistsAtPath:[itemURL path]])
+			if(!posix_path_exists(path))
 			{
-				PrintMCPTextResult(context, actionContext,
-				                   std::string("Deleted ") + [[itemURL path] UTF8String]);
+				PrintMCPTextResult(context, actionContext, std::string("Deleted ") + path);
 				return true;
 			}
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil) errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("failed to delete \"") + [[itemURL path] UTF8String] + "\": " + ([errorDesc UTF8String] ?: "unknown");
+			int err = errno;
+			std::string errStr = std::string("failed to delete \"") + path + "\": " + strerror(err);
 			PrintMCPError(context, actionContext, -32603, std::move(errStr));
 			return false;
 		}
-		PrintMCPTextResult(context, actionContext,
-		                   std::string("Deleted ") + [[itemURL path] UTF8String]);
+		PrintMCPTextResult(context, actionContext, std::string("Deleted ") + path);
 		return true;
 	}
 
 	if(context->verbose || context->dryRun)
 	{
-		std::string desc = std::string("[delete]\t") + [[itemURL path] UTF8String] + "\n";
+		std::string desc = std::string("[delete]\t") + path + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -237,19 +250,16 @@ DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager removeItemAtURL:itemURL error:&operationError];
+		isSuccessful = posix_remove_recursive(path);
 		if(!isSuccessful)
 		{
-			if(![fileManager fileExistsAtPath:[itemURL path]])
+			if(!posix_path_exists(path))
+			{
 				return true;
-
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-				errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("error: failed to delete \"") + [[itemURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
-			context->lastError.set(errStr, (int)[operationError code]);
+			}
+			int err = errno;
+			std::string errStr = std::string("error: failed to delete \"") + path + "\". Error: " + strerror(err) + "\n";
+			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}

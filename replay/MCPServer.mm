@@ -33,6 +33,7 @@
 #include <iostream>
 
 #include "AsyncDispatch.h"
+#include "PosixFileOps.h"
 
 #include <unistd.h>
 #include <sys/stat.h>
@@ -413,10 +414,7 @@ static void dispatch_mcp_tool(const std::string &tool,
         }
         NSURL *url = [NSURL fileURLWithPath:@(path.c_str())];
         NSString *content = [NSString stringWithUTF8String:std::string(*content_sv).c_str()];
-        // Ensure parent directory exists
-        NSFileManager *fm = [NSFileManager defaultManager];
-        [fm createDirectoryAtURL:[url URLByDeletingLastPathComponent]
-     withIntermediateDirectories:YES attributes:nil error:nil];
+        posix_mkdir_p(posix_parent_dir(path).c_str());
         CreateFile(url, content, context, ac);
     }
     else if (tool == "create_directory")
@@ -434,10 +432,7 @@ static void dispatch_mcp_tool(const std::string &tool,
         if (dst.empty()) return;
         NSURL *srcURL = [NSURL fileURLWithPath:@(src.c_str())];
         NSURL *dstURL = [NSURL fileURLWithPath:@(dst.c_str())];
-        // Ensure destination parent exists
-        NSFileManager *fm = [NSFileManager defaultManager];
-        [fm createDirectoryAtURL:[dstURL URLByDeletingLastPathComponent]
-     withIntermediateDirectories:YES attributes:nil error:nil];
+        posix_mkdir_p(posix_parent_dir(dst).c_str());
         MoveItem(srcURL, dstURL, context, ac);
     }
     else if (tool == "delete_file")

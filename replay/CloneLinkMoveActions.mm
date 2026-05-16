@@ -1,13 +1,19 @@
 #import <Foundation/Foundation.h>
 #import "ReplayAction.h"
 #import "ReplayActionPrivate.h"
+#include "PosixFileOps.h"
+#include <cerrno>
+#include <cstring>
 #include <string>
+#include <unistd.h>
 
 bool
 CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
+	{
 		return false;
+	}
 
 	if(context->verbose || context->dryRun)
 	{
@@ -22,28 +28,27 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL toURL:(NSURL *)toURL error:&operationError];
+		const char *fromPath = [[fromURL path] UTF8String];
+		const char *toPath   = [[toURL path] UTF8String];
+		int rc = posix_clone_item(fromPath, toPath);
+		isSuccessful = (rc == 0);
 
 		if(!isSuccessful && context->force)
 		{
-			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
-			if(!removalOK)
+			if(!posix_remove_recursive(toPath))
 			{
-				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
+				std::string parentPath = posix_parent_dir(toPath);
+				posix_mkdir_p(parentPath.c_str());
 			}
-			isSuccessful = (bool)[fileManager copyItemAtURL:(NSURL *)fromURL toURL:(NSURL *)toURL error:&operationError];
+			rc = posix_clone_item(fromPath, toPath);
+			isSuccessful = (rc == 0);
 		}
 
 		if(!isSuccessful)
 		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-				errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("error: failed to clone from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
-			context->lastError.set(errStr, (int)[operationError code]);
+			int err = errno;
+			std::string errStr = std::string("error: failed to clone from \"") + fromPath + "\" to \"" + toPath + "\". Error: " + strerror(err) + "\n";
+			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -54,36 +59,37 @@ bool
 MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
+	{
 		return false;
+	}
+
+	const char *fromPath = [[fromURL path] UTF8String];
+	const char *toPath   = [[toURL path] UTF8String];
 
 	if(context->mcpServer)
 	{
-		NSFileManager *fm = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		bool isSuccessful = (bool)[fm moveItemAtURL:fromURL toURL:toURL error:&operationError];
+		bool isSuccessful = posix_move_item(fromPath, toPath);
 		if(!isSuccessful && context->force)
 		{
-			[fm removeItemAtURL:toURL error:nil];
-			NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
-			[fm createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
-			isSuccessful = (bool)[fm moveItemAtURL:fromURL toURL:toURL error:&operationError];
+			posix_remove_recursive(toPath);
+			std::string parentPath = posix_parent_dir(toPath);
+			posix_mkdir_p(parentPath.c_str());
+			isSuccessful = posix_move_item(fromPath, toPath);
 		}
 		if(!isSuccessful)
 		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil) errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("failed to move from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\": " + ([errorDesc UTF8String] ?: "unknown");
+			int err = errno;
+			std::string errStr = std::string("failed to move from \"") + fromPath + "\" to \"" + toPath + "\": " + strerror(err);
 			PrintMCPError(context, actionContext, -32603, std::move(errStr));
 			return false;
 		}
-		PrintMCPTextResult(context, actionContext,
-		                   std::string("Moved ") + [[fromURL path] UTF8String] + " -> " + [[toURL path] UTF8String]);
+		PrintMCPTextResult(context, actionContext, std::string("Moved ") + fromPath + " -> " + toPath);
 		return true;
 	}
 
 	if(context->verbose || context->dryRun)
 	{
-		std::string desc = std::string("[move]\t") + [[fromURL path] UTF8String] + "\t" + [[toURL path] UTF8String] + "\n";
+		std::string desc = std::string("[move]\t") + fromPath + "\t" + toPath + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -94,28 +100,23 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *ac
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager moveItemAtURL:fromURL toURL:toURL error:&operationError];
+		isSuccessful = posix_move_item(fromPath, toPath);
 
 		if(!isSuccessful && context->force)
 		{
-			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
-			if(!removalOK)
+			if(!posix_remove_recursive(toPath))
 			{
-				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
+				std::string parentPath = posix_parent_dir(toPath);
+				posix_mkdir_p(parentPath.c_str());
 			}
-			isSuccessful = (bool)[fileManager moveItemAtURL:fromURL toURL:toURL error:&operationError];
+			isSuccessful = posix_move_item(fromPath, toPath);
 		}
 
 		if(!isSuccessful)
 		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-				errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("error: failed to move from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
-			context->lastError.set(errStr, (int)[operationError code]);
+			int err = errno;
+			std::string errStr = std::string("error: failed to move from \"") + fromPath + "\" to \"" + toPath + "\". Error: " + strerror(err) + "\n";
+			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -126,7 +127,9 @@ bool
 HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
+	{
 		return false;
+	}
 
 	if(context->verbose || context->dryRun)
 	{
@@ -141,28 +144,25 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
-		isSuccessful = (bool)[fileManager linkItemAtURL:fromURL toURL:toURL error:&operationError];
+		const char *fromPath = [[fromURL path] UTF8String];
+		const char *toPath   = [[toURL path] UTF8String];
+		isSuccessful = (link(fromPath, toPath) == 0);
 
 		if(!isSuccessful && context->force)
 		{
-			bool removalOK = [fileManager removeItemAtURL:toURL error:nil];
-			if(!removalOK)
+			if(!posix_remove_recursive(toPath))
 			{
-				NSURL *parentDirURL = [toURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
+				std::string parentPath = posix_parent_dir(toPath);
+				posix_mkdir_p(parentPath.c_str());
 			}
-			isSuccessful = (bool)[fileManager linkItemAtURL:fromURL toURL:toURL error:&operationError];
+			isSuccessful = (link(fromPath, toPath) == 0);
 		}
 
 		if(!isSuccessful)
 		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-				errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("error: failed to create a hardlink from \"") + [[fromURL path] UTF8String] + "\" to \"" + [[toURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
-			context->lastError.set(errStr, (int)[operationError code]);
+			int err = errno;
+			std::string errStr = std::string("error: failed to create a hardlink from \"") + fromPath + "\" to \"" + toPath + "\". Error: " + strerror(err) + "\n";
+			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
@@ -173,12 +173,17 @@ bool
 SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
+	{
 		return false;
+	}
 
+	// settings access stays ObjC until Phase 5
 	NSNumber *validateSource = actionContext->settings[@"validate"];
 	bool validateSymlinkSource = true;
 	if([validateSource isKindOfClass:[NSNumber class]])
+	{
 		validateSymlinkSource = [validateSource boolValue];
+	}
 
 	if(context->verbose || context->dryRun)
 	{
@@ -196,37 +201,43 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 
 	if(!context->dryRun)
 	{
-		NSFileManager *fileManager = [NSFileManager defaultManager];
-		NSError *operationError = nil;
+		const char *fromPath = [[fromURL path] UTF8String];
+		const char *linkPath = [[linkURL path] UTF8String];
+		int err = 0;
 
-		if(validateSymlinkSource && ![fileManager fileExistsAtPath:[fromURL path]])
+		if(validateSymlinkSource && !posix_path_exists_following_symlinks(fromPath))
 		{
+			err = errno;
 			isSuccessful = false;
 			force = false;
 		}
 		else
 		{
-			isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
+			isSuccessful = (symlink(fromPath, linkPath) == 0);
+			if(!isSuccessful)
+			{
+				err = errno;
+			}
 		}
 
 		if(!isSuccessful && force)
 		{
-			bool removalOK = [fileManager removeItemAtURL:linkURL error:nil];
-			if(!removalOK)
+			if(!posix_remove_recursive(linkPath))
 			{
-				NSURL *parentDirURL = [linkURL URLByDeletingLastPathComponent];
-				[fileManager createDirectoryAtURL:parentDirURL withIntermediateDirectories:YES attributes:nil error:nil];
+				std::string parentPath = posix_parent_dir(linkPath);
+				posix_mkdir_p(parentPath.c_str());
 			}
-			isSuccessful = (bool)[fileManager createSymbolicLinkAtURL:linkURL withDestinationURL:(NSURL *)fromURL error:&operationError];
+			isSuccessful = (symlink(fromPath, linkPath) == 0);
+			if(!isSuccessful)
+			{
+				err = errno;
+			}
 		}
 
 		if(!isSuccessful)
 		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-				errorDesc = [operationError localizedFailureReason];
-			std::string errStr = std::string("error: failed to create a symlink at \"") + [[linkURL path] UTF8String] + "\" referring to \"" + [[fromURL path] UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
-			context->lastError.set(errStr, operationError ? (int)[operationError code] : 1);
+			std::string errStr = std::string("error: failed to create a symlink at \"") + linkPath + "\" referring to \"" + fromPath + "\". Error: " + strerror(err) + "\n";
+			context->lastError.set(errStr, err != 0 ? err : 1);
 			PrintToStdErr(context, std::move(errStr));
 		}
 	}
