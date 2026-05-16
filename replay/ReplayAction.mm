@@ -502,7 +502,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				for(NSString *p in rawGlobs)
 				{
 					NSString *ep = StringByExpandingEnvironmentVariablesWithErrorCheck(p, context);
-					if(ep != nil) [expandedGlobs addObject:ep];
+					if(ep != nil)
+						[expandedGlobs addObject:ep];
 				}
 
 				NSArray<NSString*> *rawExcludes = stepDescription[@"exclude"];
@@ -512,7 +513,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					for(NSString *p in rawExcludes)
 					{
 						NSString *ep = StringByExpandingEnvironmentVariablesWithErrorCheck(p, context);
-						if(ep != nil) [expandedExcludes addObject:ep];
+						if(ep != nil)
+							[expandedExcludes addObject:ep];
 					}
 				}
 
@@ -548,34 +550,66 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		else if(replayAction == kFileActionEdit)
 		{
 			// Resolve edits specification (shared across all items)
-			NSArray<NSDictionary*> *editsArray = stepDescription[@"edits"];
-			if(![editsArray isKindOfClass:arrayClass] || [editsArray count] == 0)
+			std::vector<FileEdit> editsVec;
+			bool editsOK = false;
+			NSArray<NSDictionary*> *rawEditsArray = stepDescription[@"edits"];
+			if([rawEditsArray isKindOfClass:arrayClass] && [rawEditsArray count] > 0)
+			{
+				for(NSDictionary *editDict in rawEditsArray)
+				{
+					if(![editDict isKindOfClass:[NSDictionary class]])
+					continue;
+					NSString *oldText = editDict[@"oldText"];
+					if(![oldText isKindOfClass:stringClass])
+					continue;
+					FileEdit fe;
+					fe.old_text = [oldText UTF8String];
+					id newTextVal = editDict[@"newText"];
+					fe.new_text = [newTextVal isKindOfClass:stringClass] ? [newTextVal UTF8String] : "";
+					id limitVal = editDict[@"limit"];
+					if([limitVal isKindOfClass:[NSNumber class]])
+						fe.limit = (int)[limitVal integerValue];
+					id regexVal = editDict[@"regex"];
+					if([regexVal isKindOfClass:[NSNumber class]])
+						fe.use_regex = (bool)[regexVal boolValue];
+					id caseVal = editDict[@"case-insensitive"];
+					if([caseVal isKindOfClass:[NSNumber class]])
+						fe.case_insensitive = (bool)[caseVal boolValue];
+					editsVec.push_back(std::move(fe));
+				}
+				editsOK = !editsVec.empty();
+			}
+			else
 			{
 				// Simple streaming form: oldText/newText at top level
 				NSString *oldText = stepDescription[@"oldText"];
 				if([oldText isKindOfClass:stringClass])
 				{
-					NSMutableDictionary *singleEdit = [NSMutableDictionary dictionary];
-					singleEdit[@"oldText"] = oldText;
+					FileEdit fe;
+					fe.old_text = [oldText UTF8String];
 					id newTextVal = stepDescription[@"newText"];
-					singleEdit[@"newText"] = [newTextVal isKindOfClass:stringClass] ? newTextVal : @"";
-					for(NSString *key in @[@"limit", @"regex", @"case-insensitive"])
-					{
-						id val = stepDescription[key];
-						if(val != nil) singleEdit[key] = val;
-					}
-					editsArray = @[singleEdit];
+					fe.new_text = [newTextVal isKindOfClass:stringClass] ? [newTextVal UTF8String] : "";
+					id limitVal = stepDescription[@"limit"];
+					if([limitVal isKindOfClass:[NSNumber class]])
+						fe.limit = (int)[limitVal integerValue];
+					id regexVal = stepDescription[@"regex"];
+					if([regexVal isKindOfClass:[NSNumber class]])
+						fe.use_regex = (bool)[regexVal boolValue];
+					id caseVal = stepDescription[@"case-insensitive"];
+					if([caseVal isKindOfClass:[NSNumber class]])
+						fe.case_insensitive = (bool)[caseVal boolValue];
+					editsVec.push_back(std::move(fe));
+					editsOK = true;
 				}
 				else
 				{
 					std::string errStr = "error: \"edit\" action: \"edits\" array or \"oldText\" string is required\n";
 					context->lastError.set(errStr, 1);
 					PrintToStdErr(context, std::move(errStr));
-					editsArray = nil;
 				}
 			}
 
-			if(editsArray != nil)
+			if(editsOK)
 			{
 				bool actionDryRun = false;
 				id dryRunVal = stepDescription[@"dry-run"];
@@ -599,7 +633,8 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					auto expandedOpt = ExpandEnvVars([onePath UTF8String], context);
 					if(!expandedOpt.has_value())
 					{
-						if(context->stopOnError) break;
+						if(context->stopOnError)
+						break;
 						continue;
 					}
 
@@ -607,7 +642,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					{
 						// Glob item: one task expands at runtime and edits each match
 						std::string globPattern = *expandedOpt;
-						NSArray<NSDictionary*> *capturedEdits = editsArray;
+						std::vector<FileEdit> capturedEdits = editsVec;
 						bool capturedDryRun = actionDryRun;
 						NSInteger actionIndex = ++(context->actionCounter);
 						action = ^{ @autoreleasepool {
@@ -638,7 +673,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 					{
 						// Concrete path: one task per file (tasks are independent, can run in parallel)
 						std::string capturedPath = *expandedOpt;
-						NSArray<NSDictionary*> *capturedEdits = editsArray;
+						std::vector<FileEdit> capturedEdits = editsVec;
 						bool capturedDryRun = actionDryRun;
 						NSInteger actionIndex = ++(context->actionCounter);
 						action = ^{ @autoreleasepool {

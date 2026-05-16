@@ -108,13 +108,15 @@ static bool normalized_region_matches(
     for (int i = 0; i < count; ++i)
     {
         const auto &line = content_lines[start + i];
-        if (line.empty()) continue;
+        if (line.empty())
+            continue;
         size_t ws = 0;
         while (ws < line.size() && (line[ws] == ' ' || line[ws] == '\t'))
             ++ws;
         c_min = std::min(c_min, ws);
     }
-    if (c_min == SIZE_MAX) c_min = 0;
+    if (c_min == SIZE_MAX)
+        c_min = 0;
 
     for (int i = 0; i < count; ++i)
     {
@@ -165,7 +167,8 @@ static bool apply_whitespace_normalized(std::string &content,
         while (ws < line.size() && (line[ws] == ' ' || line[ws] == '\t')) ++ws;
         old_min = std::min(old_min, ws);
     }
-    if (old_min == SIZE_MAX) old_min = 0;
+    if (old_min == SIZE_MAX)
+        old_min = 0;
 
     // Normalize old lines (strip common indent)
     std::vector<std::string> old_norm;
@@ -220,7 +223,8 @@ static bool apply_whitespace_normalized(std::string &content,
         while (ws < cl.size() && (cl[ws] == ' ' || cl[ws] == '\t')) ++ws;
         c_min = std::min(c_min, ws);
     }
-    if (c_min == SIZE_MAX) c_min = 0;
+    if (c_min == SIZE_MAX)
+        c_min = 0;
 
     // Indent string from first non-empty matched line
     std::string actual_indent;
@@ -257,7 +261,8 @@ static bool apply_whitespace_normalized(std::string &content,
             while (ws < line.size() && (line[ws] == ' ' || line[ws] == '\t')) ++ws;
             new_min = std::min(new_min, ws);
         }
-        if (new_min == SIZE_MAX) new_min = 0;
+        if (new_min == SIZE_MAX)
+            new_min = 0;
 
         bool last_has_nl = !new_str.empty() && new_str.back() == '\n';
         for (size_t i = 0; i < new_lines.size(); ++i)
@@ -310,7 +315,8 @@ static std::vector<ReplaceChunk> parse_replacement(const std::string &repl)
 					case '\\': escaped = '\\'; break;
 					default: recognized = false; escaped = next; break;
 				}
-				if (!recognized) cur += '\\';
+				if (!recognized)
+					cur += '\\';
 				cur += escaped;
 				i += 2;
 			}
@@ -345,7 +351,8 @@ static std::string apply_chunks(const char *base, const std::vector<ReplaceChunk
 
 static size_t find_nocase(const std::string &text, const std::string &pattern, size_t start)
 {
-	if (pattern.empty()) return start;
+	if (pattern.empty())
+		return start;
 	for (size_t i = start; i + pattern.size() <= text.size(); i++)
 	{
 		if (strncasecmp(text.c_str() + i, pattern.c_str(), pattern.size()) == 0)
@@ -365,7 +372,8 @@ static bool apply_one_edit(std::string &content,
 	{
 		regex_t re;
 		int flags = REG_EXTENDED;
-		if (case_insensitive) flags |= REG_ICASE;
+		if (case_insensitive)
+			flags |= REG_ICASE;
 		int comp_err = regcomp(&re, old_text.c_str(), flags);
 		if (comp_err != 0)
 		{
@@ -386,12 +394,14 @@ static bool apply_one_edit(std::string &content,
 
 		while (pos <= content.size())
 		{
-			if (limit > 0 && count >= limit) break;
+			if (limit > 0 && count >= limit)
+				break;
 
 			matches[0].rm_so = (regoff_t)pos;
 			matches[0].rm_eo = (regoff_t)content.size();
 			int merr = regexec(&re, content.c_str(), nmatch, matches.data(), REG_STARTEND);
-			if (merr == REG_NOMATCH) break;
+			if (merr == REG_NOMATCH)
+				break;
 			if (merr != 0)
 			{
 				char buf[512];
@@ -448,13 +458,15 @@ static bool apply_one_edit(std::string &content,
 
 		while (pos < content.size())
 		{
-			if (limit > 0 && count >= limit) break;
+			if (limit > 0 && count >= limit)
+				break;
 
 			size_t found = case_insensitive
 				? find_nocase(content, old_text, pos)
 				: content.find(old_text, pos);
 
-			if (found == std::string::npos) break;
+			if (found == std::string::npos)
+				break;
 
 			result.append(content.data() + pos, found - pos);
 			result += new_text;
@@ -483,7 +495,7 @@ static bool apply_one_edit(std::string &content,
 }
 
 MCPEditResult
-EditFileMCPCore(const std::string &filePath, NSArray<NSDictionary *> *edits, bool dryRun)
+EditFileMCPCore(const std::string &filePath, const std::vector<FileEdit> &edits, bool dryRun)
 {
 	if (dryRun)
 	{
@@ -499,43 +511,23 @@ EditFileMCPCore(const std::string &filePath, NSArray<NSDictionary *> *edits, boo
 			df.close();
 
 			std::string modified = orig;
-			for (NSDictionary *edit in edits)
+			for (const auto &edit : edits)
 			{
-				NSString *oldText = edit[@"oldText"];
-				NSString *newText = edit[@"newText"];
-				if (![oldText isKindOfClass:[NSString class]])
-					return {false, -32602, "edit: \"oldText\" must be a string"};
-				if (![newText isKindOfClass:[NSString class]]) newText = @"";
-
-				std::string old_str([oldText UTF8String]);
-				std::string new_str([newText UTF8String]);
-				id limitVal = edit[@"limit"];
-				NSInteger limit = [limitVal isKindOfClass:[NSNumber class]] ? [limitVal integerValue] : 1;
-				id regexVal = edit[@"regex"];
-				bool use_regex = [regexVal isKindOfClass:[NSNumber class]] ? [regexVal boolValue] : false;
-				id caseVal = edit[@"case-insensitive"];
-				bool case_insensitive = [caseVal isKindOfClass:[NSNumber class]] ? [caseVal boolValue] : false;
-
 				NSString *editError = nil;
-				if (!apply_one_edit(modified, old_str, new_str, limit, use_regex, case_insensitive, &editError))
+				if (!apply_one_edit(modified, edit.old_text, edit.new_text, edit.limit, edit.use_regex, edit.case_insensitive, &editError))
 					return {false, -32603, [editError UTF8String]};
 			}
 			return {true, 0, make_unified_diff(filePath, orig, modified)};
 		}
 		// File does not exist yet — fall back to listing the intended edits.
 		std::string plan = std::string("Dry-run edit plan for ") + filePath + ":\n";
-		for (NSDictionary *edit in edits)
+		for (const auto &edit : edits)
 		{
-			NSString *old = edit[@"oldText"] ?: @"";
-			NSString *neu = edit[@"newText"] ?: @"";
-			id limitVal = edit[@"limit"];
-			NSInteger lim = [limitVal isKindOfClass:[NSNumber class]] ? [limitVal integerValue] : 1;
-			id regexVal = edit[@"regex"];
-			bool useRegex = [regexVal isKindOfClass:[NSNumber class]] ? [regexVal boolValue] : false;
-			plan += "  oldText: "; plan += [old UTF8String]; plan += "\n";
-			plan += "  newText: "; plan += [neu UTF8String]; plan += "\n";
-			plan += "  limit: "; plan += std::to_string((long)lim); plan += "\n";
-			if (useRegex) plan += "  regex: true\n";
+			plan += "  oldText: "; plan += edit.old_text; plan += "\n";
+			plan += "  newText: "; plan += edit.new_text; plan += "\n";
+			plan += "  limit: "; plan += std::to_string(edit.limit); plan += "\n";
+			if (edit.use_regex)
+				plan += "  regex: true\n";
 			plan += "\n";
 		}
 		return {true, 0, std::move(plan)};
@@ -554,25 +546,10 @@ EditFileMCPCore(const std::string &filePath, NSArray<NSDictionary *> *edits, boo
 		return {false, -32002, std::string("failed to read \"") + filePath + "\""};
 	f.close();
 
-	for (NSDictionary *edit in edits)
+	for (const auto &edit : edits)
 	{
-		NSString *oldText = edit[@"oldText"];
-		NSString *newText = edit[@"newText"];
-		if (![oldText isKindOfClass:[NSString class]])
-			return {false, -32602, "edit: \"oldText\" must be a string"};
-		if (![newText isKindOfClass:[NSString class]]) newText = @"";
-
-		std::string old_str([oldText UTF8String]);
-		std::string new_str([newText UTF8String]);
-		id limitVal = edit[@"limit"];
-		NSInteger limit = [limitVal isKindOfClass:[NSNumber class]] ? [limitVal integerValue] : 1;
-		id regexVal = edit[@"regex"];
-		bool use_regex = [regexVal isKindOfClass:[NSNumber class]] ? [regexVal boolValue] : false;
-		id caseVal = edit[@"case-insensitive"];
-		bool case_insensitive = [caseVal isKindOfClass:[NSNumber class]] ? [caseVal boolValue] : false;
-
 		NSString *editError = nil;
-		if (!apply_one_edit(content, old_str, new_str, limit, use_regex, case_insensitive, &editError))
+		if (!apply_one_edit(content, edit.old_text, edit.new_text, edit.limit, edit.use_regex, edit.case_insensitive, &editError))
 			return {false, -32603, [editError UTF8String]};
 	}
 
@@ -658,7 +635,8 @@ GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
     if (use_regex)
     {
         int flags = REG_EXTENDED | REG_NOSUB;
-        if (case_insensitive) flags |= REG_ICASE;
+        if (case_insensitive)
+            flags |= REG_ICASE;
         int err = regcomp(&re, pattern.c_str(), flags);
         if (err != 0)
         {
@@ -752,7 +730,7 @@ GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
 }
 
 bool
-EditFile(const std::string &filePath, NSArray<NSDictionary *> *edits, bool actionDryRun,
+EditFile(const std::string &filePath, const std::vector<FileEdit> &edits, bool actionDryRun,
          ReplayContext *context, ActionContext *actionContext)
 {
 	if (!context->mcpServer && context->stopOnError && context->lastError.hasError())
@@ -788,21 +766,15 @@ EditFile(const std::string &filePath, NSArray<NSDictionary *> *edits, bool actio
 		if (actionDryRun && !context->dryRun)
 		{
 			std::string plan = std::string("[edit-dry-run:") + filePath + "]\n";
-			for (NSDictionary *edit in edits)
+			for (const auto &edit : edits)
 			{
-				NSString *old = edit[@"oldText"] ?: @"";
-				NSString *neu = edit[@"newText"] ?: @"";
-				id limitVal = edit[@"limit"];
-				NSInteger lim = [limitVal isKindOfClass:[NSNumber class]] ? [limitVal integerValue] : 1;
-				id regexVal = edit[@"regex"];
-				bool useRegex = [regexVal isKindOfClass:[NSNumber class]] ? [regexVal boolValue] : false;
 				plan += "  \"";
-				plan += [old UTF8String];
+				plan += edit.old_text;
 				plan += "\" \xe2\x86\x92 \"";
-				plan += [neu UTF8String];
+				plan += edit.new_text;
 				plan += "\" (limit=";
-				plan += std::to_string((long)lim);
-				plan += useRegex ? " regex)\n" : ")\n";
+				plan += std::to_string(edit.limit);
+				plan += edit.use_regex ? " regex)\n" : ")\n";
 			}
 			PrintToStdOut(context, std::move(plan), actionContext->index);
 		}
@@ -839,36 +811,10 @@ EditFile(const std::string &filePath, NSArray<NSDictionary *> *edits, bool actio
 	f.close();
 
 	// Apply each edit in sequence
-	for (NSDictionary *edit in edits)
+	for (const auto &edit : edits)
 	{
-		NSString *oldText = edit[@"oldText"];
-		NSString *newText = edit[@"newText"];
-
-		if (![oldText isKindOfClass:[NSString class]])
-		{
-			std::string errStr = std::string("error: edit \"") + filePath + "\": \"oldText\" must be a string\n";
-			context->lastError.set(errStr, EINVAL);
-			PrintToStdErr(context, std::move(errStr));
-			ActionWithNoOutput(context, actionContext->index);
-			return false;
-		}
-		if (![newText isKindOfClass:[NSString class]])
-			newText = @"";
-
-		std::string old_str([oldText UTF8String]);
-		std::string new_str([newText UTF8String]);
-
-		id limitVal = edit[@"limit"];
-		NSInteger limit = [limitVal isKindOfClass:[NSNumber class]] ? [limitVal integerValue] : 1;
-
-		id regexVal = edit[@"regex"];
-		bool use_regex = [regexVal isKindOfClass:[NSNumber class]] ? [regexVal boolValue] : false;
-
-		id caseVal = edit[@"case-insensitive"];
-		bool case_insensitive = [caseVal isKindOfClass:[NSNumber class]] ? [caseVal boolValue] : false;
-
 		NSString *editError = nil;
-		if (!apply_one_edit(content, old_str, new_str, limit, use_regex, case_insensitive, &editError))
+		if (!apply_one_edit(content, edit.old_text, edit.new_text, edit.limit, edit.use_regex, edit.case_insensitive, &editError))
 		{
 			std::string errStr = std::string("error: edit \"") + filePath + "\": " + [editError UTF8String] + "\n";
 			context->lastError.set(errStr, 1);

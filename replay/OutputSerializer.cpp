@@ -147,7 +147,8 @@ void OutputSerializer::drainPendingForFlush()
             // Gap in sequence — skip to the lowest available index to avoid spinning
             int64_t minIdx = _pendingOutputs.begin()->first;
             for (const auto& kv : _pendingOutputs)
-                if (kv.first < minIdx) minIdx = kv.first;
+                if (kv.first < minIdx)
+                    minIdx = kv.first;
             _lastPrintedActionIndex = minIdx - 1;
         }
     }

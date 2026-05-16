@@ -274,7 +274,8 @@ std::vector<std::string> search_files(
 	{
 		if (max_results > 0 && seen.size() >= max_results)
 			break;
-		if (is_path_excluded(path.c_str(), compiled_excl)) continue;
+		if (is_path_excluded(path.c_str(), compiled_excl))
+			continue;
 		struct stat st;
 		if (stat(path.c_str(), &st) == 0 && !S_ISDIR(st.st_mode))
 			seen.insert(path);

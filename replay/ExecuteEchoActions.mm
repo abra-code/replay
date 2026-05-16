@@ -81,7 +81,8 @@ ExcecuteToolMCPCore(const std::string &toolPath, const std::vector<std::string> 
 
     auto trimData = [](NSData *data) -> std::string
     {
-        if (data == nil || data.length == 0) return {};
+        if (data == nil || data.length == 0)
+            return {};
         size_t len = std::min((size_t)data.length, kMCPMaxCommandOutput);
         std::string s(static_cast<const char *>(data.bytes), len);
         if ((size_t)data.length > kMCPMaxCommandOutput)

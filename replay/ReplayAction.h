@@ -74,6 +74,14 @@ struct MCPGrepResult {
     bool        is_binary   = false; // file contains null bytes — skipped
     std::string error;        // non-empty on I/O failure
 };
+
+struct FileEdit {
+    std::string old_text;
+    std::string new_text;
+    int         limit = 1;   // 0 = unlimited
+    bool        use_regex = false;
+    bool        case_insensitive = false;
+};
 #endif // __cplusplus
 
 NS_ASSUME_NONNULL_BEGIN
@@ -130,14 +138,12 @@ bool ListDirectory(const std::string &dirPath, ReplayContext *context, ActionCon
 bool DirectoryTree(const std::string &dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext);
 bool GetFileInfo(const std::string &path, ReplayContext *context, ActionContext *actionContext);
 bool GlobFiles(NSString *rootDir, NSArray<NSString*> *globPatterns, NSArray<NSString*> *excludePatterns, NSInteger maxResults, ReplayContext *context, ActionContext *actionContext);
-// edits: array of dicts with keys: oldText (required), newText, limit (default 1, 0=unlimited), regex, case-insensitive
-// actionDryRun: show plan without writing (overrides nothing; stacks with context->dryRun)
-bool EditFile(const std::string &filePath, NSArray<NSDictionary *> *edits, bool actionDryRun, ReplayContext *context, ActionContext *actionContext);
+bool EditFile(const std::string &filePath, const std::vector<FileEdit> &edits, bool actionDryRun, ReplayContext *context, ActionContext *actionContext);
 bool ExcecuteTool(const std::string &toolPath, const std::vector<std::string> &arguments, ReplayContext *context, ActionContext *actionContext);
 bool Echo(const std::string &text, ReplayContext *context, ActionContext *actionContext);
 
 // These functions return C++ structs and take C++ types — C linkage not possible.
-MCPEditResult EditFileMCPCore(const std::string &filePath, NSArray<NSDictionary *> *edits, bool dryRun);
+MCPEditResult EditFileMCPCore(const std::string &filePath, const std::vector<FileEdit> &edits, bool dryRun);
 // workingDir: passed to NSTask setCurrentDirectoryPath; empty = inherited CWD.
 // timeoutSeconds: SIGTERM at deadline, SIGKILL after 3s grace.
 MCPExecuteResult ExcecuteToolMCPCore(const std::string &toolPath, const std::vector<std::string> &arguments,

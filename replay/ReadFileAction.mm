@@ -13,16 +13,23 @@ static bool is_utf8_text(const uint8_t *data, size_t len)
 	while (i < len)
 	{
 		uint8_t c = data[i];
-		if (c == 0) return false;
+		if (c == 0)
+			return false;
 		size_t seqLen;
-		if      ((c & 0x80) == 0x00) seqLen = 1;
-		else if ((c & 0xE0) == 0xC0) seqLen = 2;
-		else if ((c & 0xF0) == 0xE0) seqLen = 3;
-		else if ((c & 0xF8) == 0xF0) seqLen = 4;
-		else return false;
+		if      ((c & 0x80) == 0x00)
+			seqLen = 1;
+		else if ((c & 0xE0) == 0xC0)
+			seqLen = 2;
+		else if ((c & 0xF0) == 0xE0)
+			seqLen = 3;
+		else if ((c & 0xF8) == 0xF0)
+			seqLen = 4;
+		else
+			return false;
 		for (size_t j = 1; j < seqLen; j++)
 		{
-			if (i + j >= len || (data[i + j] & 0xC0) != 0x80) return false;
+			if (i + j >= len || (data[i + j] & 0xC0) != 0x80)
+				return false;
 		}
 		i += seqLen;
 	}

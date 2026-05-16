@@ -254,16 +254,23 @@ static bool is_utf8_text(const uint8_t *data, size_t len)
     for (size_t i = 0; i < len; )
     {
         uint8_t c = data[i];
-        if (c == 0) return false;
+        if (c == 0)
+            return false;
         size_t seqLen;
-        if      ((c & 0x80u) == 0x00u) seqLen = 1;
-        else if ((c & 0xE0u) == 0xC0u) seqLen = 2;
-        else if ((c & 0xF0u) == 0xE0u) seqLen = 3;
-        else if ((c & 0xF8u) == 0xF0u) seqLen = 4;
-        else return false;
+        if      ((c & 0x80u) == 0x00u)
+            seqLen = 1;
+        else if ((c & 0xE0u) == 0xC0u)
+            seqLen = 2;
+        else if ((c & 0xF0u) == 0xE0u)
+            seqLen = 3;
+        else if ((c & 0xF8u) == 0xF0u)
+            seqLen = 4;
+        else
+            return false;
         for (size_t j = 1; j < seqLen; j++)
         {
-            if (i + j >= len || (data[i + j] & 0xC0u) != 0x80u) return false;
+            if (i + j >= len || (data[i + j] & 0xC0u) != 0x80u)
+                return false;
         }
         i += seqLen;
     }
@@ -440,12 +447,21 @@ static void dispatch_mcp_tool(const std::string &tool,
     {
         // path validation: need write unless dry-run
         bool action_dry_run = false;
-        if (auto dv = args.obj_get("dryRun").get_bool(); dv) action_dry_run = *dv;
+        if (auto dv = args.obj_get("dryRun").get_bool(); dv)
+            action_dry_run = *dv;
 
         auto path_sv = args.obj_get("path").get_str();
-        if (!path_sv) { PrintMCPError(context, ac, -32602, "Missing required param: path"); return; }
+        if (!path_sv)
+        {
+            PrintMCPError(context, ac, -32602, "Missing required param: path");
+            return;
+        }
         auto vr = validate_path(std::string(*path_sv), *opts, !action_dry_run);
-        if (!vr.ok) { PrintMCPError(context, ac, -32001, vr.error); return; }
+        if (!vr.ok)
+        {
+            PrintMCPError(context, ac, -32001, vr.error);
+            return;
+        }
 
         auto edits_val = args.obj_get("edits");
         if (!edits_val.is_arr())
@@ -454,28 +470,29 @@ static void dispatch_mcp_tool(const std::string &tool,
             return;
         }
 
-        NSMutableArray<NSDictionary *> *edits = [NSMutableArray array];
+        std::vector<FileEdit> edits;
         Json::ArrIter it(edits_val);
         while (it.has_next())
         {
             auto ev = it.next();
-            if (!ev.is_obj()) continue;
+            if (!ev.is_obj())
+                continue;
             auto old_sv = ev.obj_get("oldText").get_str();
-            if (!old_sv) continue;
-
-            NSMutableDictionary *edit = [NSMutableDictionary dictionary];
-            edit[@"oldText"] = [NSString stringWithUTF8String:std::string(*old_sv).c_str()];
+            if (!old_sv)
+                continue;
+            FileEdit fe;
+            fe.old_text = std::string(*old_sv);
             if (auto ns = ev.obj_get("newText").get_str(); ns)
-                edit[@"newText"] = [NSString stringWithUTF8String:std::string(*ns).c_str()];
+                fe.new_text = std::string(*ns);
             if (auto lv = ev.obj_get("limit").get_sint(); lv)
-                edit[@"limit"] = @((NSInteger)*lv);
+                fe.limit = (int)*lv;
             else if (auto lv2 = ev.obj_get("limit").get_uint(); lv2)
-                edit[@"limit"] = @((NSInteger)*lv2);
+                fe.limit = (int)*lv2;
             if (auto rv = ev.obj_get("regex").get_bool(); rv)
-                edit[@"regex"] = @((BOOL)*rv);
+                fe.use_regex = *rv;
             if (auto cv = ev.obj_get("caseInsensitive").get_bool(); cv)
-                edit[@"case-insensitive"] = @((BOOL)*cv);
-            [edits addObject:edit];
+                fe.case_insensitive = *cv;
+            edits.push_back(std::move(fe));
         }
 
         EditFile(vr.canonical, edits, action_dry_run, context, ac);
@@ -483,7 +500,8 @@ static void dispatch_mcp_tool(const std::string &tool,
     else if (tool == "edit_files")
     {
         bool action_dry_run = false;
-        if (auto dv = args.obj_get("dryRun").get_bool(); dv) action_dry_run = *dv;
+        if (auto dv = args.obj_get("dryRun").get_bool(); dv)
+            action_dry_run = *dv;
 
         auto paths_val = args.obj_get("paths");
         if (!paths_val.is_arr())
@@ -498,29 +516,31 @@ static void dispatch_mcp_tool(const std::string &tool,
             return;
         }
 
-        // Build edits array (same structure as edit_file)
-        NSMutableArray<NSDictionary *> *edits = [NSMutableArray array];
+        // Build edits array
+        std::vector<FileEdit> edits;
         {
             Json::ArrIter it(edits_val);
             while (it.has_next())
             {
                 auto ev = it.next();
-                if (!ev.is_obj()) continue;
+                if (!ev.is_obj())
+                    continue;
                 auto old_sv = ev.obj_get("oldText").get_str();
-                if (!old_sv) continue;
-                NSMutableDictionary *edit = [NSMutableDictionary dictionary];
-                edit[@"oldText"] = [NSString stringWithUTF8String:std::string(*old_sv).c_str()];
+                if (!old_sv)
+                    continue;
+                FileEdit fe;
+                fe.old_text = std::string(*old_sv);
                 if (auto ns = ev.obj_get("newText").get_str(); ns)
-                    edit[@"newText"] = [NSString stringWithUTF8String:std::string(*ns).c_str()];
+                    fe.new_text = std::string(*ns);
                 if (auto lv = ev.obj_get("limit").get_sint(); lv)
-                    edit[@"limit"] = @((NSInteger)*lv);
+                    fe.limit = (int)*lv;
                 else if (auto lv2 = ev.obj_get("limit").get_uint(); lv2)
-                    edit[@"limit"] = @((NSInteger)*lv2);
+                    fe.limit = (int)*lv2;
                 if (auto rv = ev.obj_get("regex").get_bool(); rv)
-                    edit[@"regex"] = @((BOOL)*rv);
+                    fe.use_regex = *rv;
                 if (auto cv = ev.obj_get("caseInsensitive").get_bool(); cv)
-                    edit[@"case-insensitive"] = @((BOOL)*cv);
-                [edits addObject:edit];
+                    fe.case_insensitive = *cv;
+                edits.push_back(std::move(fe));
             }
         }
 
@@ -533,7 +553,8 @@ static void dispatch_mcp_tool(const std::string &tool,
             {
                 auto pv = it.next();
                 auto ps = pv.get_str();
-                if (!ps) continue;
+                if (!ps)
+                    continue;
                 std::string path_str(*ps);
 
                 if (globoverlap::contains_glob_pattern_char(path_str))
@@ -570,7 +591,8 @@ static void dispatch_mcp_tool(const std::string &tool,
                     concrete_paths.push_back(vr.canonical);
                 }
             }
-            if (early_error) return;
+            if (early_error)
+                return;
         }
 
         if (concrete_paths.empty())
@@ -660,7 +682,11 @@ static void dispatch_mcp_tool(const std::string &tool,
         }
 
         auto vr = validate_path(std::string(*path_sv), *opts, false);
-        if (!vr.ok) { PrintMCPError(context, ac, -32001, vr.error); return; }
+        if (!vr.ok)
+        {
+            PrintMCPError(context, ac, -32001, vr.error);
+            return;
+        }
 
         std::vector<std::string> exclude_strs;
         {
@@ -746,7 +772,8 @@ static void dispatch_mcp_tool(const std::string &tool,
             {
                 auto pv = it.next();
                 auto ps = pv.get_str();
-                if (!ps) continue;
+                if (!ps)
+                    continue;
                 std::string path_str(*ps);
 
                 if (globoverlap::contains_glob_pattern_char(path_str))
@@ -909,7 +936,8 @@ static void dispatch_mcp_tool(const std::string &tool,
         {
             auto pv = it.next();
             auto ps = pv.get_str();
-            if (!ps) continue;
+            if (!ps)
+                continue;
             if (++count > kMaxReadMultiple)
             {
                 texts.push_back("[error: too many files (max 50)]");
