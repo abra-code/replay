@@ -1,5 +1,5 @@
 #import "StringAndPath.h"
-#include "env_var_expand.h"
+#include "EnvVarExpand.h"
 
 NSString *
 StringByExpandingEnvironmentVariablesWithErrorCheck(NSString *origString, ReplayContext *context)

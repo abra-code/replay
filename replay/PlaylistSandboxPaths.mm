@@ -8,7 +8,7 @@
 #include "FileSystemHelpers.h"
 #include "GlobOverlap.h"
 #include "PosixFileOps.h"
-#include "env_var_expand.h"
+#include "EnvVarExpand.h"
 
 #include <string>
 #include <unordered_map>

@@ -9,9 +9,8 @@
 #include <string>
 #include <vector>
 #include <CoreFoundation/CoreFoundation.h>
-#include <os/log.h>
-#include <os/signpost.h>
 #include "FileTree.h"
+#include "../common/include/ReplaySignpost.h"
 
 static uint32_t sSiblingStatCount[1000];
 
@@ -139,8 +138,6 @@ int main(int argc, const char * argv[])
 {
 	std::vector<std::string> testPaths;
 
-	os_log_t log = os_log_create("filetree", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
-
 	if (argc < 2)
 	{
 		printf("Finding all paths in ~/Library\n");
@@ -158,7 +155,7 @@ int main(int argc, const char * argv[])
 
 	printf("Loaded %lu test paths\n", (unsigned long)testPaths.size());
 
-	os_signpost_event_emit(log, OS_SIGNPOST_ID_EXCLUSIVE, "lowercasing and fileSystemRepresentation");
+	REPLAY_SIGNPOST_EVENT("lowercasing and fileSystemRepresentation");
 
 	// run lowercasing separately first just to assess how long it takes
 	{
@@ -179,7 +176,7 @@ int main(int argc, const char * argv[])
 
 	clock_t begin = clock();
 
-	os_signpost_event_emit(log, OS_SIGNPOST_ID_EXCLUSIVE, "Creating file tree");
+	REPLAY_SIGNPOST_EVENT("Creating file tree");
 
 	FileNode *rootNode = CreateFileTreeRoot();
 
@@ -199,11 +196,11 @@ int main(int argc, const char * argv[])
 	printf("Gathering file node stats\n");
 	clock_t statsBegin = clock();
 
-	os_signpost_event_emit(log, OS_SIGNPOST_ID_EXCLUSIVE, "Begin gathering file node stats");
+	REPLAY_SIGNPOST_EVENT("Begin gathering file node stats");
 
 	CountSiblingNodes(rootNode);
 
-	os_signpost_event_emit(log, OS_SIGNPOST_ID_EXCLUSIVE, "End gathering file node stats");
+	REPLAY_SIGNPOST_EVENT("End gathering file node stats");
 
 	clock_t statsEnd = clock();
 	double statsSeconds = (double)(statsEnd - statsBegin) / CLOCKS_PER_SEC;

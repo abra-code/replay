@@ -9,6 +9,7 @@
 #import "TaskProxyGlob.h"
 #include "LogStream.h"
 #include "GlobOverlap.h"
+#include "ReplaySignpost.h"
 
 //#define TRACE 1
 
@@ -98,6 +99,8 @@ ConnectImplicitProducers(FileNode *treeRoot)
     clock_t begin = clock();
 #endif //TRACE
 
+	REPLAY_SIGNPOST_BEGIN("ConnectImplicitProducers");
+
 	if(treeRoot->children != NULL)
 	{
 		FileNodeVisitorContext visitorContext =
@@ -111,6 +114,8 @@ ConnectImplicitProducers(FileNode *treeRoot)
 			FileNodeCFSetConnector(child, &visitorContext);
 		}
 	}
+
+	REPLAY_SIGNPOST_END("ConnectImplicitProducers");
 
 #if TRACE
 	clock_t end = clock();
@@ -131,6 +136,8 @@ ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *allTasks, //input li
     size_t all_input_count = 0;
     size_t static_input_count = 0;
 #endif //TRACE
+
+	REPLAY_SIGNPOST_BEGIN("ConnectDynamicInputs", "task_count=%lu", (unsigned long)[allTasks count]);
 
 	for(__unsafe_unretained TaskProxy *oneTask in allTasks)
 	{
@@ -183,12 +190,14 @@ ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *allTasks, //input li
             [rootTask linkNextTask:oneTask];
         }
     }
-    
+
+	REPLAY_SIGNPOST_END("ConnectDynamicInputs");
+
 #if TRACE
 	clock_t end = clock();
 	double seconds = (double)(end - begin) / CLOCKS_PER_SEC;
     printf("Finished connecting all dynamic outputs in %f seconds\n", seconds);
-    
+
     printf("All input count %lu\n", all_input_count);
     printf("Static input count %lu\n", static_input_count);
 #endif //TRACE
@@ -219,6 +228,8 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 	printf("Connecting glob dependencies\n");
 	clock_t begin = clock();
 #endif
+
+	REPLAY_SIGNPOST_BEGIN("ConnectGlobDependencies", "task_count=%lu", (unsigned long)[allTasks count]);
 
 	for(__unsafe_unretained TaskProxy *consumerTask in allTasks)
 	{
@@ -479,6 +490,8 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 			}
 		}
 	}
+
+	REPLAY_SIGNPOST_END("ConnectGlobDependencies");
 
 #if TRACE
 	clock_t end = clock();

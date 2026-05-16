@@ -3,6 +3,7 @@
 #import "SchedulerMedusa.h"
 #import "TaskScheduler.h"
 #include "GlobOverlap.h"
+#include "ReplaySignpost.h"
 
 
 static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path, TaskProxy* producer, bool isExclusiveInput)
@@ -102,7 +103,9 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 					std::string path([oneInput UTF8String]);
 					if(globoverlap::is_glob_pattern(path))
 					{
-						globInputList.push_back(std::move(path));
+						// Lowercase to match GetPathForNode output (FileTree stores lowercased
+						// paths); concrete_matches_glob compares them case-sensitively.
+						globInputList.push_back(std::string([[oneInput lowercaseString] UTF8String]));
 					}
 					else
 					{
@@ -119,7 +122,7 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 					std::string path([oneInput UTF8String]);
 					if(globoverlap::is_glob_pattern(path))
 					{
-						globExclusiveInputList.push_back(std::move(path));
+						globExclusiveInputList.push_back(std::string([[oneInput lowercaseString] UTF8String]));
 					}
 					else
 					{
@@ -136,7 +139,7 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 					std::string path([oneInput UTF8String]);
 					if(globoverlap::is_glob_pattern(path))
 					{
-						globMutatingInputList.push_back(std::move(path));
+						globMutatingInputList.push_back(std::string([[oneInput lowercaseString] UTF8String]));
 						continue;
 					}
 
@@ -210,7 +213,7 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 						std::string path([oneOutput UTF8String]);
 						if(globoverlap::is_glob_pattern(path))
 						{
-							globOutputList.push_back(std::move(path));
+							globOutputList.push_back(std::string([[oneOutput lowercaseString] UTF8String]));
 						}
 						else
 						{
@@ -255,7 +258,9 @@ ExecuteTasksWithScheduler(NSArray<TaskProxy*> *allTasks, ReplayContext *context,
 	ConnectDynamicInputsForScheduler(allTasks, //input list of all raw unconnected medusas
 									scheduler.rootTask);
 
+	REPLAY_SIGNPOST_BEGIN("SchedulerExecution", "task_count=%lu", (unsigned long)[allTasks count]);
 	[scheduler startExecutionAndWait];
+	REPLAY_SIGNPOST_END("SchedulerExecution");
 }
 
 static inline void
@@ -298,6 +303,8 @@ DispatchTasksConcurrentlyWithDependencyAnalysis(NSArray<NSDictionary*> *playlist
 
 	Class dictionaryClass = [NSDictionary class];
 
+	REPLAY_SIGNPOST_BEGIN("TaskProxyBuild", "playlist_count=%lu", (unsigned long)[playlist count]);
+
 	for(id oneStep in playlist)
 	{
 		if([oneStep isKindOfClass:dictionaryClass])
@@ -315,14 +322,17 @@ DispatchTasksConcurrentlyWithDependencyAnalysis(NSArray<NSDictionary*> *playlist
 			LogError("error: invalid non-dictionary step in the playlist\n");
 		}
 	}
-	
+
+	REPLAY_SIGNPOST_END("TaskProxyBuild");
+
 	// at that point the whole input and output paths tree is already constructed
 	// with all explicit producers referred in their respective nodes
-	
+
 	ExecuteTasksWithScheduler(taskList, context, totalInputCount, totalOutputCount);
 
 	// Post-execution verification
 	// in case of circular dependencies some tasks were not scheduled for execution
 	// because their dependencies have not been satisifed (the dependency counter never dropped to 0)
 	VerifyAllTasksExecuted(taskList);
+	REPLAY_PRINT_TIMINGS();
 }

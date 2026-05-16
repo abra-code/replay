@@ -9,8 +9,7 @@
 #import <Foundation/Foundation.h>
 #import "TaskScheduler.h"
 #import "TaskProxy.h"
-
-@import os.signpost;
+#include "../common/include/ReplaySignpost.h"
 
 // 3,300,000 empty dispatched blocks peaked at about 200MB heap consumption
 // The cost of the graph itself is 167MB and then it grows some more when dispatching starts
@@ -38,10 +37,8 @@ int main(int argc, const char * argv[])
 {
 	@autoreleasepool
 	{
-		os_log_t log = os_log_create("scheduler", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
-
 	    printf("scheduler: constructing graph\n");
-	    os_signpost_event_emit(log, OS_SIGNPOST_ID_EXCLUSIVE, "Constructing graph");
+	    REPLAY_SIGNPOST_EVENT("Constructing graph");
 		clock_t begin = clock();
 
 		TaskScheduler *scheduler = [[TaskScheduler alloc] initWithConcurrencyLimit:0];
@@ -93,7 +90,7 @@ int main(int argc, const char * argv[])
 		double time_spent = (double)(end_construction - begin) / CLOCKS_PER_SEC;
 	    printf("scheduler: time spent constructing graph: %f\n", time_spent);
 
-	    os_signpost_event_emit(log, OS_SIGNPOST_ID_EXCLUSIVE, "Starting graph execution");
+	    REPLAY_SIGNPOST_EVENT("Starting graph execution");
 	    printf("scheduler: starting graph execution\n");
 
 #if RELASE_GRAPH_EARLY

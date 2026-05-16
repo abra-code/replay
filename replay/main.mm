@@ -23,7 +23,7 @@
 #import "PlaylistSandboxPaths.h"
 #include "FileHelpers.h"
 #include "MCPServer.h"
-#include "env_var_expand.h"
+#include "EnvVarExpand.h"
 
 #include <limits.h>
 
