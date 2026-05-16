@@ -377,13 +377,13 @@ static void dispatch_mcp_tool(const std::string &tool,
     {
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
         if (path.empty()) return;
-        ReadFile(path.c_str(), context, ac);
+        ReadFile(path, context, ac);
     }
     else if (tool == "list_directory")
     {
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
         if (path.empty()) return;
-        ListDirectory(path.c_str(), context, ac);
+        ListDirectory(path, context, ac);
     }
     else if (tool == "directory_tree")
     {
@@ -394,13 +394,13 @@ static void dispatch_mcp_tool(const std::string &tool,
             depth = (NSInteger)*dv;
         else if (auto dv2 = args.obj_get("depth").get_uint(); dv2)
             depth = (NSInteger)*dv2;
-        DirectoryTree(path.c_str(), depth, context, ac);
+        DirectoryTree(path, depth, context, ac);
     }
     else if (tool == "get_file_info")
     {
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
         if (path.empty()) return;
-        GetFileInfo(path.c_str(), context, ac);
+        GetFileInfo(path, context, ac);
     }
     else if (tool == "write_file")
     {
@@ -412,17 +412,14 @@ static void dispatch_mcp_tool(const std::string &tool,
             PrintMCPError(context, ac, -32602, "Missing required param: content");
             return;
         }
-        NSURL *url = [NSURL fileURLWithPath:@(path.c_str())];
-        NSString *content = [NSString stringWithUTF8String:std::string(*content_sv).c_str()];
-        posix_mkdir_p(posix_parent_dir(path).c_str());
-        CreateFile(url, content, context, ac);
+        posix_mkdir_p(posix_parent_dir(path));
+        CreateFile(path, std::string(*content_sv), context, ac);
     }
     else if (tool == "create_directory")
     {
         auto path = validate_and_get(args, "path", *opts, true, ac, context);
         if (path.empty()) return;
-        NSURL *url = [NSURL fileURLWithPath:@(path.c_str()) isDirectory:YES];
-        CreateDirectory(url, context, ac);
+        CreateDirectory(path, context, ac);
     }
     else if (tool == "move_file")
     {
@@ -430,17 +427,14 @@ static void dispatch_mcp_tool(const std::string &tool,
         if (src.empty()) return;
         auto dst = validate_and_get(args, "destination", *opts, true, ac, context);
         if (dst.empty()) return;
-        NSURL *srcURL = [NSURL fileURLWithPath:@(src.c_str())];
-        NSURL *dstURL = [NSURL fileURLWithPath:@(dst.c_str())];
-        posix_mkdir_p(posix_parent_dir(dst).c_str());
-        MoveItem(srcURL, dstURL, context, ac);
+        posix_mkdir_p(posix_parent_dir(dst));
+        MoveItem(src, dst, context, ac);
     }
     else if (tool == "delete_file")
     {
         auto path = validate_and_get(args, "path", *opts, true, ac, context);
         if (path.empty()) return;
-        NSURL *url = [NSURL fileURLWithPath:@(path.c_str())];
-        DeleteItem(url, context, ac);
+        DeleteItem(path, context, ac);
     }
     else if (tool == "edit_file")
     {
@@ -484,7 +478,7 @@ static void dispatch_mcp_tool(const std::string &tool,
             [edits addObject:edit];
         }
 
-        EditFile(vr.canonical.c_str(), edits, action_dry_run, context, ac);
+        EditFile(vr.canonical, edits, action_dry_run, context, ac);
     }
     else if (tool == "edit_files")
     {
@@ -589,7 +583,7 @@ static void dispatch_mcp_tool(const std::string &tool,
         std::vector<std::string> results;
         for (const auto &path : concrete_paths)
         {
-            auto r = EditFileMCPCore(path.c_str(), edits, action_dry_run);
+            auto r = EditFileMCPCore(path, edits, action_dry_run);
             if (r.ok)
                 results.push_back(r.message);
             else
@@ -647,7 +641,7 @@ static void dispatch_mcp_tool(const std::string &tool,
             @"workingDirectory": @(working_dir.c_str()),
             @"timeout":          @(timeout_sec),
         };
-        ExcecuteTool(@"/bin/sh", @[@"-c", @(command.c_str())], context, ac);
+        ExcecuteTool("/bin/sh", {"-c", command}, context, ac);
     }
     else if (tool == "search_files")
     {
@@ -828,7 +822,7 @@ static void dispatch_mcp_tool(const std::string &tool,
                 truncated = true;
                 break;
             }
-            auto r = GrepFileMCPCore(file_path.c_str(), pattern, use_regex,
+            auto r = GrepFileMCPCore(file_path, pattern, use_regex,
                                       case_insensitive, context_lines,
                                       max_results - total_matches);
             if (r.is_binary || !r.error.empty() || r.text.empty())

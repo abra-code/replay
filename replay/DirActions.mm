@@ -5,7 +5,7 @@
 #include <cerrno>
 
 bool
-ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *actionContext)
+ListDirectory(const std::string &dirPath, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 		return false;
@@ -13,7 +13,7 @@ ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *action
 	if(context->mcpServer)
 	{
 		std::vector<DirEntry> entries;
-		if(!list_directory(dirPath, entries))
+		if(!list_directory(dirPath.c_str(), entries))
 		{
 			int err = errno;
 			std::string errStr = std::string("failed to list \"") + dirPath + "\": " + strerror(err);
@@ -50,7 +50,7 @@ ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *action
 	}
 
 	std::vector<DirEntry> entries;
-	if(!list_directory(dirPath, entries))
+	if(!list_directory(dirPath.c_str(), entries))
 	{
 		int err = errno;
 		std::string errStr = std::string("error: failed to list \"") + dirPath + "\": " + strerror(err) + "\n";
@@ -87,7 +87,7 @@ static id TreeNodeToObject(const TreeNode &node)
 }
 
 bool
-DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext)
+DirectoryTree(const std::string &dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 		return false;
@@ -95,7 +95,7 @@ DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, A
 	if(context->mcpServer)
 	{
 		TreeNode root;
-		if(!build_directory_tree(dirPath, root, (int)maxDepth))
+		if(!build_directory_tree(dirPath.c_str(), root, (int)maxDepth))
 		{
 			int err = errno;
 			std::string errStr = std::string("failed to read directory \"") + dirPath + "\": " + strerror(err);
@@ -131,7 +131,7 @@ DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, A
 	}
 
 	TreeNode root;
-	if(!build_directory_tree(dirPath, root, (int)maxDepth))
+	if(!build_directory_tree(dirPath.c_str(), root, (int)maxDepth))
 	{
 		int err = errno;
 		std::string errStr = std::string("error: failed to read directory \"") + dirPath + "\": " + strerror(err) + "\n";
@@ -149,7 +149,7 @@ DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, A
 	size_t jsonLen = jsonData ? (size_t)[jsonData length] : 2;
 
 	std::string output;
-	output.reserve(strlen("[tree:") + strlen(dirPath) + 2 + jsonLen + 1);
+	output.reserve(6 + dirPath.size() + 2 + jsonLen + 1);
 	output += "[tree:";
 	output += dirPath;
 	output += "]\n";

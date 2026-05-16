@@ -8,14 +8,6 @@
 #import <Foundation/Foundation.h>
 #import "ReplayAction.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 void StartReceivingActions(ReplayContext *context);
 void FinishReceivingActionsAndWait(ReplayContext *context);
 void StreamActionsFromStdIn(ReplayContext *context);
-
-#ifdef __cplusplus
-}
-#endif

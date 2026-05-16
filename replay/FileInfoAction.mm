@@ -36,7 +36,7 @@ static void format_iso8601(time_t t, char out[21])
 }
 
 bool
-GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionContext)
+GetFileInfo(const std::string &path, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && context->lastError.hasError())
 		return false;
@@ -44,7 +44,7 @@ GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionConte
 	if(context->mcpServer)
 	{
 		struct stat st;
-		if(lstat(path, &st) != 0)
+		if(lstat(path.c_str(), &st) != 0)
 		{
 			int err = errno;
 			std::string errStr = std::string("failed to stat \"") + path + "\": " + strerror(err);
@@ -94,7 +94,7 @@ GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionConte
 	}
 
 	struct stat st;
-	if(lstat(path, &st) != 0)
+	if(lstat(path.c_str(), &st) != 0)
 	{
 		int err = errno;
 		std::string errStr = std::string("error: failed to stat \"") + path + "\": " + strerror(err) + "\n";
@@ -123,7 +123,7 @@ GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionConte
 	else                            typeStr = "other";
 
 	std::string output;
-	output.reserve(128 + strlen(path));
+	output.reserve(128 + path.size());
 	output += "[info:";
 	output += path;
 	output += "]\nsize: ";

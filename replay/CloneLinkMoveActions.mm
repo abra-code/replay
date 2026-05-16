@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 bool
-CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
+CloneItem(const std::string &fromPath, const std::string &toPath, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
 	{
@@ -17,7 +17,7 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 
 	if(context->verbose || context->dryRun)
 	{
-		std::string desc = std::string("[clone]\t") + [[fromURL path] UTF8String] + "\t" + [[toURL path] UTF8String] + "\n";
+		std::string desc = std::string("[clone]\t") + fromPath + "\t" + toPath + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -28,8 +28,6 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		const char *fromPath = [[fromURL path] UTF8String];
-		const char *toPath   = [[toURL path] UTF8String];
 		int rc = posix_clone_item(fromPath, toPath);
 		isSuccessful = (rc == 0);
 
@@ -38,7 +36,7 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 			if(!posix_remove_recursive(toPath))
 			{
 				std::string parentPath = posix_parent_dir(toPath);
-				posix_mkdir_p(parentPath.c_str());
+				posix_mkdir_p(parentPath);
 			}
 			rc = posix_clone_item(fromPath, toPath);
 			isSuccessful = (rc == 0);
@@ -56,15 +54,12 @@ CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *a
 }
 
 bool
-MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
+MoveItem(const std::string &fromPath, const std::string &toPath, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 	{
 		return false;
 	}
-
-	const char *fromPath = [[fromURL path] UTF8String];
-	const char *toPath   = [[toURL path] UTF8String];
 
 	if(context->mcpServer)
 	{
@@ -73,7 +68,7 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *ac
 		{
 			posix_remove_recursive(toPath);
 			std::string parentPath = posix_parent_dir(toPath);
-			posix_mkdir_p(parentPath.c_str());
+			posix_mkdir_p(parentPath);
 			isSuccessful = posix_move_item(fromPath, toPath);
 		}
 		if(!isSuccessful)
@@ -107,7 +102,7 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *ac
 			if(!posix_remove_recursive(toPath))
 			{
 				std::string parentPath = posix_parent_dir(toPath);
-				posix_mkdir_p(parentPath.c_str());
+				posix_mkdir_p(parentPath);
 			}
 			isSuccessful = posix_move_item(fromPath, toPath);
 		}
@@ -124,7 +119,7 @@ MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *ac
 }
 
 bool
-HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext)
+HardlinkItem(const std::string &fromPath, const std::string &toPath, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
 	{
@@ -133,7 +128,7 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext
 
 	if(context->verbose || context->dryRun)
 	{
-		std::string desc = std::string("[hardlink]\t") + [[fromURL path] UTF8String] + "\t" + [[toURL path] UTF8String] + "\n";
+		std::string desc = std::string("[hardlink]\t") + fromPath + "\t" + toPath + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -144,18 +139,16 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		const char *fromPath = [[fromURL path] UTF8String];
-		const char *toPath   = [[toURL path] UTF8String];
-		isSuccessful = (link(fromPath, toPath) == 0);
+		isSuccessful = (link(fromPath.c_str(), toPath.c_str()) == 0);
 
 		if(!isSuccessful && context->force)
 		{
 			if(!posix_remove_recursive(toPath))
 			{
 				std::string parentPath = posix_parent_dir(toPath);
-				posix_mkdir_p(parentPath.c_str());
+				posix_mkdir_p(parentPath);
 			}
-			isSuccessful = (link(fromPath, toPath) == 0);
+			isSuccessful = (link(fromPath.c_str(), toPath.c_str()) == 0);
 		}
 
 		if(!isSuccessful)
@@ -170,7 +163,7 @@ HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext
 }
 
 bool
-SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContext *actionContext)
+SymlinkItem(const std::string &fromPath, const std::string &linkPath, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
 	{
@@ -188,7 +181,7 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 	if(context->verbose || context->dryRun)
 	{
 		const char *settingsCStr = (validateSource == nil) ? "" : (validateSymlinkSource ? " validate=true" : " validate=false");
-		std::string desc = std::string("[symlink") + settingsCStr + "]\t" + [[fromURL path] UTF8String] + "\t" + [[linkURL path] UTF8String] + "\n";
+		std::string desc = std::string("[symlink") + settingsCStr + "]\t" + fromPath + "\t" + linkPath + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -201,8 +194,6 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 
 	if(!context->dryRun)
 	{
-		const char *fromPath = [[fromURL path] UTF8String];
-		const char *linkPath = [[linkURL path] UTF8String];
 		int err = 0;
 
 		if(validateSymlinkSource && !posix_path_exists_following_symlinks(fromPath))
@@ -213,7 +204,7 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 		}
 		else
 		{
-			isSuccessful = (symlink(fromPath, linkPath) == 0);
+			isSuccessful = (symlink(fromPath.c_str(), linkPath.c_str()) == 0);
 			if(!isSuccessful)
 			{
 				err = errno;
@@ -225,9 +216,9 @@ SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContex
 			if(!posix_remove_recursive(linkPath))
 			{
 				std::string parentPath = posix_parent_dir(linkPath);
-				posix_mkdir_p(parentPath.c_str());
+				posix_mkdir_p(parentPath);
 			}
-			isSuccessful = (symlink(fromPath, linkPath) == 0);
+			isSuccessful = (symlink(fromPath.c_str(), linkPath.c_str()) == 0);
 			if(!isSuccessful)
 			{
 				err = errno;

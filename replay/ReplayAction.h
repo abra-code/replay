@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 // Thread-safe error holder. hasError() is a lock-free atomic read — hot path in
 // every action guard. set/clear/description take a mutex for the string payload.
@@ -77,10 +78,6 @@ struct MCPGrepResult {
 
 NS_ASSUME_NONNULL_BEGIN
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 typedef struct
 {
 	std::unordered_map<std::string, std::string> environment;
@@ -118,35 +115,35 @@ typedef void (^action_handler_t)(__nullable dispatch_block_t action,
 NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen);
 void HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler);
 
-bool CloneItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext);
-bool MoveItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext);
-bool HardlinkItem(NSURL *fromURL, NSURL *toURL, ReplayContext *context, ActionContext *actionContext);
-bool SymlinkItem(NSURL *fromURL, NSURL *linkURL, ReplayContext *context, ActionContext *actionContext);
-bool CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionContext *actionContext);
-bool CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *context, ActionContext *actionContext);
-bool CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext);
-bool DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext);
-bool ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionContext);
-bool ListDirectory(const char *dirPath, ReplayContext *context, ActionContext *actionContext);
-bool DirectoryTree(const char *dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext);
-bool GetFileInfo(const char *path, ReplayContext *context, ActionContext *actionContext);
+#ifdef __cplusplus
+
+bool CloneItem(const std::string &fromPath, const std::string &toPath, ReplayContext *context, ActionContext *actionContext);
+bool MoveItem(const std::string &fromPath, const std::string &toPath, ReplayContext *context, ActionContext *actionContext);
+bool HardlinkItem(const std::string &fromPath, const std::string &toPath, ReplayContext *context, ActionContext *actionContext);
+bool SymlinkItem(const std::string &fromPath, const std::string &linkPath, ReplayContext *context, ActionContext *actionContext);
+bool CreateFile(const std::string &itemPath, const std::string &content, ReplayContext *context, ActionContext *actionContext);
+bool CreateFileFromBlob(const std::string &itemPath, const std::string &base64Content, ReplayContext *context, ActionContext *actionContext);
+bool CreateDirectory(const std::string &itemPath, ReplayContext *context, ActionContext *actionContext);
+bool DeleteItem(const std::string &itemPath, ReplayContext *context, ActionContext *actionContext);
+bool ReadFile(const std::string &filePath, ReplayContext *context, ActionContext *actionContext);
+bool ListDirectory(const std::string &dirPath, ReplayContext *context, ActionContext *actionContext);
+bool DirectoryTree(const std::string &dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext);
+bool GetFileInfo(const std::string &path, ReplayContext *context, ActionContext *actionContext);
 bool GlobFiles(NSString *rootDir, NSArray<NSString*> *globPatterns, NSArray<NSString*> *excludePatterns, NSInteger maxResults, ReplayContext *context, ActionContext *actionContext);
 // edits: array of dicts with keys: oldText (required), newText, limit (default 1, 0=unlimited), regex, case-insensitive
 // actionDryRun: show plan without writing (overrides nothing; stacks with context->dryRun)
-bool EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun, ReplayContext *context, ActionContext *actionContext);
-bool ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext);
-bool Echo(NSString *content, ReplayContext *context, ActionContext *actionContext);
+bool EditFile(const std::string &filePath, NSArray<NSDictionary *> *edits, bool actionDryRun, ReplayContext *context, ActionContext *actionContext);
+bool ExcecuteTool(const std::string &toolPath, const std::vector<std::string> &arguments, ReplayContext *context, ActionContext *actionContext);
+bool Echo(const std::string &text, ReplayContext *context, ActionContext *actionContext);
 
-#ifdef __cplusplus
-}
-// These functions return C++ structs so they must live outside extern "C".
-MCPEditResult EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edits, bool dryRun);
+// These functions return C++ structs and take C++ types — C linkage not possible.
+MCPEditResult EditFileMCPCore(const std::string &filePath, NSArray<NSDictionary *> *edits, bool dryRun);
 // workingDir: passed to NSTask setCurrentDirectoryPath; empty = inherited CWD.
 // timeoutSeconds: SIGTERM at deadline, SIGKILL after 3s grace.
-MCPExecuteResult ExcecuteToolMCPCore(NSString *toolPath, NSArray<NSString*> *arguments,
+MCPExecuteResult ExcecuteToolMCPCore(const std::string &toolPath, const std::vector<std::string> &arguments,
                                       const std::string &workingDir, int timeoutSeconds);
 // pattern: literal or POSIX ERE string. max_matches: stops counting (not formatting) at this limit.
-MCPGrepResult GrepFileMCPCore(const char *filePath, const std::string &pattern,
+MCPGrepResult GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
                                bool use_regex, bool case_insensitive,
                                int context_lines, int max_matches);
 #endif

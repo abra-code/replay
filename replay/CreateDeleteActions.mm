@@ -10,50 +10,45 @@
 #include <vector>
 
 bool
-CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionContext *actionContext)
+CreateFile(const std::string &itemPath, const std::string &content, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 	{
 		return false;
 	}
 
-	const char *path = [[itemURL path] UTF8String];
-	const char *utf8 = [content UTF8String];
-	size_t len = (utf8 != nullptr) ? strlen(utf8) : 0;
-
-	auto tryWrite = [&](const char *p) -> bool {
+	auto tryWrite = [&](const std::string &p) -> bool {
 		std::ofstream f(p, std::ios::binary);
 		if(!f.is_open())
 		{
 			return false;
 		}
-		if(len > 0)
+		if(!content.empty())
 		{
-			f.write(utf8, (std::streamsize)len);
+			f.write(content.c_str(), (std::streamsize)content.size());
 		}
 		return f.good();
 	};
 
 	if(context->mcpServer)
 	{
-		bool isSuccessful = tryWrite(path);
+		bool isSuccessful = tryWrite(itemPath);
 		if(!isSuccessful && context->force)
 		{
-			if(!posix_remove_recursive(path))
+			if(!posix_remove_recursive(itemPath))
 			{
-				std::string parentPath = posix_parent_dir(path);
-				posix_mkdir_p(parentPath.c_str());
+				posix_mkdir_p(posix_parent_dir(itemPath));
 			}
-			isSuccessful = tryWrite(path);
+			isSuccessful = tryWrite(itemPath);
 		}
 		if(!isSuccessful)
 		{
 			int err = errno;
-			std::string errStr = std::string("failed to create file \"") + path + "\": " + strerror(err);
+			std::string errStr = std::string("failed to create file \"") + itemPath + "\": " + strerror(err);
 			PrintMCPError(context, actionContext, -32603, std::move(errStr));
 			return false;
 		}
-		PrintMCPTextResult(context, actionContext, std::string("Successfully wrote ") + path);
+		PrintMCPTextResult(context, actionContext, std::string("Successfully wrote ") + itemPath);
 		return true;
 	}
 
@@ -62,7 +57,7 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 		// settings access stays ObjC until Phase 5
 		id useRawText = actionContext->settings[@"raw"];
 		const char *settingsCStr = ([useRawText isKindOfClass:[NSNumber class]]) ? ([useRawText boolValue] ? " raw=true" : " raw=false") : "";
-		std::string desc = std::string("[create file") + settingsCStr + "]\t" + path + "\t" + (utf8 != nullptr ? utf8 : "") + "\n";
+		std::string desc = std::string("[create file") + settingsCStr + "]\t" + itemPath + "\t" + content + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -73,22 +68,21 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		isSuccessful = tryWrite(path);
+		isSuccessful = tryWrite(itemPath);
 
 		if(!isSuccessful && context->force)
 		{
-			if(!posix_remove_recursive(path))
+			if(!posix_remove_recursive(itemPath))
 			{
-				std::string parentPath = posix_parent_dir(path);
-				posix_mkdir_p(parentPath.c_str());
+				posix_mkdir_p(posix_parent_dir(itemPath));
 			}
-			isSuccessful = tryWrite(path);
+			isSuccessful = tryWrite(itemPath);
 		}
 
 		if(!isSuccessful)
 		{
 			int err = errno;
-			std::string errStr = std::string("error: failed to create file \"") + path + "\". Error: " + strerror(err) + "\n";
+			std::string errStr = std::string("error: failed to create file \"") + itemPath + "\". Error: " + strerror(err) + "\n";
 			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
@@ -97,7 +91,7 @@ CreateFile(NSURL *itemURL, NSString *content, ReplayContext *context, ActionCont
 }
 
 bool
-CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *context, ActionContext *actionContext)
+CreateFileFromBlob(const std::string &itemPath, const std::string &base64Content, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
 	{
@@ -106,7 +100,7 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 
 	if(context->verbose || context->dryRun)
 	{
-		std::string desc = std::string("[create file blob=true]\t") + [[itemURL path] UTF8String] + "\n";
+		std::string desc = std::string("[create file blob=true]\t") + itemPath + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -117,16 +111,14 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		const char *encoded = [base64Content UTF8String];
-		unsigned long encodedLen = (encoded != nullptr) ? strlen(encoded) : 0;
+		unsigned long encodedLen = base64Content.size();
 		unsigned long maxDecoded = CalculateDecodedBufferMaxSize(encodedLen);
 		std::vector<unsigned char> decoded(maxDecoded > 0 ? maxDecoded : 1);
 		unsigned long decodedLen = encodedLen > 0
-			? DecodeBase64((const unsigned char *)encoded, encodedLen, decoded.data(), maxDecoded)
+			? DecodeBase64((const unsigned char *)base64Content.c_str(), encodedLen, decoded.data(), maxDecoded)
 			: 0;
 
-		const char *path = [[itemURL path] UTF8String];
-		auto tryWrite = [&](const char *p) -> bool {
+		auto tryWrite = [&](const std::string &p) -> bool {
 			std::ofstream f(p, std::ios::binary);
 			if(!f.is_open())
 			{
@@ -139,19 +131,18 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 			return f.good();
 		};
 
-		isSuccessful = tryWrite(path);
+		isSuccessful = tryWrite(itemPath);
 		if(!isSuccessful && context->force)
 		{
-			posix_remove_recursive(path);
-			std::string parentPath = posix_parent_dir(path);
-			posix_mkdir_p(parentPath.c_str());
-			isSuccessful = tryWrite(path);
+			posix_remove_recursive(itemPath);
+			posix_mkdir_p(posix_parent_dir(itemPath));
+			isSuccessful = tryWrite(itemPath);
 		}
 
 		if(!isSuccessful)
 		{
 			int err = errno;
-			std::string errStr = std::string("error: failed to create file \"") + path + "\". Error: " + strerror(err) + "\n";
+			std::string errStr = std::string("error: failed to create file \"") + itemPath + "\". Error: " + strerror(err) + "\n";
 			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
@@ -160,32 +151,30 @@ CreateFileFromBlob(NSURL *itemURL, NSString *base64Content, ReplayContext *conte
 }
 
 bool
-CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
+CreateDirectory(const std::string &itemPath, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 	{
 		return false;
 	}
 
-	const char *path = [[itemURL path] UTF8String];
-
 	if(context->mcpServer)
 	{
-		bool isSuccessful = posix_mkdir_p(path);
+		bool isSuccessful = posix_mkdir_p(itemPath);
 		if(!isSuccessful)
 		{
 			int err = errno;
-			std::string errStr = std::string("failed to create directory \"") + path + "\": " + strerror(err);
+			std::string errStr = std::string("failed to create directory \"") + itemPath + "\": " + strerror(err);
 			PrintMCPError(context, actionContext, -32603, std::move(errStr));
 			return false;
 		}
-		PrintMCPTextResult(context, actionContext, std::string("Created directory ") + path);
+		PrintMCPTextResult(context, actionContext, std::string("Created directory ") + itemPath);
 		return true;
 	}
 
 	if(context->verbose || context->dryRun)
 	{
-		std::string desc = std::string("[create directory]\t") + path + "\n";
+		std::string desc = std::string("[create directory]\t") + itemPath + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -196,11 +185,11 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		isSuccessful = posix_mkdir_p(path);
+		isSuccessful = posix_mkdir_p(itemPath);
 		if(!isSuccessful)
 		{
 			int err = errno;
-			std::string errStr = std::string("error: failed to create directory \"") + path + "\". Error: " + strerror(err) + "\n";
+			std::string errStr = std::string("error: failed to create directory \"") + itemPath + "\". Error: " + strerror(err) + "\n";
 			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}
@@ -209,37 +198,35 @@ CreateDirectory(NSURL *itemURL, ReplayContext *context, ActionContext *actionCon
 }
 
 bool
-DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
+DeleteItem(const std::string &itemPath, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 	{
 		return false;
 	}
 
-	const char *path = [[itemURL path] UTF8String];
-
 	if(context->mcpServer)
 	{
-		bool isSuccessful = posix_remove_recursive(path);
+		bool isSuccessful = posix_remove_recursive(itemPath);
 		if(!isSuccessful)
 		{
-			if(!posix_path_exists(path))
+			if(!posix_path_exists(itemPath))
 			{
-				PrintMCPTextResult(context, actionContext, std::string("Deleted ") + path);
+				PrintMCPTextResult(context, actionContext, std::string("Deleted ") + itemPath);
 				return true;
 			}
 			int err = errno;
-			std::string errStr = std::string("failed to delete \"") + path + "\": " + strerror(err);
+			std::string errStr = std::string("failed to delete \"") + itemPath + "\": " + strerror(err);
 			PrintMCPError(context, actionContext, -32603, std::move(errStr));
 			return false;
 		}
-		PrintMCPTextResult(context, actionContext, std::string("Deleted ") + path);
+		PrintMCPTextResult(context, actionContext, std::string("Deleted ") + itemPath);
 		return true;
 	}
 
 	if(context->verbose || context->dryRun)
 	{
-		std::string desc = std::string("[delete]\t") + path + "\n";
+		std::string desc = std::string("[delete]\t") + itemPath + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -250,15 +237,15 @@ DeleteItem(NSURL *itemURL, ReplayContext *context, ActionContext *actionContext)
 	bool isSuccessful = context->dryRun;
 	if(!context->dryRun)
 	{
-		isSuccessful = posix_remove_recursive(path);
+		isSuccessful = posix_remove_recursive(itemPath);
 		if(!isSuccessful)
 		{
-			if(!posix_path_exists(path))
+			if(!posix_path_exists(itemPath))
 			{
 				return true;
 			}
 			int err = errno;
-			std::string errStr = std::string("error: failed to delete \"") + path + "\". Error: " + strerror(err) + "\n";
+			std::string errStr = std::string("error: failed to delete \"") + itemPath + "\". Error: " + strerror(err) + "\n";
 			context->lastError.set(errStr, err);
 			PrintToStdErr(context, std::move(errStr));
 		}

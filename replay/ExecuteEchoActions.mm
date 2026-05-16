@@ -2,20 +2,24 @@
 #import "ReplayAction.h"
 #import "ReplayActionPrivate.h"
 #include <string>
+#include <vector>
 #include <signal.h>
 
 static constexpr size_t kMCPMaxCommandOutput = 512u * 1024u; // 512 KB per stream
 static constexpr int    kMCPDefaultTimeout    = 30;           // seconds
 
 MCPExecuteResult
-ExcecuteToolMCPCore(NSString *toolPath, NSArray<NSString*> *arguments,
+ExcecuteToolMCPCore(const std::string &toolPath, const std::vector<std::string> &arguments,
                     const std::string &workingDir, int timeoutSeconds)
 {
     MCPExecuteResult res;
 
     NSTask *task = [[NSTask alloc] init];
-    [task setLaunchPath:toolPath];
-    [task setArguments:arguments];
+    [task setLaunchPath:@(toolPath.c_str())];
+    NSMutableArray *nsArgs = [NSMutableArray arrayWithCapacity:arguments.size()];
+    for(const auto &arg : arguments)
+        [nsArgs addObject:@(arg.c_str())];
+    [task setArguments:nsArgs];
     if (!workingDir.empty())
         [task setCurrentDirectoryPath:@(workingDir.c_str())];
 
@@ -31,7 +35,7 @@ ExcecuteToolMCPCore(NSString *toolPath, NSArray<NSString*> *arguments,
     {
         NSString *desc = [launchError localizedDescription];
         res.launch_error = std::string("Failed to launch ")
-            + [toolPath UTF8String] + ": "
+            + toolPath + ": "
             + (desc != nil ? [desc UTF8String] : "unknown");
         return res;
     }
@@ -91,7 +95,7 @@ ExcecuteToolMCPCore(NSString *toolPath, NSArray<NSString*> *arguments,
 }
 
 bool
-ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *context, ActionContext *actionContext)
+ExcecuteTool(const std::string &toolPath, const std::vector<std::string> &arguments, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
@@ -122,9 +126,9 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 	if(context->verbose || context->dryRun)
 	{
 		const char *settingsCStr = (useStdOutNum == nil) ? "" : (useStdOut ? " stdout=true" : " stdout=false");
-		std::string stdoutStr = std::string("[execute") + settingsCStr + "]\t" + [toolPath UTF8String];
-		for(NSString *arg in arguments)
-			{ stdoutStr += "\t"; stdoutStr += [arg UTF8String]; }
+		std::string stdoutStr = std::string("[execute") + settingsCStr + "]\t" + toolPath;
+		for(const auto &arg : arguments)
+			{ stdoutStr += "\t"; stdoutStr += arg; }
 		stdoutStr += "\n";
 		PrintToStdOut(context, std::move(stdoutStr), actionContext->index);
 	}
@@ -142,8 +146,11 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 	if(!context->dryRun)
 	{
 		NSTask *task = [[NSTask alloc] init];
-		[task setLaunchPath:toolPath];
-		[task setArguments:arguments];
+		[task setLaunchPath:@(toolPath.c_str())];
+		NSMutableArray *nsArgs = [NSMutableArray arrayWithCapacity:arguments.size()];
+		for(const auto &arg : arguments)
+			[nsArgs addObject:@(arg.c_str())];
+		[task setArguments:nsArgs];
 
 		NSPipe *stdErrPipe = [NSPipe pipe];
 		[task setStandardError:stdErrPipe];
@@ -160,7 +167,7 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 					PrintToStdErr(context, std::string((const char *)[stdErrData bytes], (size_t)[stdErrData length]));
 				}
 
-				std::string toolErrStr = std::string("error: failed to execute \"") + [toolPath UTF8String] + "\". Error: " + std::to_string(toolStatus) + "\n";
+				std::string toolErrStr = std::string("error: failed to execute \"") + toolPath + "\". Error: " + std::to_string(toolStatus) + "\n";
 				context->lastError.set(toolErrStr, toolStatus);
 				PrintToStdErr(context, std::move(toolErrStr));
 			}
@@ -197,7 +204,7 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 			NSString *errorDesc = [operationError localizedDescription];
 			if(errorDesc == nil)
 				errorDesc = [operationError localizedFailureReason];
-			std::string launchErrStr = std::string("error: failed to execute \"") + [toolPath UTF8String] + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
+			std::string launchErrStr = std::string("error: failed to execute \"") + toolPath + "\". Error: " + ([errorDesc UTF8String] ?: "unknown") + "\n";
 			context->lastError.set(launchErrStr, operationError ? (int)[operationError code] : 1);
 			PrintToStdErr(context, std::move(launchErrStr));
 		}
@@ -210,7 +217,7 @@ ExcecuteTool(NSString *toolPath, NSArray<NSString*> *arguments, ReplayContext *c
 }
 
 bool
-Echo(NSString *text, ReplayContext *context, ActionContext *actionContext)
+Echo(const std::string &text, ReplayContext *context, ActionContext *actionContext)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
@@ -220,15 +227,12 @@ Echo(NSString *text, ReplayContext *context, ActionContext *actionContext)
 	if([newlineVal isKindOfClass:[NSNumber class]])
 		addNewline = [newlineVal boolValue];
 
-	if(text == nil)
-		text = @"";
-
 	if(context->verbose || context->dryRun)
 	{
 		id useRawText = actionContext->settings[@"raw"];
 		const char *rawCStr = ([useRawText isKindOfClass:[NSNumber class]]) ? ([useRawText boolValue] ? " raw=true" : " raw=false") : "";
 		const char *newlineCStr = (newlineVal != nil) ? (addNewline ? " newline=true" : " newline=false") : "";
-		std::string desc = std::string("[echo") + rawCStr + newlineCStr + "]\t" + [text UTF8String] + "\n";
+		std::string desc = std::string("[echo") + rawCStr + newlineCStr + "]\t" + text + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}
 	else
@@ -241,11 +245,10 @@ Echo(NSString *text, ReplayContext *context, ActionContext *actionContext)
 
 	if(!context->dryRun)
 	{
-		std::string textStr([text UTF8String]);
 		if(addNewline)
-			PrintToStdOut(context, textStr + "\n", actionContext->index);
+			PrintToStdOut(context, text + "\n", actionContext->index);
 		else
-			PrintToStdOut(context, std::move(textStr), actionContext->index);
+			PrintToStdOut(context, text, actionContext->index);
 	}
 	else
 	{

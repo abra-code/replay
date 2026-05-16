@@ -9,12 +9,4 @@
 #import "ReplayAction.h"
 #import "replay_server.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 void StartServerAndRunLoop(ReplayContext *context);
-
-#ifdef __cplusplus
-}
-#endif

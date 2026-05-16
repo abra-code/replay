@@ -30,7 +30,7 @@ static bool is_utf8_text(const uint8_t *data, size_t len)
 }
 
 bool
-ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionContext)
+ReadFile(const std::string &filePath, ReplayContext *context, ActionContext *actionContext)
 {
 	if (!context->mcpServer && context->stopOnError && context->lastError.hasError())
 		return false;
@@ -118,7 +118,7 @@ ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionCont
 		// Build output directly from the raw bytes — no NSString round-trip
 		// (avoids UTF-8→UTF-16→UTF-8 conversion+copy for potentially large content)
 		std::string output;
-		output.reserve(strlen("[text:") + strlen(filePath) + 2 + data.size() + 1);
+		output.reserve(6 + filePath.size() + 2 + data.size() + 1);
 		output += "[text:";
 		output += filePath;
 		output += "]\n";
@@ -134,7 +134,7 @@ ReadFile(const char *filePath, ReplayContext *context, ActionContext *actionCont
 		unsigned long written = EncodeBase64(data.data(), (unsigned long)data.size(), encoded.data(), encodedSize);
 
 		std::string output;
-		output.reserve(strlen("[blob:") + strlen(filePath) + 2 + written + 1);
+		output.reserve(6 + filePath.size() + 2 + written + 1);
 		output += "[blob:";
 		output += filePath;
 		output += "]\n";

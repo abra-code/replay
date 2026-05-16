@@ -36,7 +36,7 @@ static std::vector<std::string> split_lines_for_diff(const std::string &s)
 
 // Single-hunk unified diff using common-prefix/suffix approach.
 // Correct for localized replacements; multi-edit spans collapse into one hunk.
-static std::string make_unified_diff(const char *path,
+static std::string make_unified_diff(const std::string &path,
                                       const std::string &orig,
                                       const std::string &modified)
 {
@@ -483,7 +483,7 @@ static bool apply_one_edit(std::string &content,
 }
 
 MCPEditResult
-EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edits, bool dryRun)
+EditFileMCPCore(const std::string &filePath, NSArray<NSDictionary *> *edits, bool dryRun)
 {
 	if (dryRun)
 	{
@@ -576,9 +576,8 @@ EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edits, bool dryRu
 			return {false, -32603, [editError UTF8String]};
 	}
 
-	std::string pathStr(filePath);
-	size_t lastSlash = pathStr.rfind('/');
-	std::string dir = (lastSlash != std::string::npos) ? pathStr.substr(0, lastSlash) : ".";
+	size_t lastSlash = filePath.rfind('/');
+	std::string dir = (lastSlash != std::string::npos) ? filePath.substr(0, lastSlash) : ".";
 	std::string tmpl = dir + "/.replay_edit_XXXXXX";
 	int tmpFd = mkstemp(&tmpl[0]);
 	if (tmpFd < 0)
@@ -589,7 +588,7 @@ EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edits, bool dryRu
 	bool write_ok = content.empty() ||
 	                ::write(tmpFd, content.data(), content.size()) == (ssize_t)content.size();
 	::close(tmpFd);
-	if (!write_ok || ::rename(tmpl.c_str(), filePath) != 0)
+	if (!write_ok || ::rename(tmpl.c_str(), filePath.c_str()) != 0)
 	{
 		int err = errno;
 		::unlink(tmpl.c_str());
@@ -600,7 +599,7 @@ EditFileMCPCore(const char *filePath, NSArray<NSDictionary *> *edits, bool dryRu
 }
 
 MCPGrepResult
-GrepFileMCPCore(const char *filePath, const std::string &pattern,
+GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
                   bool use_regex, bool case_insensitive,
                   int context_lines, int max_matches)
 {
@@ -753,7 +752,7 @@ GrepFileMCPCore(const char *filePath, const std::string &pattern,
 }
 
 bool
-EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun,
+EditFile(const std::string &filePath, NSArray<NSDictionary *> *edits, bool actionDryRun,
          ReplayContext *context, ActionContext *actionContext)
 {
 	if (!context->mcpServer && context->stopOnError && context->lastError.hasError())
@@ -880,9 +879,8 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	}
 
 	// Write atomically: temp file in same directory, then rename
-	std::string pathStr(filePath);
-	size_t lastSlash = pathStr.rfind('/');
-	std::string dir = (lastSlash != std::string::npos) ? pathStr.substr(0, lastSlash) : ".";
+	size_t lastSlash = filePath.rfind('/');
+	std::string dir = (lastSlash != std::string::npos) ? filePath.substr(0, lastSlash) : ".";
 	std::string tmpl = dir + "/.replay_edit_XXXXXX";
 
 	int tmpFd = mkstemp(&tmpl[0]);
@@ -900,7 +898,7 @@ EditFile(const char *filePath, NSArray<NSDictionary *> *edits, bool actionDryRun
 	                ::write(tmpFd, content.data(), content.size()) == (ssize_t)content.size();
 	::close(tmpFd);
 
-	if (!write_ok || ::rename(tmpl.c_str(), filePath) != 0)
+	if (!write_ok || ::rename(tmpl.c_str(), filePath.c_str()) != 0)
 	{
 		int err = errno;
 		::unlink(tmpl.c_str());
