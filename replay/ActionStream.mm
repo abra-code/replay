@@ -230,7 +230,7 @@ NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen)
 		return actionDescription;
 	
 	bool isSourceDestAction = false;
-	Action action = ActionFromName(actionName, &isSourceDestAction);
+	Action action = ActionFromName(std::string_view([actionName UTF8String]), isSourceDestAction);
 	if(action == kActionInvalid)
 		return actionDescription; // defer error handling to parsing code
 

@@ -170,17 +170,11 @@ SymlinkItem(const std::string &fromPath, const std::string &linkPath, ReplayCont
 		return false;
 	}
 
-	// settings access stays ObjC until Phase 5
-	NSNumber *validateSource = actionContext->settings[@"validate"];
-	bool validateSymlinkSource = true;
-	if([validateSource isKindOfClass:[NSNumber class]])
-	{
-		validateSymlinkSource = [validateSource boolValue];
-	}
+	bool validateSymlinkSource = actionContext->settings.bool_value("validate", true);
 
 	if(context->verbose || context->dryRun)
 	{
-		const char *settingsCStr = (validateSource == nil) ? "" : (validateSymlinkSource ? " validate=true" : " validate=false");
+		const char *settingsCStr = validateSymlinkSource ? "" : " validate=false";
 		std::string desc = std::string("[symlink") + settingsCStr + "]\t" + fromPath + "\t" + linkPath + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}

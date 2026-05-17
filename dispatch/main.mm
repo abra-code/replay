@@ -1,5 +1,5 @@
 //
-//  main.m
+//  main.mm
 //  dispatch
 //
 //  Created by Tomasz Kukielka on 12/23/20.
@@ -354,7 +354,7 @@ int main(int argc, const char * argv[])
 		if(argc > 2)
 		{
 			actionName = @(argv[2]);
-			action = ActionFromName(actionName,  &isSrcDestAction);
+			action = ActionFromName(std::string_view(argv[2]), isSrcDestAction);
 		}
 
 		CFMessagePortRef remotePort = CFMessagePortCreateRemote(kCFAllocatorDefault, portName);//should return non-null if remote server port already created

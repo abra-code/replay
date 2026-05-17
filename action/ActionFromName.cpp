@@ -1,106 +1,106 @@
-#import <Foundation/Foundation.h>
-#import "ActionFromName.h"
+#include "ActionFromName.h"
 #include "LogStream.h"
+#include <optional>
+#include <string_view>
 
 Action
-ActionFromName(NSString *actionName, bool *isSrcDestActionPtr)
+ActionFromName(std::optional<std::string_view> actionName, bool &isSrcDestAction)
 {
-	if(actionName == nil)
+	if(!actionName.has_value())
 	{
 		LogError("error: action not specified in a step.\n");
+		isSrcDestAction = false;
 		return kActionInvalid;
 	}
 
+	std::string_view sv = *actionName;
 	Action replayAction = kActionInvalid;
-	bool isSrcDestAction = false;
+	isSrcDestAction = false;
 
-	if([actionName isEqualToString:@"clone"] || [actionName isEqualToString:@"copy"])
+	if(sv == "clone" || sv == "copy")
 	{
 		replayAction = kFileActionClone;
 		isSrcDestAction = true;
 	}
-	else if([actionName isEqualToString:@"move"])
+	else if(sv == "move")
 	{
 		replayAction = kFileActionMove;
 		isSrcDestAction = true;
 	}
-	else if([actionName isEqualToString:@"hardlink"])
+	else if(sv == "hardlink")
 	{
 		replayAction = kFileActionHardlink;
 		isSrcDestAction = true;
 	}
-	else if([actionName isEqualToString:@"symlink"])
+	else if(sv == "symlink")
 	{
 		replayAction = kFileActionSymlink;
 		isSrcDestAction = true;
 	}
-	else if([actionName isEqualToString:@"create"])
+	else if(sv == "create")
 	{
 		replayAction = kFileActionCreate;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"delete"])
+	else if(sv == "delete")
 	{
 		replayAction = kFileActionDelete;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"read"])
+	else if(sv == "read")
 	{
 		replayAction = kFileActionRead;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"list"])
+	else if(sv == "list")
 	{
 		replayAction = kFileActionList;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"tree"])
+	else if(sv == "tree")
 	{
 		replayAction = kFileActionTree;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"info"])
+	else if(sv == "info")
 	{
 		replayAction = kFileActionInfo;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"glob"])
+	else if(sv == "glob")
 	{
 		replayAction = kFileActionGlob;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"edit"])
+	else if(sv == "edit")
 	{
 		replayAction = kFileActionEdit;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"execute"])
+	else if(sv == "execute")
 	{
 		replayAction = kActionExecuteTool;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"echo"])
+	else if(sv == "echo")
 	{
 		replayAction = kActionEcho;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"start"])
+	else if(sv == "start")
 	{
 		replayAction = kActionStartServer;
 		isSrcDestAction = false;
 	}
-	else if([actionName isEqualToString:@"wait"])
+	else if(sv == "wait")
 	{
 		replayAction = kActionWait;
 		isSrcDestAction = false;
 	}
 	else
 	{
-		replayAction = kActionInvalid;
-		LogError("error: unrecognized step action: %s\n", [actionName UTF8String]);
+		LogError("error: unrecognized step action: %.*s\n", (int)sv.size(), sv.data());
 	}
 
-	*isSrcDestActionPtr = isSrcDestAction;
 	return replayAction;
 }
-

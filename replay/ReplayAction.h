@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #include "FileTree.h"
 #include "LogStream.h"
+#include "ActionStep.h"
 
 #ifdef __cplusplus
 #include <atomic>
@@ -109,7 +110,7 @@ typedef struct
 
 typedef struct
 {
-	NSDictionary *settings;
+	ActionStep settings;
 	NSInteger index;
 	std::string mcpRequestID; // raw JSON of the JSON-RPC id field; empty when not in MCP mode
 } ActionContext;

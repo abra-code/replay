@@ -659,10 +659,12 @@ static void dispatch_mcp_tool(const std::string &tool,
 
         // Pass execution parameters via ActionContext settings.
         // ExcecuteTool detects context->mcpServer and delegates to ExcecuteToolMCPCore.
-        ac->settings = @{
+        // Local dict keeps the NSDictionary alive through the synchronous ExcecuteTool call.
+        NSDictionary *execSettings = @{
             @"workingDirectory": @(working_dir.c_str()),
             @"timeout":          @(timeout_sec),
         };
+        ac->settings = ActionStep((__bridge CFDictionaryRef)execSettings);
         ExcecuteTool("/bin/sh", {"-c", command}, context, ac);
     }
     else if (tool == "search_files")
@@ -1410,7 +1412,7 @@ static void handle_message(const std::string &line,
     if (!doc)
     {
         fprintf(stderr, "replay-mcp: JSON parse error: %s\n", read_err.msg);
-        ActionContext ac = {nil, -1, "null"};
+        ActionContext ac = {{}, -1, "null"};
         PrintMCPError(context, &ac, -32700, "Parse error");
         return;
     }
@@ -1418,7 +1420,7 @@ static void handle_message(const std::string &line,
     Json::Val root = doc.root();
     if (!root.is_obj())
     {
-        ActionContext ac = {nil, -1, "null"};
+        ActionContext ac = {{}, -1, "null"};
         PrintMCPError(context, &ac, -32600, "Invalid request: root must be object");
         return;
     }
@@ -1432,13 +1434,13 @@ static void handle_message(const std::string &line,
     {
         if (!has_id)
             return;
-        ActionContext ac = {nil, -1, request_id};
+        ActionContext ac = {{}, -1, request_id};
         PrintMCPError(context, &ac, -32600, "Invalid request: missing method");
         return;
     }
     std::string_view method = *method_sv;
 
-    ActionContext ac = {nil, -1, request_id};
+    ActionContext ac = {{}, -1, request_id};
 
     if (method == "initialize")
     {
@@ -1506,7 +1508,6 @@ static void handle_message(const std::string &line,
         AsyncDispatch(^{
             @autoreleasepool {
                 ActionContext ac;
-                ac.settings     = nil;
                 ac.index        = -1;
                 ac.mcpRequestID = captured_id;
 

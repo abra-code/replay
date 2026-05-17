@@ -54,9 +54,8 @@ CreateFile(const std::string &itemPath, const std::string &content, ReplayContex
 
 	if(context->verbose || context->dryRun)
 	{
-		// settings access stays ObjC until Phase 5
-		id useRawText = actionContext->settings[@"raw"];
-		const char *settingsCStr = ([useRawText isKindOfClass:[NSNumber class]]) ? ([useRawText boolValue] ? " raw=true" : " raw=false") : "";
+		bool useRaw = actionContext->settings.bool_value("raw", false);
+		const char *settingsCStr = useRaw ? " raw=true" : "";
 		std::string desc = std::string("[create file") + settingsCStr + "]\t" + itemPath + "\t" + content + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}

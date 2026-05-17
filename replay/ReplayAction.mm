@@ -10,7 +10,7 @@
 
 
 static inline dispatch_block_t
-CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::string toPath, ReplayContext *context, NSDictionary *actionSettings, NSInteger actionIndex)
+CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::string toPath, ReplayContext *context, ActionStep step, NSInteger actionIndex)
 {
 	if(fromPath.empty() || toPath.empty())
 		return nil;
@@ -21,7 +21,7 @@ CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::st
 		case kFileActionClone:
 		{
             action = ^{ @autoreleasepool {
-				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
+				ActionContext localContext = { .settings = step, .index = actionIndex };
 				__unused bool isOK = CloneItem(fromPath, toPath, context, &localContext);
             }};
 		}
@@ -30,7 +30,7 @@ CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::st
 		case kFileActionMove:
 		{
             action = ^{ @autoreleasepool {
-				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
+				ActionContext localContext = { .settings = step, .index = actionIndex };
 				__unused bool isOK = MoveItem(fromPath, toPath, context, &localContext);
             }};
 		}
@@ -39,7 +39,7 @@ CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::st
 		case kFileActionHardlink:
 		{
             action = ^{ @autoreleasepool {
-				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
+				ActionContext localContext = { .settings = step, .index = actionIndex };
 				__unused bool isOK = HardlinkItem(fromPath, toPath, context, &localContext);
             }};
 		}
@@ -48,7 +48,7 @@ CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::st
 		case kFileActionSymlink:
 		{
             action = ^{ @autoreleasepool {
-				ActionContext localContext = { .settings = actionSettings, .index = actionIndex };
+				ActionContext localContext = { .settings = step, .index = actionIndex };
 				__unused bool isOK = SymlinkItem(fromPath, toPath, context, &localContext);
             }};
 		}
@@ -63,23 +63,21 @@ CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::st
 }
 
 static inline NSArray<NSString*> *
-GetExpandedPathsFromRawPaths(NSArray<NSString*> *rawPaths, ReplayContext *context)
+GetExpandedPathsFromVector(const std::optional<std::vector<std::string>>& rawPaths, ReplayContext *context)
 {
-	if([rawPaths isKindOfClass:[NSArray class]])
+	if(!rawPaths.has_value())
+		return nil;
+	NSMutableArray<NSString*> *expandedPaths = [NSMutableArray arrayWithCapacity:rawPaths->size()];
+	for(const auto& onePath : *rawPaths)
 	{
-		NSMutableArray<NSString*> *expandedPaths = [NSMutableArray arrayWithCapacity:[rawPaths count]];
-		for(NSString *onePath in rawPaths)
+		auto expanded = ExpandEnvVars(onePath.c_str(), context);
+		if(expanded.has_value())
 		{
-			auto expanded = ExpandEnvVars([onePath UTF8String], context);
-			if(expanded.has_value())
-			{
-				NSURL *oneURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:expanded->c_str()]];
-				[expandedPaths addObject:oneURL.absoluteURL.path];
-			}
+			NSURL *oneURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:expanded->c_str()]];
+			[expandedPaths addObject:oneURL.absoluteURL.path];
 		}
-		return expandedPaths;
 	}
-	return nil;
+	return expandedPaths;
 }
 
 static inline NSArray<NSString*> *
@@ -101,14 +99,12 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		return;
 
  @autoreleasepool {
+	ActionStep step((__bridge CFDictionaryRef)stepDescription);
 	bool isSrcDestAction = false;
-	Action replayAction = ActionFromName(stepDescription[@"action"], &isSrcDestAction);
+	Action replayAction = ActionFromName(step.string_value("action"), isSrcDestAction);
 
 	if(replayAction == kActionInvalid)
 		return;
-
-	Class stringClass = [NSString class];
-	Class arrayClass = [NSArray class];
 
 	dispatch_block_t action = NULL;
 	NSArray<NSString*> *inputs = nil;
@@ -118,12 +114,12 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
 	if(isSrcDestAction)
 	{
-		NSString *sourcePath = stepDescription[@"from"];
-		NSString *destinationPath = stepDescription[@"to"];
-		if([sourcePath isKindOfClass:stringClass] && [destinationPath isKindOfClass:stringClass])
+		auto sourcePath = step.string_value("from");
+		auto destinationPath = step.string_value("to");
+		if(sourcePath.has_value() && destinationPath.has_value())
 		{//simple one-to-one form
-			auto expandedSource = ExpandEnvVars([sourcePath UTF8String], context);
-			auto expandedDest = ExpandEnvVars([destinationPath UTF8String], context);
+			auto expandedSource = ExpandEnvVars(sourcePath->c_str(), context);
+			auto expandedDest = ExpandEnvVars(destinationPath->c_str(), context);
 			if(!expandedSource.has_value() || !expandedDest.has_value())
 			{
 				actionHandler(nil, nil, nil, nil, nil);
@@ -153,7 +149,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						auto slash = match.rfind('/');
 						std::string fileName = (slash != std::string::npos) ? match.substr(slash + 1) : match;
 						std::string destPath = capturedDestDir + "/" + fileName;
-						ActionContext localContext = { .settings = stepDescription, .index = actionIndex };
+						ActionContext localContext = { .settings = step, .index = actionIndex };
 						switch(capturedAction) {
 							case kFileActionClone:    CloneItem(match, destPath, context, &localContext); break;
 							case kFileActionMove:     MoveItem(match, destPath, context, &localContext); break;
@@ -181,7 +177,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				std::string toPath = *expandedDest;
 
 				NSInteger actionIndex = ++(context->actionCounter);
-				action = CreateSourceDestinationAction(replayAction, fromPath, toPath, context, stepDescription, actionIndex);
+				action = CreateSourceDestinationAction(replayAction, fromPath, toPath, context, step, actionIndex);
 
 				if(context->concurrent)
 				{
@@ -196,18 +192,18 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		}
 		else
 		{//multiple items to destination directory form
-			NSArray<NSString*> *itemPaths = stepDescription[@"items"];
-			NSString *destinationDirPath = stepDescription[@"destination directory"];
-			if([itemPaths isKindOfClass:arrayClass] && [destinationDirPath isKindOfClass:stringClass])
+			auto itemPaths = step.string_array("items");
+			auto destinationDirPath = step.string_value("destination directory");
+			if(itemPaths.has_value() && destinationDirPath.has_value())
 			{
 				std::string capturedDestDir;
-				auto expandedDestOpt = ExpandEnvVars([destinationDirPath UTF8String], context);
+				auto expandedDestOpt = ExpandEnvVars(destinationDirPath->c_str(), context);
 				if(expandedDestOpt.has_value())
 					capturedDestDir = *expandedDestOpt;
 
-				for(NSString *onePath in itemPaths)
+				for(const auto& onePath : *itemPaths)
 				{
-					auto expandedOpt = ExpandEnvVars([onePath UTF8String], context);
+					auto expandedOpt = ExpandEnvVars(onePath.c_str(), context);
 					if(!expandedOpt.has_value())
 					{
 						if(context->stopOnError)
@@ -238,7 +234,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 								auto slash = match.rfind('/');
 								std::string fileName = (slash != std::string::npos) ? match.substr(slash + 1) : match;
 								std::string destPath = capturedDestDir + "/" + fileName;
-								ActionContext localContext = { .settings = stepDescription, .index = actionIndex };
+								ActionContext localContext = { .settings = step, .index = actionIndex };
 								switch(capturedAction) {
 									case kFileActionClone:    CloneItem(match, destPath, context, &localContext); break;
 									case kFileActionMove:     MoveItem(match, destPath, context, &localContext); break;
@@ -266,7 +262,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 						std::string fileName = (slash != std::string::npos) ? srcPath.substr(slash + 1) : srcPath;
 						std::string dstPath = capturedDestDir + "/" + fileName;
 						NSInteger actionIndex = ++(context->actionCounter);
-						action = CreateSourceDestinationAction(replayAction, srcPath, dstPath, context, stepDescription, actionIndex);
+						action = CreateSourceDestinationAction(replayAction, srcPath, dstPath, context, step, actionIndex);
 
 						if(context->concurrent)
 						{
@@ -286,12 +282,12 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 	{
 		if(replayAction == kFileActionDelete)
 		{
-			NSArray<NSString*> *itemPaths = stepDescription[@"items"];
-			if([itemPaths isKindOfClass:arrayClass])
+			auto itemPaths = step.string_array("items");
+			if(itemPaths.has_value())
 			{
-				for(NSString *onePath in itemPaths)
+				for(const auto& onePath : *itemPaths)
 				{
-					auto expandedOpt = ExpandEnvVars([onePath UTF8String], context);
+					auto expandedOpt = ExpandEnvVars(onePath.c_str(), context);
 					if(expandedOpt.has_value())
 					{
 						if(globoverlap::is_glob_pattern(*expandedOpt))
@@ -313,7 +309,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 								{
 									if(context->stopOnError && (context->lastError.hasError()))
 										break;
-									ActionContext localContext = { .settings = stepDescription, .index = actionIndex };
+									ActionContext localContext = { .settings = step, .index = actionIndex };
 									__unused bool isOK = DeleteItem(match, context, &localContext);
 								}
 							}};
@@ -330,7 +326,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 							std::string capturedPath = *expandedOpt;
 							NSInteger actionIndex = ++(context->actionCounter);
 							action = ^{ @autoreleasepool {
-								ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+								ActionContext actionContext = { .settings = step, .index = actionIndex };
 								__unused bool isOK = DeleteItem(capturedPath, context, &actionContext);
 							}};
 
@@ -356,18 +352,18 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		}
 		else if(replayAction == kFileActionRead)
 		{
-			NSArray<NSString*> *itemPaths = stepDescription[@"items"];
-			if([itemPaths isKindOfClass:arrayClass])
+			auto itemPaths = step.string_array("items");
+			if(itemPaths.has_value())
 			{
-				for(NSString *onePath in itemPaths)
+				for(const auto& onePath : *itemPaths)
 				{
-					auto expandedOpt = ExpandEnvVars([onePath UTF8String], context);
+					auto expandedOpt = ExpandEnvVars(onePath.c_str(), context);
 					if(expandedOpt.has_value())
 					{
 						std::string capturedPath = *expandedOpt;
 						NSInteger actionIndex = ++(context->actionCounter);
 						action = ^{ @autoreleasepool {
-							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+							ActionContext actionContext = { .settings = step, .index = actionIndex };
 							__unused bool isOK = ReadFile(capturedPath, context, &actionContext);
 						}};
 						// ReadFile prints two strings (verbose descriptor + content), reserve second slot
@@ -394,16 +390,16 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		}
 		else if(replayAction == kFileActionList)
 		{
-			NSString *dirPath = stepDescription[@"directory"];
-			if([dirPath isKindOfClass:stringClass])
+			auto dirPath = step.string_value("directory");
+			if(dirPath.has_value())
 			{
-				auto expandedOpt = ExpandEnvVars([dirPath UTF8String], context);
+				auto expandedOpt = ExpandEnvVars(dirPath->c_str(), context);
 				if(expandedOpt.has_value())
 				{
 					std::string capturedPath = *expandedOpt;
 					NSInteger actionIndex = ++(context->actionCounter);
 					action = ^{ @autoreleasepool {
-						ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+						ActionContext actionContext = { .settings = step, .index = actionIndex };
 						__unused bool isOK = ListDirectory(capturedPath, context, &actionContext);
 					}};
 					++(context->actionCounter);
@@ -424,21 +420,17 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		}
 		else if(replayAction == kFileActionTree)
 		{
-			NSString *dirPath = stepDescription[@"directory"];
-			if([dirPath isKindOfClass:stringClass])
+			auto dirPath = step.string_value("directory");
+			if(dirPath.has_value())
 			{
-				auto expandedOpt = ExpandEnvVars([dirPath UTF8String], context);
+				auto expandedOpt = ExpandEnvVars(dirPath->c_str(), context);
 				if(expandedOpt.has_value())
 				{
 					std::string capturedPath = *expandedOpt;
-					NSInteger maxDepth = 5;
-					id depthVal = stepDescription[@"depth"];
-					if([depthVal isKindOfClass:[NSNumber class]])
-						maxDepth = [depthVal integerValue];
-					NSInteger capturedDepth = maxDepth;
+					NSInteger capturedDepth = step.int_value("depth", 5);
 					NSInteger actionIndex = ++(context->actionCounter);
 					action = ^{ @autoreleasepool {
-						ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+						ActionContext actionContext = { .settings = step, .index = actionIndex };
 						__unused bool isOK = DirectoryTree(capturedPath, capturedDepth, context, &actionContext);
 					}};
 					++(context->actionCounter);
@@ -459,16 +451,16 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		}
 		else if(replayAction == kFileActionInfo)
 		{
-			NSString *filePath = stepDescription[@"path"];
-			if([filePath isKindOfClass:stringClass])
+			auto filePath = step.string_value("path");
+			if(filePath.has_value())
 			{
-				auto expandedOpt = ExpandEnvVars([filePath UTF8String], context);
+				auto expandedOpt = ExpandEnvVars(filePath->c_str(), context);
 				if(expandedOpt.has_value())
 				{
 					std::string capturedPath = *expandedOpt;
 					NSInteger actionIndex = ++(context->actionCounter);
 					action = ^{ @autoreleasepool {
-						ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+						ActionContext actionContext = { .settings = step, .index = actionIndex };
 						__unused bool isOK = GetFileInfo(capturedPath, context, &actionContext);
 					}};
 					++(context->actionCounter);
@@ -489,47 +481,46 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		}
 		else if(replayAction == kFileActionGlob)
 		{
-			NSString *rawRoot = stepDescription[@"root"];
-			NSArray<NSString*> *rawGlobs = stepDescription[@"glob"];
+			auto rawRootOpt = step.string_value("root");
+			auto rawGlobsOpt = step.string_array("glob");
 
-			if([rawRoot isKindOfClass:stringClass] && [rawGlobs isKindOfClass:arrayClass] && [rawGlobs count] > 0)
+			if(rawRootOpt.has_value() && rawGlobsOpt.has_value() && !rawGlobsOpt->empty())
 			{
+				NSString *rawRoot = [NSString stringWithUTF8String:rawRootOpt->c_str()];
 				NSString *expandedRoot = StringByExpandingEnvironmentVariablesWithErrorCheck(rawRoot, context);
 				if(expandedRoot == nil)
 					expandedRoot = rawRoot;
 
 				NSMutableArray<NSString*> *expandedGlobs = [NSMutableArray new];
-				for(NSString *p in rawGlobs)
+				for(const auto& p : *rawGlobsOpt)
 				{
-					NSString *ep = StringByExpandingEnvironmentVariablesWithErrorCheck(p, context);
+					NSString *nsP = [NSString stringWithUTF8String:p.c_str()];
+					NSString *ep = StringByExpandingEnvironmentVariablesWithErrorCheck(nsP, context);
 					if(ep != nil)
 						[expandedGlobs addObject:ep];
 				}
 
-				NSArray<NSString*> *rawExcludes = stepDescription[@"exclude"];
+				auto rawExcludesOpt = step.string_array("exclude");
 				NSMutableArray<NSString*> *expandedExcludes = [NSMutableArray new];
-				if([rawExcludes isKindOfClass:arrayClass])
+				if(rawExcludesOpt.has_value())
 				{
-					for(NSString *p in rawExcludes)
+					for(const auto& p : *rawExcludesOpt)
 					{
-						NSString *ep = StringByExpandingEnvironmentVariablesWithErrorCheck(p, context);
+						NSString *nsP = [NSString stringWithUTF8String:p.c_str()];
+						NSString *ep = StringByExpandingEnvironmentVariablesWithErrorCheck(nsP, context);
 						if(ep != nil)
 							[expandedExcludes addObject:ep];
 					}
 				}
 
-				NSInteger maxResults = 1000;
-				id maxVal = stepDescription[@"max"];
-				if([maxVal isKindOfClass:[NSNumber class]])
-					maxResults = [maxVal integerValue];
-
+				NSInteger maxResults = step.int_value("max", 1000);
 				NSString *capturedRoot = expandedRoot;
 				NSArray<NSString*> *capturedGlobs = [expandedGlobs copy];
 				NSArray<NSString*> *capturedExcludes = [expandedExcludes copy];
 				NSInteger capturedMax = maxResults;
 				NSInteger actionIndex = ++(context->actionCounter);
 				action = ^{ @autoreleasepool {
-					ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+					ActionContext actionContext = { .settings = step, .index = actionIndex };
 					__unused bool isOK = GlobFiles(capturedRoot, capturedGlobs, capturedExcludes, capturedMax, context, &actionContext);
 				}};
 				++(context->actionCounter);
@@ -552,29 +543,20 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			// Resolve edits specification (shared across all items)
 			std::vector<FileEdit> editsVec;
 			bool editsOK = false;
-			NSArray<NSDictionary*> *rawEditsArray = stepDescription[@"edits"];
-			if([rawEditsArray isKindOfClass:arrayClass] && [rawEditsArray count] > 0)
+			auto rawEditsOpt = step.step_array("edits");
+			if(rawEditsOpt.has_value() && !rawEditsOpt->empty())
 			{
-				for(NSDictionary *editDict in rawEditsArray)
+				for(const auto& editStep : *rawEditsOpt)
 				{
-					if(![editDict isKindOfClass:[NSDictionary class]])
-					continue;
-					NSString *oldText = editDict[@"oldText"];
-					if(![oldText isKindOfClass:stringClass])
-					continue;
+					auto oldTextOpt = editStep.string_value("oldText");
+					if(!oldTextOpt.has_value())
+						continue;
 					FileEdit fe;
-					fe.old_text = [oldText UTF8String];
-					id newTextVal = editDict[@"newText"];
-					fe.new_text = [newTextVal isKindOfClass:stringClass] ? [newTextVal UTF8String] : "";
-					id limitVal = editDict[@"limit"];
-					if([limitVal isKindOfClass:[NSNumber class]])
-						fe.limit = (int)[limitVal integerValue];
-					id regexVal = editDict[@"regex"];
-					if([regexVal isKindOfClass:[NSNumber class]])
-						fe.use_regex = (bool)[regexVal boolValue];
-					id caseVal = editDict[@"case-insensitive"];
-					if([caseVal isKindOfClass:[NSNumber class]])
-						fe.case_insensitive = (bool)[caseVal boolValue];
+					fe.old_text = *oldTextOpt;
+					fe.new_text = editStep.string_value("newText").value_or("");
+					fe.limit = (int)editStep.int_value("limit", 1);
+					fe.use_regex = editStep.bool_value("regex", false);
+					fe.case_insensitive = editStep.bool_value("case-insensitive", false);
 					editsVec.push_back(std::move(fe));
 				}
 				editsOK = !editsVec.empty();
@@ -582,22 +564,15 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			else
 			{
 				// Simple streaming form: oldText/newText at top level
-				NSString *oldText = stepDescription[@"oldText"];
-				if([oldText isKindOfClass:stringClass])
+				auto oldTextOpt = step.string_value("oldText");
+				if(oldTextOpt.has_value())
 				{
 					FileEdit fe;
-					fe.old_text = [oldText UTF8String];
-					id newTextVal = stepDescription[@"newText"];
-					fe.new_text = [newTextVal isKindOfClass:stringClass] ? [newTextVal UTF8String] : "";
-					id limitVal = stepDescription[@"limit"];
-					if([limitVal isKindOfClass:[NSNumber class]])
-						fe.limit = (int)[limitVal integerValue];
-					id regexVal = stepDescription[@"regex"];
-					if([regexVal isKindOfClass:[NSNumber class]])
-						fe.use_regex = (bool)[regexVal boolValue];
-					id caseVal = stepDescription[@"case-insensitive"];
-					if([caseVal isKindOfClass:[NSNumber class]])
-						fe.case_insensitive = (bool)[caseVal boolValue];
+					fe.old_text = *oldTextOpt;
+					fe.new_text = step.string_value("newText").value_or("");
+					fe.limit = (int)step.int_value("limit", 1);
+					fe.use_regex = step.bool_value("regex", false);
+					fe.case_insensitive = step.bool_value("case-insensitive", false);
 					editsVec.push_back(std::move(fe));
 					editsOK = true;
 				}
@@ -611,118 +586,124 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 
 			if(editsOK)
 			{
-				bool actionDryRun = false;
-				id dryRunVal = stepDescription[@"dry-run"];
-				if([dryRunVal isKindOfClass:[NSNumber class]])
-					actionDryRun = [dryRunVal boolValue];
+				bool actionDryRun = step.bool_value("dry-run", false);
 
-				NSArray<NSString*> *itemPaths = stepDescription[@"items"];
-				if(![itemPaths isKindOfClass:arrayClass] || [itemPaths count] == 0)
+				auto itemPathsOpt = step.string_array("items");
+				if(!itemPathsOpt.has_value() || itemPathsOpt->empty())
 				{
 					std::string errStr = "error: \"edit\" action: \"items\" array of paths is required\n";
 					context->lastError.set(errStr, 1);
 					PrintToStdErr(context, std::move(errStr));
-					itemPaths = nil;
+					itemPathsOpt = std::nullopt;
 				}
 
-				for(NSString *onePath in itemPaths)
+				if(itemPathsOpt.has_value())
 				{
-					if(context->stopOnError && (context->lastError.hasError()))
-						break;
-
-					auto expandedOpt = ExpandEnvVars([onePath UTF8String], context);
-					if(!expandedOpt.has_value())
+					for(const auto& onePath : *itemPathsOpt)
 					{
-						if(context->stopOnError)
-						break;
-						continue;
-					}
+						if(context->stopOnError && (context->lastError.hasError()))
+							break;
 
-					if(globoverlap::is_glob_pattern(*expandedOpt))
-					{
-						// Glob item: one task expands at runtime and edits each match
-						std::string globPattern = *expandedOpt;
-						std::vector<FileEdit> capturedEdits = editsVec;
-						bool capturedDryRun = actionDryRun;
-						NSInteger actionIndex = ++(context->actionCounter);
-						action = ^{ @autoreleasepool {
-							auto matches = expand_glob(globPattern);
-							if(matches.empty())
-							{
-								std::string errStr = std::string("error: glob pattern \"") + globPattern + "\" matched no files\n";
-								context->lastError.set(errStr, 1);
-								PrintToStdErr(context, std::move(errStr));
-								return;
-							}
-							for(const auto& match : matches)
-							{
-								if(context->stopOnError && (context->lastError.hasError()))
-									break;
-								ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
-								__unused bool isOK = EditFile(match, capturedEdits, capturedDryRun, context, &actionContext);
-							}
-						}};
-						++(context->actionCounter);
-
-						if(context->concurrent)
-							mutatingInputs = PathArrayFromString(globPattern);
-						actionHandler(action, nil, mutatingInputs, nil, nil);
-						mutatingInputs = nil;
-					}
-					else
-					{
-						// Concrete path: one task per file (tasks are independent, can run in parallel)
-						std::string capturedPath = *expandedOpt;
-						std::vector<FileEdit> capturedEdits = editsVec;
-						bool capturedDryRun = actionDryRun;
-						NSInteger actionIndex = ++(context->actionCounter);
-						action = ^{ @autoreleasepool {
-							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
-							__unused bool isOK = EditFile(capturedPath, capturedEdits, capturedDryRun, context, &actionContext);
-						}};
-						++(context->actionCounter);
-
-						if(context->concurrent)
+						auto expandedOpt = ExpandEnvVars(onePath.c_str(), context);
+						if(!expandedOpt.has_value())
 						{
-							mutatingInputs = PathArrayFromString(capturedPath);
+							if(context->stopOnError)
+								break;
+							continue;
 						}
-						actionHandler(action, nil, mutatingInputs, nil, nil);
-						mutatingInputs = nil;
+
+						if(globoverlap::is_glob_pattern(*expandedOpt))
+						{
+							// Glob item: one task expands at runtime and edits each match
+							std::string globPattern = *expandedOpt;
+							std::vector<FileEdit> capturedEdits = editsVec;
+							bool capturedDryRun = actionDryRun;
+							NSInteger actionIndex = ++(context->actionCounter);
+							action = ^{ @autoreleasepool {
+								auto matches = expand_glob(globPattern);
+								if(matches.empty())
+								{
+									std::string errStr = std::string("error: glob pattern \"") + globPattern + "\" matched no files\n";
+									context->lastError.set(errStr, 1);
+									PrintToStdErr(context, std::move(errStr));
+									return;
+								}
+								for(const auto& match : matches)
+								{
+									if(context->stopOnError && (context->lastError.hasError()))
+										break;
+									ActionContext actionContext = { .settings = step, .index = actionIndex };
+									__unused bool isOK = EditFile(match, capturedEdits, capturedDryRun, context, &actionContext);
+								}
+							}};
+							++(context->actionCounter);
+
+							if(context->concurrent)
+								mutatingInputs = PathArrayFromString(globPattern);
+							actionHandler(action, nil, mutatingInputs, nil, nil);
+							mutatingInputs = nil;
+						}
+						else
+						{
+							// Concrete path: one task per file (tasks are independent, can run in parallel)
+							std::string capturedPath = *expandedOpt;
+							std::vector<FileEdit> capturedEdits = editsVec;
+							bool capturedDryRun = actionDryRun;
+							NSInteger actionIndex = ++(context->actionCounter);
+							action = ^{ @autoreleasepool {
+								ActionContext actionContext = { .settings = step, .index = actionIndex };
+								__unused bool isOK = EditFile(capturedPath, capturedEdits, capturedDryRun, context, &actionContext);
+							}};
+							++(context->actionCounter);
+
+							if(context->concurrent)
+							{
+								mutatingInputs = PathArrayFromString(capturedPath);
+							}
+							actionHandler(action, nil, mutatingInputs, nil, nil);
+							mutatingInputs = nil;
+						}
 					}
 				}
 			}
 		}
 		else if(replayAction == kFileActionCreate)
 		{
-			NSString *filePath = stepDescription[@"file"];
-			if([filePath isKindOfClass:stringClass])
+			auto filePathOpt = step.string_value("file");
+			if(filePathOpt.has_value())
 			{
 				// blob (base64 binary) takes priority over text content
-				NSString *blobContent = nil;
-				id blobValue = stepDescription[@"blob"];
-				if([blobValue isKindOfClass:stringClass])
+				auto blobStrOpt = step.string_value("blob");
+				std::string blobContent;
+				bool isBlob = false;
+
+				if(blobStrOpt.has_value())
 				{
 					// JSON/plist format: "blob": "<base64>" key holds the data
-					blobContent = blobValue;
+					blobContent = *blobStrOpt;
+					isBlob = true;
 				}
-				else if([blobValue isKindOfClass:[NSNumber class]] && [blobValue boolValue])
+				else if(step.bool_value("blob", false))
 				{
 					// streaming format: blob=true modifier, "content" holds the base64 data
-					id contentValue = stepDescription[@"content"];
-					if([contentValue isKindOfClass:stringClass])
-						blobContent = contentValue;
+					auto contentOpt = step.string_value("content");
+					if(contentOpt.has_value())
+					{
+						blobContent = *contentOpt;
+						isBlob = true;
+					}
 				}
 
-				if(blobContent != nil)
+				if(isBlob)
 				{
-					auto pathOpt = ExpandEnvVars([filePath UTF8String], context);
+					auto pathOpt = ExpandEnvVars(filePathOpt->c_str(), context);
 					if(pathOpt.has_value())
 					{
 						std::string capturedPath = *pathOpt;
-						std::string capturedBlob([blobContent UTF8String]);
+						std::string capturedBlob = blobContent;
 						NSInteger actionIndex = ++(context->actionCounter);
 						action = ^{ @autoreleasepool {
-							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+							ActionContext actionContext = { .settings = step, .index = actionIndex };
 							__unused bool isOK = CreateFileFromBlob(capturedPath, capturedBlob, context, &actionContext);
 						}};
 						if(context->concurrent)
@@ -734,69 +715,56 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 				}
 				else
 				{
-				NSString *content = stepDescription[@"content"];
-				if(content == nil)
-					content = @""; //content is optional
-				if(![content isKindOfClass:stringClass])
-				{
-					PrintToStdErr(context, "error: \"create file\" action: \"content\" is expected to be a string\n");
-					content = @"";
-				}
+					std::string contentStr = step.string_value("content").value_or("");
+					bool expandContent = !step.bool_value("raw", false);
 
-				bool expandContent = true;
-				id useRawText = stepDescription[@"raw"];
-				if([useRawText isKindOfClass:[NSNumber class]])
-				{
-					expandContent = ![useRawText boolValue];
-				}
-
-				std::string capturedContent;
-				bool contentOK = true;
-				if(expandContent)
-				{
-					auto contentOpt = ExpandEnvVars([content UTF8String], context);
-					if(!contentOpt.has_value())
-						contentOK = false;
-					else
-						capturedContent = *contentOpt;
-				}
-				else
-				{
-					capturedContent = [content UTF8String];
-				}
-
-				auto pathOpt = ExpandEnvVars([filePath UTF8String], context);
-
-				// contentOK is false only if string is malformed or missing environment variable
-				if(contentOK && pathOpt.has_value())
-				{
-					std::string capturedPath = *pathOpt;
-					NSInteger actionIndex = ++(context->actionCounter);
-                    action = ^{ @autoreleasepool {
-						ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
-						__unused bool isOK = CreateFile(capturedPath, capturedContent, context, &actionContext);
-                    }};
-
-					if(context->concurrent)
+					std::string capturedContent;
+					bool contentOK = true;
+					if(expandContent)
 					{
-						outputs = PathArrayFromString(capturedPath);
+						auto contentOpt = ExpandEnvVars(contentStr.c_str(), context);
+						if(!contentOpt.has_value())
+							contentOK = false;
+						else
+							capturedContent = *contentOpt;
 					}
-					actionHandler(action, nil, nil, nil, outputs);
+					else
+					{
+						capturedContent = contentStr;
+					}
+
+					auto pathOpt = ExpandEnvVars(filePathOpt->c_str(), context);
+
+					// contentOK is false only if string is malformed or missing environment variable
+					if(contentOK && pathOpt.has_value())
+					{
+						std::string capturedPath = *pathOpt;
+						NSInteger actionIndex = ++(context->actionCounter);
+                        action = ^{ @autoreleasepool {
+							ActionContext actionContext = { .settings = step, .index = actionIndex };
+							__unused bool isOK = CreateFile(capturedPath, capturedContent, context, &actionContext);
+                        }};
+
+						if(context->concurrent)
+						{
+							outputs = PathArrayFromString(capturedPath);
+						}
+						actionHandler(action, nil, nil, nil, outputs);
+					}
 				}
-				} // end else (not blob)
-			} // end if(filePath)
+			}
 			else
 			{
-				NSString *dirPath = stepDescription[@"directory"];
-				if([dirPath isKindOfClass:stringClass])
+				auto dirPathOpt = step.string_value("directory");
+				if(dirPathOpt.has_value())
 				{
-					auto pathOpt = ExpandEnvVars([dirPath UTF8String], context);
+					auto pathOpt = ExpandEnvVars(dirPathOpt->c_str(), context);
 					if(pathOpt.has_value())
 					{
 						std::string capturedPath = *pathOpt;
 						NSInteger actionIndex = ++(context->actionCounter);
                         action = ^{ @autoreleasepool {
-							ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+							ActionContext actionContext = { .settings = step, .index = actionIndex };
 							__unused bool isOK = CreateDirectory(capturedPath, context, &actionContext);
                         }};
 
@@ -817,27 +785,21 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		}
 		else if(replayAction == kActionExecuteTool)
 		{
-			NSString *toolPath = stepDescription[@"tool"];
-			if([toolPath isKindOfClass:stringClass])
+			auto toolPathOpt = step.string_value("tool");
+			if(toolPathOpt.has_value())
 			{
-				NSArray<NSString*> *arguments = stepDescription[@"arguments"];
-				if((arguments != nil) && ![arguments isKindOfClass:arrayClass])
+				auto expandedToolOpt = ExpandEnvVars(toolPathOpt->c_str(), context);
+				if(expandedToolOpt.has_value())
 				{
-					std::string errStr = "error: \"execute\" action must specify \"arguments\" as a string array\n";
-					context->lastError.set(errStr, 1);
-					PrintToStdErr(context, std::move(errStr));
-				}
-				else
-				{
-					auto expandedToolOpt = ExpandEnvVars([toolPath UTF8String], context);
-					if(expandedToolOpt.has_value())
+					bool argsOK = true;
+					std::vector<std::string> capturedArgs;
+					auto argumentsOpt = step.string_array("arguments");
+					if(argumentsOpt.has_value())
 					{
-						bool argsOK = true;
-						std::vector<std::string> capturedArgs;
-						capturedArgs.reserve([arguments count]);
-						for(NSString *oneArg in arguments)
+						capturedArgs.reserve(argumentsOpt->size());
+						for(const auto& oneArg : *argumentsOpt)
 						{
-							auto expandedArgOpt = ExpandEnvVars([oneArg UTF8String], context);
+							auto expandedArgOpt = ExpandEnvVars(oneArg.c_str(), context);
 							if(expandedArgOpt.has_value())
 							{
 								capturedArgs.push_back(*expandedArgOpt);
@@ -848,31 +810,31 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 								break;
 							}
 						}
+					}
 
-						if(argsOK)
+					if(argsOK)
+					{
+						std::string capturedToolPath = *expandedToolOpt;
+						NSInteger actionIndex = ++(context->actionCounter);
+						action = ^{ @autoreleasepool {
+                                ActionContext actionContext = { .settings = step, .index = actionIndex };
+                                __unused bool isOK = ExcecuteTool(capturedToolPath, capturedArgs, context, &actionContext);
+                        }};
+
+						// [execute] action is expected to print two strings:
+						// - verbose action description (or null string if not verbose)
+						// - stdout from child tool (or null string if stdout is suppressed)
+						// so we need to increase the counter second time
+						++(context->actionCounter);
+
+						if(context->concurrent)
 						{
-							std::string capturedToolPath = *expandedToolOpt;
-							NSInteger actionIndex = ++(context->actionCounter);
-							action = ^{ @autoreleasepool {
-                                    ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
-                                    __unused bool isOK = ExcecuteTool(capturedToolPath, capturedArgs, context, &actionContext);
-                            }};
-
-							// [execute] action is expected to print two strings:
-							// - verbose action description (or null string if not verbose)
-							// - stdout from child tool (or null string if stdout is suppressed)
-							// so we need to increase the counter second time
-							++(context->actionCounter);
-
-							if(context->concurrent)
-							{
-								inputs = GetExpandedPathsFromRawPaths(stepDescription[@"inputs"], context);
-								exclusiveInputs = GetExpandedPathsFromRawPaths(stepDescription[@"exclusive inputs"], context);
-								outputs = GetExpandedPathsFromRawPaths(stepDescription[@"outputs"], context);
-							}
-
-							actionHandler(action, inputs, nil, exclusiveInputs, outputs);
+							inputs = GetExpandedPathsFromVector(step.string_array("inputs"), context);
+							exclusiveInputs = GetExpandedPathsFromVector(step.string_array("exclusive inputs"), context);
+							outputs = GetExpandedPathsFromVector(step.string_array("outputs"), context);
 						}
+
+						actionHandler(action, inputs, nil, exclusiveInputs, outputs);
 					}
 				}
 			}
@@ -885,29 +847,14 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 		}
 		else if(replayAction == kActionEcho)
 		{
-			NSString *text = stepDescription[@"text"];
-
-			if(text == nil)
-				text = @"";
-
-			if(![text isKindOfClass:stringClass])
-			{
-				PrintToStdErr(context, "error: \"echo\" action: \"text\" is expected to be a string\n");
-				text = @"";
-			}
-
-			bool expandText = true;
-			id useRawText = stepDescription[@"raw"];
-			if([useRawText isKindOfClass:[NSNumber class]])
-			{
-				expandText = ![useRawText boolValue];
-			}
+			std::string textStr = step.string_value("text").value_or("");
+			bool expandText = !step.bool_value("raw", false);
 
 			std::string capturedText;
 			bool textOK = true;
 			if(expandText)
 			{
-				auto expandedOpt = ExpandEnvVars([text UTF8String], context);
+				auto expandedOpt = ExpandEnvVars(textStr.c_str(), context);
 				if(!expandedOpt.has_value())
 					textOK = false;
 				else
@@ -915,7 +862,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			}
 			else
 			{
-				capturedText = [text UTF8String];
+				capturedText = textStr;
 			}
 
 			// capturedText is empty (textOK=false) only if string is malformed or missing environment variable
@@ -923,7 +870,7 @@ HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_h
 			{
 				NSInteger actionIndex = ++(context->actionCounter);
 				action = ^{ @autoreleasepool {
-					ActionContext actionContext = { .settings = stepDescription, .index = actionIndex };
+					ActionContext actionContext = { .settings = step, .index = actionIndex };
 					__unused bool isOK = Echo(capturedText, context, &actionContext);
 				}};
 

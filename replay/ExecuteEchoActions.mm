@@ -104,10 +104,8 @@ ExcecuteTool(const std::string &toolPath, const std::vector<std::string> &argume
     // MCP mode: capture stdout/stderr and return them as a JSON-RPC response.
     if (context->mcpServer)
     {
-        NSString *workDirNS = actionContext->settings[@"workingDirectory"];
-        std::string workingDir = workDirNS != nil ? [workDirNS UTF8String] : "";
-        NSNumber *timeoutNum = actionContext->settings[@"timeout"];
-        int timeoutSec = timeoutNum != nil ? (int)[timeoutNum intValue] : kMCPDefaultTimeout;
+        std::string workingDir = actionContext->settings.string_value("workingDirectory").value_or("");
+        int timeoutSec = (int)actionContext->settings.int_value("timeout", kMCPDefaultTimeout);
 
         MCPExecuteResult r = ExcecuteToolMCPCore(toolPath, arguments, workingDir, timeoutSec);
         if (!r.launched)
@@ -119,14 +117,11 @@ ExcecuteTool(const std::string &toolPath, const std::vector<std::string> &argume
         return r.exit_code == 0;
     }
 
-	NSNumber *useStdOutNum = actionContext->settings[@"stdout"];
-	bool useStdOut = true;
-	if([useStdOutNum isKindOfClass:[NSNumber class]])
-		useStdOut = [useStdOutNum boolValue];
+	bool useStdOut = actionContext->settings.bool_value("stdout", true);
 
 	if(context->verbose || context->dryRun)
 	{
-		const char *settingsCStr = (useStdOutNum == nil) ? "" : (useStdOut ? " stdout=true" : " stdout=false");
+		const char *settingsCStr = useStdOut ? "" : " stdout=false";
 		std::string stdoutStr = std::string("[execute") + settingsCStr + "]\t" + toolPath;
 		for(const auto &arg : arguments)
 			{ stdoutStr += "\t"; stdoutStr += arg; }
@@ -223,16 +218,13 @@ Echo(const std::string &text, ReplayContext *context, ActionContext *actionConte
 	if(context->stopOnError && (context->lastError.hasError()))
 		return false;
 
-	bool addNewline = true;
-	id newlineVal = actionContext->settings[@"newline"];
-	if([newlineVal isKindOfClass:[NSNumber class]])
-		addNewline = [newlineVal boolValue];
+	bool addNewline = actionContext->settings.bool_value("newline", true);
 
 	if(context->verbose || context->dryRun)
 	{
-		id useRawText = actionContext->settings[@"raw"];
-		const char *rawCStr = ([useRawText isKindOfClass:[NSNumber class]]) ? ([useRawText boolValue] ? " raw=true" : " raw=false") : "";
-		const char *newlineCStr = (newlineVal != nil) ? (addNewline ? " newline=true" : " newline=false") : "";
+		bool useRaw = actionContext->settings.bool_value("raw", false);
+		const char *rawCStr = useRaw ? " raw=true" : "";
+		const char *newlineCStr = addNewline ? "" : " newline=false";
 		std::string desc = std::string("[echo") + rawCStr + newlineCStr + "]\t" + text + "\n";
 		PrintToStdOut(context, std::move(desc), actionContext->index);
 	}

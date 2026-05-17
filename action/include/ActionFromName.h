@@ -1,10 +1,6 @@
-#import <Foundation/Foundation.h>
-
-NS_ASSUME_NONNULL_BEGIN
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#pragma once
+#include <optional>
+#include <string_view>
 
 typedef enum
 {
@@ -27,10 +23,4 @@ typedef enum
 	kActionWait         // not a real action
 } Action;
 
-Action ActionFromName(NSString *actionName, bool *isSrcDestActionPtr);
-
-#ifdef __cplusplus
-}
-#endif
-
-NS_ASSUME_NONNULL_END
+Action ActionFromName(std::optional<std::string_view> actionName, bool &isSrcDestAction);
