@@ -118,7 +118,7 @@ let package = Package(
 
         .target(
             name: "FingerprintLib",
-            dependencies: ["GlobCpp", "GlobOverlap", "Blake3", "FastCrc32"],
+            dependencies: ["Common", "GlobCpp", "GlobOverlap", "Blake3", "FastCrc32"],
             path: "fingerprint",
             exclude: ["main.cpp"],
             cxxSettings: [

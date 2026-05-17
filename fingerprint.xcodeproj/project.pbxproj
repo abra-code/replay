@@ -83,20 +83,6 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		1DB17C242F7E4A6B00E67624 /* Exceptions for "common" folder in "gate" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				LogStream.c,
-			);
-			target = 1DDD17002F7A0CAC00DB718A /* gate */;
-		};
-		1DB17C252F7E4A6D00E67624 /* Exceptions for "common" folder in "fingerprint" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				LogStream.c,
-			);
-			target = 1D7ED29D2E9648EB003BA8A7 /* fingerprint */;
-		};
 		1DDD17102F7A0CAD00DB718A /* Exceptions for "fingerprint" folder in "gate" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -117,6 +103,22 @@
 				globoverlap.cpp,
 			);
 			target = 1D7ED29D2E9648EB003BA8A7 /* fingerprint */;
+		};
+		1DF9AFCE2FBA1E3B00E0C4ED /* Exceptions for "common" folder in "fingerprint" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				EnvVarExpand.cpp,
+				LogStream.cpp,
+			);
+			target = 1D7ED29D2E9648EB003BA8A7 /* fingerprint */;
+		};
+		1DF9AFCF2FBA1E3D00E0C4ED /* Exceptions for "common" folder in "gate" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				EnvVarExpand.cpp,
+				LogStream.cpp,
+			);
+			target = 1DDD17002F7A0CAC00DB718A /* gate */;
 		};
 		1DFF728D2ED31C8700860A62 /* Exceptions for "blake3" folder in "blake3" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
@@ -148,8 +150,8 @@
 		1DB17C212F7E4A6200E67624 /* common */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				1DB17C252F7E4A6D00E67624 /* Exceptions for "common" folder in "fingerprint" target */,
-				1DB17C242F7E4A6B00E67624 /* Exceptions for "common" folder in "gate" target */,
+				1DF9AFCE2FBA1E3B00E0C4ED /* Exceptions for "common" folder in "fingerprint" target */,
+				1DF9AFCF2FBA1E3D00E0C4ED /* Exceptions for "common" folder in "gate" target */,
 			);
 			path = common;
 			sourceTree = "<group>";
