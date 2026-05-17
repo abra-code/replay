@@ -3,7 +3,6 @@
 #include "LogStream.h"
 #include "ActionStep.h"
 
-#ifdef __cplusplus
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -83,7 +82,6 @@ struct FileEdit {
     bool        use_regex = false;
     bool        case_insensitive = false;
 };
-#endif // __cplusplus
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -122,9 +120,7 @@ typedef void (^action_handler_t)(__nullable dispatch_block_t action,
 								NSArray<NSString*> * __nullable outputs);
 
 NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen);
-void HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler);
-
-#ifdef __cplusplus
+void HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actionHandler);
 
 bool CloneItem(const std::string &fromPath, const std::string &toPath, ReplayContext *context, ActionContext *actionContext);
 bool MoveItem(const std::string &fromPath, const std::string &toPath, ReplayContext *context, ActionContext *actionContext);
@@ -153,6 +149,5 @@ MCPExecuteResult ExcecuteToolMCPCore(const std::string &toolPath, const std::vec
 MCPGrepResult GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
                                bool use_regex, bool case_insensitive,
                                int context_lines, int max_matches);
-#endif
 
 NS_ASSUME_NONNULL_END

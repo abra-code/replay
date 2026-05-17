@@ -49,14 +49,14 @@ static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path
 }
 
 NSArray<TaskProxy *> *
-TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
+TasksFromStep(const ActionStep& step, ReplayContext *context)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
 		return nil;
 
 	__block NSMutableArray<TaskProxy *> *tasksFromStep = [NSMutableArray arrayWithCapacity:0];
 
-	HandleActionStep(replayStep, context,
+	HandleActionStep(step, context,
 		^( __nullable dispatch_block_t action,
 			NSArray<NSString*> * __nullable inputs,
 			NSArray<NSString*> * __nullable mutatingInputs,
@@ -67,7 +67,10 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 				return;
 
 			TaskProxy *oneTask = [[TaskProxy alloc] initWithTask:action];
-			oneTask.stepDescription = replayStep;
+			{
+				auto actionName = step.string_value("action");
+				oneTask.stepActionName = actionName.has_value() ? @(actionName->c_str()) : nil;
+			}
 			[tasksFromStep addObject:oneTask];
 
 			// Classify each input/output path: glob patterns go to TaskProxy's glob properties
@@ -168,9 +171,9 @@ TasksFromStep(NSDictionary *replayStep, ReplayContext *context)
 
 					// Conditional FileTree producer-replacement: only when no prior
 					// consumer has registered this path. Without prior consumers the
-					// FileTree edge mutator → next-consumer is the right direction;
+					// FileTree edge mutator -> next-consumer is the right direction;
 					// with prior consumers, that edge would conflict with Pass B's
-					// pre-mutation reader edge (consumer → mutator), creating a
+					// pre-mutation reader edge (consumer -> mutator), creating a
 					// cycle. Skipping the replacement in that case lets Pass B
 					// handle ordering on both sides per playlist position.
 					if(node->hasConsumer == 0)
@@ -291,7 +294,7 @@ VerifyAllTasksExecuted(NSArray<TaskProxy*> *allTasks)
 }
 
 void
-DispatchTasksConcurrentlyWithDependencyAnalysis(NSArray<NSDictionary*> *playlist, ReplayContext *context)
+DispatchTasksConcurrentlyWithDependencyAnalysis(const std::vector<ActionStep>& playlist, ReplayContext *context)
 {
 	assert(context->concurrent);
 	DeleteFileTree(context->fileTreeRoot);
@@ -301,25 +304,16 @@ DispatchTasksConcurrentlyWithDependencyAnalysis(NSArray<NSDictionary*> *playlist
 	NSUInteger totalInputCount = 0;
 	NSUInteger totalOutputCount = 0;
 
-	Class dictionaryClass = [NSDictionary class];
+	REPLAY_SIGNPOST_BEGIN("TaskProxyBuild", "playlist_count=%zu", playlist.size());
 
-	REPLAY_SIGNPOST_BEGIN("TaskProxyBuild", "playlist_count=%lu", (unsigned long)[playlist count]);
-
-	for(id oneStep in playlist)
+	for (const auto& step : playlist)
 	{
-		if([oneStep isKindOfClass:dictionaryClass])
+		NSArray<TaskProxy *> *stepTasks = TasksFromStep(step, context);
+		for(TaskProxy *oneTask in stepTasks)
 		{
-			NSArray<TaskProxy *> *stepTasks = TasksFromStep((NSDictionary *)oneStep, context);
-			for(TaskProxy *oneTask in stepTasks)
-			{
-				[taskList addObject:oneTask];
-				totalInputCount += oneTask.inputCount;
-				totalOutputCount += oneTask.outputCount;
-			}
-		}
-		else
-		{
-			LogError("error: invalid non-dictionary step in the playlist\n");
+			[taskList addObject:oneTask];
+			totalInputCount += oneTask.inputCount;
+			totalOutputCount += oneTask.outputCount;
 		}
 	}
 

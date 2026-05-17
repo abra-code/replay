@@ -19,7 +19,7 @@ FinishSerialDispatchAndWait(ReplayContext *context)
 }
 
 void
-DispatchTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context)
+DispatchTasksSerially(const std::vector<ActionStep>& playlist, ReplayContext *context)
 {
 	StartSerialDispatch(context);
 
@@ -27,32 +27,18 @@ DispatchTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 	printf("start dispatching async tasks\n");
 #endif
 
-	Class dictionaryClass = [NSDictionary class];
-
-	for(id oneStep in playlist)
+	for (const auto& step : playlist)
 	{
-		if([oneStep isKindOfClass:dictionaryClass])
-		{
-			HandleActionStep((NSDictionary *)oneStep, context,
-				^(dispatch_block_t action,
-				__unused NSArray<NSString*> *inputs,
-				__unused NSArray<NSString*> *mutatingInputs,
-				__unused NSArray<NSString*> *exclusiveInputs,
-				__unused NSArray<NSString*> *outputs)
-				{
-					if(action != NULL)
-					{
-						// with serial queue the tasks still execute one after another, never overlapping
-						// dispatch_async allows us to keep iterating, building and adding new tasks
-						// while the ones dispatched are already executing on the background thread
-						dispatch_async(context->queue, action);
-					}
-				});
-		}
-		else
-		{
-			LogError("error: invalid non-dictionary step in the playlist\n");
-		}
+		HandleActionStep(step, context,
+			^(dispatch_block_t action,
+			__unused NSArray<NSString*> *inputs,
+			__unused NSArray<NSString*> *mutatingInputs,
+			__unused NSArray<NSString*> *exclusiveInputs,
+			__unused NSArray<NSString*> *outputs)
+			{
+				if (action != NULL)
+					dispatch_async(context->queue, action);
+			});
 	}
 
 #if TRACE
@@ -65,19 +51,15 @@ DispatchTasksSerially(NSArray<NSDictionary*> *playlist, ReplayContext *context)
 void
 DispatchTaskSerially(NSDictionary *stepDescription, ReplayContext *context)
 {
-	HandleActionStep(stepDescription, context,
+	ActionStep step((__bridge CFDictionaryRef)stepDescription);
+	HandleActionStep(step, context,
 		^(dispatch_block_t action,
 		__unused NSArray<NSString*> *inputs,
 		__unused NSArray<NSString*> *mutatingInputs,
 		__unused NSArray<NSString*> *exclusiveInputs,
 		__unused NSArray<NSString*> *outputs)
 		{
-			if(action != NULL)
-			{
-				// with serial queue the tasks still execute one after another, never overlapping
-				// dispatch_async allows us to keep iterating, building and adding new tasks
-				// while the ones dispatched are already executing on the background thread
+			if (action != NULL)
 				dispatch_async(context->queue, action);
-			}
 		});
 }

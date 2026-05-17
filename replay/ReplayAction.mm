@@ -89,17 +89,15 @@ PathArrayFromString(const std::string &path)
 }
 
 
-// this function resolves each step and calls provided actionHandler
-// one or more times for each action in the step
-// one step may have multiple actions like copying a list of files to one directory
+// Resolves one playlist step and calls actionHandler one or more times.
+// (A step may expand into multiple actions, e.g. copying a list of items to a directory.)
 void
-HandleActionStep(NSDictionary *stepDescription, ReplayContext *context, action_handler_t actionHandler)
+HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actionHandler)
 {
 	if(context->stopOnError && (context->lastError.hasError()))
 		return;
 
  @autoreleasepool {
-	ActionStep step((__bridge CFDictionaryRef)stepDescription);
 	bool isSrcDestAction = false;
 	Action replayAction = ActionFromName(step.string_value("action"), isSrcDestAction);
 

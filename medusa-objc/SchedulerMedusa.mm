@@ -219,13 +219,8 @@ ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *allTasks, //input li
 // The precompiled overload avoids re-constructing the automata on each call —
 // safe to reuse sequentially because Automata::Exec() calls ResetStates() after
 // every match, which now clears matched_str_ via State::ResetState().
-static bool concrete_matches_glob(const std::string& concretePath, glob::glob& g) {
+static inline bool concrete_matches_glob(const std::string& concretePath, glob::glob& g) {
 	return glob_match(concretePath, g);
-}
-
-static bool concrete_matches_glob(const std::string& concretePath, const std::string& pattern) {
-	glob::glob g(pattern);
-	return concrete_matches_glob(concretePath, g);
 }
 
 void

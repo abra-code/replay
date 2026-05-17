@@ -1551,7 +1551,7 @@ CFMutableDictionaryRef fingerprint::load_snapshot(const std::string& path) noexc
         return nullptr;
     }
 
-    if (CFGetTypeID(snapshot) != CFDictionaryGetTypeID())
+    if (CFType<CFMutableDictionaryRef>::DynamicCast(snapshot) == nullptr)
     {
         std::cerr << "Error: snapshot is not a dictionary: " << path << "\n";
         return nullptr;

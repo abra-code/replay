@@ -10,6 +10,7 @@
 #include <vector>
 #include <CoreFoundation/CoreFoundation.h>
 #include "../common/include/CFObj.h"
+#include "../common/include/CFType.h"
 #include "FileTree.h"
 #include "../common/include/ReplaySignpost.h"
 
@@ -96,9 +97,9 @@ LoadPathsFromPlist(const char *filePath)
 
 	if (plist != nullptr)
 	{
-		if (CFGetTypeID(plist) == CFArrayGetTypeID())
+		CFArrayRef array = CFType<CFArrayRef>::DynamicCast(plist.Get());
+		if (array != nullptr)
 		{
-			CFArrayRef array = (CFArrayRef)plist.Get();
 			CFIndex count = CFArrayGetCount(array);
 			char buf[4096];
 			for (CFIndex i = 0; i < count; i++)

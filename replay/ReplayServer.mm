@@ -10,6 +10,7 @@
 #import "SerialDispatch.h"
 #import "ActionStream.h"
 #include "CFObj.h"
+#include "CFType.h"
 
 CFMessagePortRef
 CreateCallbackPort(NSString *batchName)
@@ -63,8 +64,8 @@ ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
     if((inData != NULL) && (CFDataGetLength(inData) > 0))
 	{//CFData containing property list dictionary
 		CFErrorRef error = NULL;
-		replayMessage = (CFDictionaryRef)CFPropertyListCreateWithData(kCFAllocatorDefault, inData, kCFPropertyListImmutable, NULL, &error);
-		if(replayMessage == NULL)
+		CFPropertyListRef rawMessage = CFPropertyListCreateWithData(kCFAllocatorDefault, inData, kCFPropertyListImmutable, NULL, &error);
+		if(rawMessage == NULL)
 		{
 			if(error != NULL)
 				CFRelease(error);
@@ -74,14 +75,17 @@ ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 				context->lastError.set("error: corrupt message - cannot unpack property list dictionary from data", 1);
 			}
 		}
-		else if(CFGetTypeID(replayMessage) != CFDictionaryGetTypeID())
+		else
 		{
-			CFRelease(replayMessage);
-			replayMessage = NULL;
-			LogError("error: invalid message - cannot unpack property list dictionary from data\n");
-			if(context->stopOnError)
+			replayMessage = CFType<CFDictionaryRef>::DynamicCast(rawMessage);
+			if(replayMessage == NULL)
 			{
-				context->lastError.set("error: invalid message - cannot unpack property list dictionary from data", 1);
+				CFRelease(rawMessage);
+				LogError("error: invalid message - cannot unpack property list dictionary from data\n");
+				if(context->stopOnError)
+				{
+					context->lastError.set("error: invalid message - cannot unpack property list dictionary from data", 1);
+				}
 			}
 		}
 	}

@@ -36,9 +36,11 @@ static CFStringRef create_cfstring(const std::string& s)
 // Helper to extract std::string from CFString
 static std::string cfstring_to_string(CFStringRef cf)
 {
-    if (!cf) return {};
+    if (cf == nullptr)
+        return {};
     const char* ptr = CFStringGetCStringPtr(cf, kCFStringEncodingUTF8);
-    if (ptr) return std::string(ptr);
+    if (ptr != nullptr)
+        return std::string(ptr);
 
     CFIndex len = CFStringGetLength(cf);
     CFIndex bufSize = 0;
@@ -80,7 +82,8 @@ static CFArrayRef create_cfarray(const std::vector<std::string>& vec)
 static std::vector<std::string> cfarray_to_vector(CFArrayRef arr)
 {
     std::vector<std::string> result;
-    if (!arr) return result;
+    if (arr == nullptr)
+        return result;
     CFIndex count = CFArrayGetCount(arr);
     result.reserve(count);
     for (CFIndex i = 0; i < count; ++i)
@@ -291,7 +294,8 @@ bool cache_lookup(const std::string& cache_dir,
 
     // Try to open and lock for reading
     int fd = open(path.c_str(), O_RDONLY);
-    if (fd < 0) return false;
+    if (fd < 0)
+        return false;
 
     flock(fd, LOCK_SH);
 
@@ -299,7 +303,8 @@ bool cache_lookup(const std::string& cache_dir,
     flock(fd, LOCK_UN);
     close(fd);
 
-    if (!dict) return false;
+    if (dict == nullptr)
+        return false;
     CFObj<CFMutableDictionaryRef> dict_guard(dict);
 
     // Extract fields directly from the flat dictionary

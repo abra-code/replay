@@ -7,9 +7,9 @@
 //
 
 #import <Foundation/Foundation.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <pthread.h>
 #include <getopt.h>
-#include <filesystem>
 #import "ReplayAction.h"
 #include "OutputSerializer.h"
 #import "TaskProxy.h"
@@ -20,10 +20,11 @@
 #import "ReplayServer.h"
 #include "replay_version.h"
 #include "SandboxProfile.h"
-#import "PlaylistSandboxPaths.h"
+#include "PlaylistSandboxPaths.h"
 #include "FileHelpers.h"
 #include "MCPServer.h"
 #include "EnvVarExpand.h"
+#include "PlaylistDoc.h"
 
 #include <limits.h>
 
@@ -31,205 +32,6 @@
 #if DEBUG
 	#define TRACE 0
 #endif
-
-typedef enum
-{
-	kPlaylistFormatPlist = 0,
-	kPlaylistFormatJson,
-	kPlaylistFormatCount
-} PlaylistFormat;
-
-static inline std::string
-EnsureAbsolutePath(std::string_view inputPath)
-{
-	if (inputPath.empty())
-		return {};
-
-	if (inputPath[0] == '/')
-		return std::string(inputPath);
-
-	try
-	{
-		std::filesystem::path cwd = std::filesystem::current_path();
-		return (cwd / inputPath).lexically_normal().string();
-	}
-	catch (...)
-	{
-		return std::string(inputPath);
-	}
-}
-
-static inline NSString *
-MakeAbsolutePathString(std::string_view path)
-{
-	return [NSString stringWithUTF8String:EnsureAbsolutePath(path).c_str()];
-}
-
-//this function is used when the playlist key is non-null so the root container must be a dictionary
-static inline NSDictionary<NSString *, NSArray *> *
-LoadPlaylistRootDictionary(const char* playlistPath, ReplayContext *context)
-{
-	if(playlistPath == NULL)
-	{
-		LogError("error: playlist file path not provided\n");
-		return nil;
-	}
-
-	NSDictionary<NSString *, NSArray *> *playlistDict = nil;
-	NSString *nsPlaylistPath = MakeAbsolutePathString(playlistPath);
-	NSURL *playlistURL = [NSURL fileURLWithPath:nsPlaylistPath];
-
-	PlaylistFormat hint = kPlaylistFormatPlist; //default to plist
-	int numberOfTries = 0;
-
-	NSString *ext = [[playlistURL pathExtension] lowercaseString];
-	if([ext isEqualToString:@"json"])
-	{
-		hint = kPlaylistFormatJson;
-	}
-
-	do
-	{
-		if(hint == kPlaylistFormatPlist)
-		{
-			playlistDict = [NSDictionary dictionaryWithContentsOfURL:playlistURL];
-			NSError *loadingError = nil;
-			playlistDict = [NSDictionary dictionaryWithContentsOfURL:playlistURL error:&loadingError];
-			if(playlistDict != nil)
-				break;
-			numberOfTries++;
-			hint = kPlaylistFormatJson;
-		}
-		else if(hint == kPlaylistFormatJson)
-		{
-			NSError *error = nil;
-			NSData *jsonData = [NSData dataWithContentsOfURL:playlistURL options:kNilOptions error:&error];
-			
-			id playlistCollection = nil;
-			if(jsonData != nil)
-			{
-				playlistCollection = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:&error];
-			}
-
-			if(playlistCollection != nil)
-			{
-				if([playlistCollection isKindOfClass:[NSDictionary class]])
-				{
-					playlistDict = (NSDictionary *)playlistCollection;
-				}
-				break;
-			}
-			numberOfTries++;
-			hint = kPlaylistFormatPlist;
-		}
-	}
-	while(numberOfTries < (int)kPlaylistFormatCount);
-
-	if(playlistDict == nil)
-	{
-		NSError *operationError = nil;
-		BOOL isReachable = [playlistURL checkResourceIsReachableAndReturnError:&operationError];
-		if(!isReachable)
-		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-				errorDesc = [operationError localizedFailureReason];
-			context->lastError.set(std::string("error: playlist file \"") + [[playlistURL path] UTF8String] + "\" cannot be opened: " + ([errorDesc UTF8String] ?: "unknown"), (int)[operationError code]);
-			LogError("error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
-		}
-		else
-		{
-			context->lastError.set("error: unknown or invalid playlist type", 1);
-			LogError("error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key specified, the root container is expected to be a dictionary\n");
-		}
-	}
-
-	return playlistDict;
-}
-
-
-// This function is used when playlistKey is null and the whole content of the file must be the playlist array
-
-static inline NSArray<NSDictionary*> *
-GetPlaylistFromRootArray(const char* playlistPath, ReplayContext *context)
-{
-	if(playlistPath == NULL)
-	{
-		LogError("error: playlist file path not provided\n");
-		return nil;
-	}
-
-	NSArray<NSDictionary*> *playlistArray = nil;
-	NSString *nsPlaylistPath = MakeAbsolutePathString(playlistPath);
-	NSURL *playlistURL = [NSURL fileURLWithPath:nsPlaylistPath];
-
-	PlaylistFormat hint = kPlaylistFormatPlist; //default to plist
-	int numberOfTries = 0;
-
-	NSString *ext = [[playlistURL pathExtension] lowercaseString];
-	if([ext isEqualToString:@"json"])
-	{
-		hint = kPlaylistFormatJson;
-	}
-
-	do
-	{
-		if(hint == kPlaylistFormatPlist)
-		{
-			NSError *error = nil;
-			playlistArray = [NSArray arrayWithContentsOfURL:playlistURL error:&error];
-			if(playlistArray != nil)
-				break;
-			numberOfTries++;
-			hint = kPlaylistFormatJson;
-		}
-		else if(hint == kPlaylistFormatJson)
-		{
-			NSError *error = nil;
-			NSData *jsonData = [NSData dataWithContentsOfURL:playlistURL options:kNilOptions error:&error];
-			
-			id playlistCollection = nil;
-			if(jsonData != nil)
-			{
-				playlistCollection = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:&error];
-			}
-
-			if(playlistCollection != nil)
-			{
-				if([playlistCollection isKindOfClass:[NSArray class]])
-				{
-					playlistArray = (NSArray *)playlistCollection;
-				}
-				break;
-			}
-			numberOfTries++;
-			hint = kPlaylistFormatPlist;
-		}
-	}
-	while(numberOfTries < (int)kPlaylistFormatCount);
-
-	if(playlistArray == nil)
-	{
-		NSError *operationError = nil;
-		BOOL isReachable = [playlistURL checkResourceIsReachableAndReturnError:&operationError];
-		if(!isReachable)
-		{
-			NSString *errorDesc = [operationError localizedDescription];
-			if(errorDesc == nil)
-				errorDesc = [operationError localizedFailureReason];
-			context->lastError.set(std::string("error: playlist file \"") + [[playlistURL path] UTF8String] + "\" cannot be opened: " + ([errorDesc UTF8String] ?: "unknown"), (int)[operationError code]);
-			LogError("error: playlist file \"%s\" cannot be opened. Error: \"%s\"\n", [[playlistURL path] UTF8String], [errorDesc UTF8String]);
-		}
-		else
-		{
-			context->lastError.set("error: unknown or invalid playlist type", 1);
-			LogError("error: unkown or invalid playlist type. Only .plist and .json playlists are supported\nWith playlist key not specified, the root container is expected to be an array.\n");
-		}
-	}
-
-	return playlistArray;
-}
-
 
 // Long-only options use values >= 256 so they don't collide with short opts.
 enum
@@ -675,7 +477,7 @@ DisplayHelp(void)
 }
 
 static void
-ProcessPlaylist(NSArray<NSDictionary*> *playlist, ReplayContext *context)
+ProcessPlaylist(const std::vector<ActionStep>& playlist, ReplayContext *context)
 {
 	if(context->concurrent)
 	{
@@ -723,7 +525,7 @@ int main(int argc, const char * argv[])
 	context.orderedOutput = false;
 	context.mcpServer = false;
 
-	NSMutableArray *playlistKeys = [NSMutableArray new];
+	std::vector<std::string> playlistKeys;
 
 	bool sandboxRequested = false;
 	std::string sandboxProfilePath;
@@ -766,8 +568,8 @@ int main(int argc, const char * argv[])
 			break;
 
 			case 'k':
-				// multiple playlists are allowed and stored in array to dispatch one after another
-				[playlistKeys addObject:@(optarg)];
+				// multiple playlists are allowed and stored to dispatch one after another
+				playlistKeys.emplace_back(optarg);
 			break;
 
 			case 'e':
@@ -847,20 +649,45 @@ int main(int argc, const char * argv[])
 		}
 	}
 
-	// Before applying the sandbox, pre-read the playlist to extract all paths
-	// referenced by actions. This auto-populates the sandbox policy so the
-	// user does not have to repeat every path with --allow-read/--allow-write flags.
-	if (sandboxRequested && (optind < argc))
+	// Determine playlist path (needed for both pre-sandbox extraction and execution).
+	const char* playlistPath = (optind < argc) ? argv[optind] : nullptr;
+
+	// Load the playlist once before the sandbox is applied so we can read the file freely.
+	// The same in-memory document is reused for sandbox extraction and for execution.
+	PlaylistDoc playlistDoc;
+	if (playlistPath != nullptr)
 	{
-		const char *playlistPeekPath = argv[optind];
+		std::string absPath = EnsureAbsolutePath(playlistPath);
 
-		NSString *nsPlaylistPath = MakeAbsolutePathString(playlistPeekPath);
-		NSString *playlistDir = [nsPlaylistPath stringByDeletingLastPathComponent];
-		if (playlistDir != nil && [playlistDir length] > 0)
-			sandboxAllowRead.emplace_back([playlistDir UTF8String]);
+		// Sandbox: allow reads from the playlist's own directory.
+		if (sandboxRequested && !absPath.empty())
+		{
+			auto slash = absPath.rfind('/');
+			if (slash != std::string::npos && slash > 0)
+				sandboxAllowRead.emplace_back(absPath.substr(0, slash));
+		}
 
-		ExtractPlaylistSandboxPaths(playlistPeekPath, playlistKeys, context.environment,
-		                             sandboxAllowRead, sandboxAllowWrite);
+		playlistDoc = LoadPlaylist(playlistPath, &context);
+
+		// Extract sandbox paths from the already-loaded document — no second file read.
+		if (sandboxRequested && playlistDoc.valid())
+		{
+			if (!playlistKeys.empty())
+			{
+				for (const auto& key : playlistKeys)
+				{
+					auto steps = playlistDoc.steps_for_key(key);
+					ExtractPlaylistSandboxPaths(steps, context.environment,
+					                             sandboxAllowRead, sandboxAllowWrite);
+				}
+			}
+			else
+			{
+				auto steps = playlistDoc.root_steps();
+				ExtractPlaylistSandboxPaths(steps, context.environment,
+				                             sandboxAllowRead, sandboxAllowWrite);
+			}
+		}
 	}
 
 	// Apply sandbox before any real work. Once applied, the policy is
@@ -901,49 +728,45 @@ int main(int argc, const char * argv[])
 		safe_exit(context.lastError.hasError() ? EXIT_FAILURE : EXIT_SUCCESS);
 	}
 
-	const char *playlistPath = NULL;
-	if (optind < argc)
-	{
-		playlistPath = argv[optind];
-		optind++;
-	}
-	
-	if(playlistPath == NULL)
+	if (playlistPath == nullptr)
 	{
 		StreamActionsFromStdIn(&context);
 	}
-	else if ([playlistKeys count] > 0)
+	else if (!playlistKeys.empty())
 	{
-		NSDictionary<NSString *, NSArray *> *playlistRootDict = LoadPlaylistRootDictionary(playlistPath, &context);
-		if(playlistRootDict == nil)
+		if (!playlistDoc.valid())
 		{
 			LogError("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
 			safe_exit(EXIT_SUCCESS);
 		}
-		
-		Class arrayClass = [NSArray class];
 
-		for(NSString *oneKey in playlistKeys)
+		for (const auto& key : playlistKeys)
 		{
-			NSArray<NSDictionary*> *playlist = playlistRootDict[oneKey];
-			if((playlist == nil) || !([playlist isKindOfClass:arrayClass]))
+			auto steps = playlistDoc.steps_for_key(key);
+			if (steps.empty())
 			{
-				LogError("Invalid or empty playlist for key \"%s\". No steps to replay\n", [oneKey UTF8String]);
-				if(context.stopOnError)
+				LogError("Invalid or empty playlist for key \"%s\". No steps to replay\n", key.c_str());
+				if (context.stopOnError)
 					break;
+				continue;
 			}
-			ProcessPlaylist(playlist, &context);
+			ProcessPlaylist(steps, &context);
 		}
 	}
 	else
 	{
-		NSArray<NSDictionary*> *playlist = GetPlaylistFromRootArray(playlistPath, &context);
-		if(playlist == nil)
+		if (!playlistDoc.valid())
 		{
 			LogError("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
 			safe_exit(EXIT_SUCCESS);
 		}
-		ProcessPlaylist(playlist, &context);
+		auto steps = playlistDoc.root_steps();
+		if (steps.empty())
+		{
+			LogError("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
+			safe_exit(EXIT_SUCCESS);
+		}
+		ProcessPlaylist(steps, &context);
 	}
 
 	// It looks like a lot of unnecessary Obj-C memory cleanup is happening at exit

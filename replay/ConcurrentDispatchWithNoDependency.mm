@@ -15,7 +15,7 @@ FinishConcurrentDispatchWithNoDependencyAndWait(ReplayContext *context)
 }
 
 void
-DispatchTasksConcurrentlyWithNoDependency(NSArray<NSDictionary*> *playlist, ReplayContext *context)
+DispatchTasksConcurrentlyWithNoDependency(const std::vector<ActionStep>& playlist, ReplayContext *context)
 {
 	StartConcurrentDispatchWithNoDependency(context);
 
@@ -23,29 +23,18 @@ DispatchTasksConcurrentlyWithNoDependency(NSArray<NSDictionary*> *playlist, Repl
 	printf("start dispatching async tasks\n");
 #endif
 
-	Class dictionaryClass = [NSDictionary class];
-
-	for(id oneStep in playlist)
+	for (const auto& step : playlist)
 	{
-		if([oneStep isKindOfClass:dictionaryClass])
-		{
-			HandleActionStep((NSDictionary *)oneStep, context,
-				^(dispatch_block_t action,
-				__unused NSArray<NSString*> *inputs,
-				__unused NSArray<NSString*> *mutatingInputs,
-				__unused NSArray<NSString*> *exclusiveInputs,
-				__unused NSArray<NSString*> *outputs)
-				{
-					if(action != NULL)
-					{
-						AsyncDispatch(action);
-					}
-				});
-		}
-		else
-		{
-			LogError("error: invalid non-dictionary step in the playlist\n");
-		}
+		HandleActionStep(step, context,
+			^(dispatch_block_t action,
+			__unused NSArray<NSString*> *inputs,
+			__unused NSArray<NSString*> *mutatingInputs,
+			__unused NSArray<NSString*> *exclusiveInputs,
+			__unused NSArray<NSString*> *outputs)
+			{
+				if (action != NULL)
+					AsyncDispatch(action);
+			});
 	}
 
 #if TRACE
@@ -58,17 +47,15 @@ DispatchTasksConcurrentlyWithNoDependency(NSArray<NSDictionary*> *playlist, Repl
 void
 DispatchTaskConcurrentlyWithNoDependency(NSDictionary *stepDescription, ReplayContext *context)
 {
-	HandleActionStep(stepDescription, context,
+	ActionStep step((__bridge CFDictionaryRef)stepDescription);
+	HandleActionStep(step, context,
 		^(dispatch_block_t action,
 		__unused NSArray<NSString*> *inputs,
 		__unused NSArray<NSString*> *mutatingInputs,
 		__unused NSArray<NSString*> *exclusiveInputs,
 		__unused NSArray<NSString*> *outputs)
 		{
-			if(action != NULL)
-			{
+			if (action != NULL)
 				AsyncDispatch(action);
-			}
 		});
 }
-

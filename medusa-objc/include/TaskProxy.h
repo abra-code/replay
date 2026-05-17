@@ -12,7 +12,8 @@
 
 @interface TaskProxy : NSObject<MedusaTask>
 
-@property(nonatomic, direct) NSDictionary *stepDescription;
+// Action name string stored for error diagnostics only (e.g. "clone", "delete").
+@property(nonatomic, direct, copy) NSString *stepActionName;
 @property(nonatomic) NSUInteger inputCount;
 @property(nonatomic, unsafe_unretained) FileNode** inputs;
 

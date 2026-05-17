@@ -193,8 +193,7 @@
 {
 	char path[2048];
 
-	NSString *actionName = self.stepDescription[@"action"];
-	LogError("[%s]\n", actionName.UTF8String);
+	LogError("[%s]\n", self.stepActionName.UTF8String ?: "unknown");
 	LogError("  unsatisfied dependency count: %ld\n", _pendingDependenciesCount);
 
 	LogError("  inputs:\n");
