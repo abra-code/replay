@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <CoreFoundation/CoreFoundation.h>
+#include "../common/include/CFObj.h"
 #include "FileTree.h"
 #include "../common/include/ReplaySignpost.h"
 
@@ -79,27 +80,25 @@ LoadPathsFromPlist(const char *filePath)
 {
 	std::vector<std::string> paths;
 
-	CFURLRef url = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault,
-		(const UInt8 *)filePath, (CFIndex)strlen(filePath), false);
+	CFObj<CFURLRef> url(CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault,
+		(const UInt8 *)filePath, (CFIndex)strlen(filePath), false));
 	if (url == nullptr)
 		return paths;
 
-	CFReadStreamRef stream = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
-	CFRelease(url);
+	CFObj<CFReadStreamRef> stream(CFReadStreamCreateWithFile(kCFAllocatorDefault, url));
 	if (stream == nullptr)
 		return paths;
 
 	CFReadStreamOpen(stream);
-	CFPropertyListRef plist = CFPropertyListCreateWithStream(kCFAllocatorDefault,
-		stream, 0, kCFPropertyListImmutable, nullptr, nullptr);
+	CFObj<CFPropertyListRef> plist(CFPropertyListCreateWithStream(kCFAllocatorDefault,
+		stream, 0, kCFPropertyListImmutable, nullptr, nullptr));
 	CFReadStreamClose(stream);
-	CFRelease(stream);
 
 	if (plist != nullptr)
 	{
 		if (CFGetTypeID(plist) == CFArrayGetTypeID())
 		{
-			CFArrayRef array = (CFArrayRef)plist;
+			CFArrayRef array = (CFArrayRef)plist.Get();
 			CFIndex count = CFArrayGetCount(array);
 			char buf[4096];
 			for (CFIndex i = 0; i < count; i++)
@@ -111,7 +110,6 @@ LoadPathsFromPlist(const char *filePath)
 				}
 			}
 		}
-		CFRelease(plist);
 	}
 	return paths;
 }

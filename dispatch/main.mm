@@ -10,6 +10,7 @@
 #import "replay_server.h"
 #import "ActionFromName.h"
 #include "replay_version.h"
+#include "CFObj.h"
 
 static inline BOOL
 StartChildProcess(NSString *toolPath, NSArray<NSString*> *arguments)
@@ -72,23 +73,22 @@ static CFRunLoopSourceRef
 StartCallbackListener(NSString *batchName)
 {
 	CFMessagePortRef localPort = NULL;
-	CFStringRef portName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kDispatchListenerPortFormat, GetAppGroupIdentifier(), batchName);
+	CFObj<CFStringRef> portName(CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kDispatchListenerPortFormat, GetAppGroupIdentifier(), batchName));
 	if(portName == NULL)
 	{
-		fprintf(stderr, "error: could not create port name %s\n", ((__bridge NSString *)portName).UTF8String);
+		fprintf(stderr, "error: could not create port name %s\n", ((__bridge NSString *)(CFStringRef)portName).UTF8String);
 		exit(EXIT_FAILURE);
 	}
 
 	CFMessagePortContext messagePortContext = { 0, NULL, NULL, NULL, NULL };
 	localPort = CFMessagePortCreateLocal(kCFAllocatorDefault, portName, CallbackProc, &messagePortContext, NULL);
-	CFRelease(portName);
 	if(localPort == NULL)
 	{
 		fprintf(stderr, "error: could not create a local message port\n");
 		exit(EXIT_FAILURE);
 	}
 	
-	CFRunLoopSourceRef runLoopSource = CFMessagePortCreateRunLoopSource(kCFAllocatorDefault, localPort, 0);
+	CFObj<CFRunLoopSourceRef> runLoopSource(CFMessagePortCreateRunLoopSource(kCFAllocatorDefault, localPort, 0));
 	if(runLoopSource == NULL)
 	{
 		fprintf(stderr, "error: could not create a runloop source\n");
@@ -96,7 +96,7 @@ StartCallbackListener(NSString *batchName)
 	}
 
 	CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
-	return runLoopSource;
+	return runLoopSource.Detach();
 }
 
 static void
@@ -194,11 +194,10 @@ SendActionsFromStdIn(CFMessagePortRef remotePort)
 	ssize_t linelen;
 	while ((linelen = getline(&line, &linecap, stdin)) > 0)
 	{
-		CFDataRef lineData = CFDataCreate(kCFAllocatorDefault, (const UInt8 *)line, linelen);
+		CFObj<CFDataRef> lineData(CFDataCreate(kCFAllocatorDefault, (const UInt8 *)line, linelen));
 		if(lineData != nil)
 		{
 			result = CFMessagePortSendRequest(remotePort, kReplayMessageQueueActionLine, lineData, 10/*send timeout*/, 0/*rcv timout*/, NULL, NULL);
-			CFRelease(lineData);
 			if(result != 0)
 			{
 				fprintf(stderr, "error: could not send dispatch request to \"replay\": %d\n", result);
@@ -342,10 +341,10 @@ int main(int argc, const char * argv[])
 			return EXIT_SUCCESS;
 		}
 
-		CFStringRef portName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kReplayServerPortFormat, GetAppGroupIdentifier(), batchName);
+		CFObj<CFStringRef> portName(CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kReplayServerPortFormat, GetAppGroupIdentifier(), batchName));
 		if(portName == NULL)
 		{
-			fprintf(stderr, "error: could not create port name %s\n", ((__bridge NSString *)portName).UTF8String);
+			fprintf(stderr, "error: could not create port name\n");
 			exit(EXIT_FAILURE);
 		}
 
@@ -357,7 +356,7 @@ int main(int argc, const char * argv[])
 			action = ActionFromName(std::string_view(argv[2]), isSrcDestAction);
 		}
 
-		CFMessagePortRef remotePort = CFMessagePortCreateRemote(kCFAllocatorDefault, portName);//should return non-null if remote server port already created
+		CFObj<CFMessagePortRef> remotePort(CFMessagePortCreateRemote(kCFAllocatorDefault, portName));//should return non-null if remote server port already created
 		if(remotePort == NULL)
 		{
 			if(action != kActionWait)
@@ -387,7 +386,7 @@ int main(int argc, const char * argv[])
 				{
 					pathToDispatch = @(dispatchPath);
 				}
-				remotePort = StartReplayAndOpenRemotePort(pathToDispatch, portName, arguments, ensureResponse);
+				remotePort.Adopt(StartReplayAndOpenRemotePort(pathToDispatch, portName, arguments, ensureResponse));
 			}
 			else if(action == kActionWait)
 			{
@@ -408,7 +407,6 @@ int main(int argc, const char * argv[])
 		{// this is the mode where only "dispatch batch_name" is used and the action description
 		 // is read-in from stdin in the delimited format the same as "replay" uses
 			result = SendActionsFromStdIn(remotePort);
-			CFRelease(remotePort);
 			exit((result == 0) ? EXIT_SUCCESS : EXIT_FAILURE);
 		}
 
@@ -734,12 +732,12 @@ int main(int argc, const char * argv[])
 			}
 		}
 
-		CFDataRef plistData = CFPropertyListCreateData(kCFAllocatorDefault, (__bridge CFDictionaryRef)actionDescription, kCFPropertyListBinaryFormat_v1_0, 0, NULL);
 		CFDataRef replayReplyData = NULL;
+		CFObj<CFDataRef> plistData(CFPropertyListCreateData(kCFAllocatorDefault, (__bridge CFDictionaryRef)actionDescription, kCFPropertyListBinaryFormat_v1_0, 0, NULL));
 		if(plistData != NULL)
 		{
 			result = CFMessagePortSendRequest(remotePort, msgid, plistData, 10/*send timeout*/, 10/*rcv timout*/, kCFRunLoopDefaultMode, &replayReplyData);
-			CFRelease(plistData);
+			plistData.Release();
 			if(result != 0)
 			{
 				fprintf(stderr, "error: could not send dispatch request to \"replay\": %d\n", result);
@@ -785,7 +783,6 @@ int main(int argc, const char * argv[])
 			FinalizeCallbackListener(callbackListenerRef);
 		}
 
-		CFRelease(remotePort);
 	}
 
 	exit(EXIT_SUCCESS);

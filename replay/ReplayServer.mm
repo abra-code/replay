@@ -9,6 +9,7 @@
 #import "ConcurrentDispatchWithNoDependency.h"
 #import "SerialDispatch.h"
 #import "ActionStream.h"
+#include "CFObj.h"
 
 CFMessagePortRef
 CreateCallbackPort(NSString *batchName)
@@ -48,11 +49,10 @@ SendCallbackMessage(ReplayContext *context, SInt32 messageID)
 		return;
 	}
 
-	CFDataRef plistData = CFPropertyListCreateData(kCFAllocatorDefault, (__bridge CFDictionaryRef)callbackInfo, kCFPropertyListBinaryFormat_v1_0, 0, NULL);
+	CFObj<CFDataRef> plistData(CFPropertyListCreateData(kCFAllocatorDefault, (__bridge CFDictionaryRef)callbackInfo, kCFPropertyListBinaryFormat_v1_0, 0, NULL));
 	if(plistData != NULL)
 	{
 		/*int result =*/ CFMessagePortSendRequest(context->callbackPort, messageID, plistData, 5/*send timeout*/, 0/*rcv timout*/, NULL, NULL);
-		CFRelease(plistData);
 	}
 }
 
@@ -183,25 +183,24 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 void
 StartServerAndRunLoop(ReplayContext *context)
 {
-	CFMessagePortRef localPort = NULL;
+	CFObj<CFMessagePortRef> localPort;
 	assert(context->batchName != nil);
-	CFStringRef portName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kReplayServerPortFormat, GetAppGroupIdentifier(), context->batchName);
+	CFObj<CFStringRef> portName(CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kReplayServerPortFormat, GetAppGroupIdentifier(), context->batchName));
 	if(portName == NULL)
 	{
-		LogError("error: could not create port name %s\n", ((__bridge NSString *)portName).UTF8String);
+		LogError("error: could not create port name %s\n", ((__bridge NSString *)(CFStringRef)portName).UTF8String);
 		safe_exit(EXIT_FAILURE);
 	}
 
 	CFMessagePortContext messagePortContext = { 0, (void *)context, NULL, NULL, NULL };
-	localPort = CFMessagePortCreateLocal(kCFAllocatorDefault, portName, ReplayListenerProc, &messagePortContext, NULL);
-	CFRelease(portName);
+	localPort.Adopt(CFMessagePortCreateLocal(kCFAllocatorDefault, portName, ReplayListenerProc, &messagePortContext, NULL));
 	if(localPort == NULL)
 	{
 		LogError("error: could not create a local message port\n");
 		safe_exit(EXIT_FAILURE);
 	}
-	
-	CFRunLoopSourceRef runLoopSource = CFMessagePortCreateRunLoopSource(kCFAllocatorDefault, localPort, 0);
+
+	CFObj<CFRunLoopSourceRef> runLoopSource(CFMessagePortCreateRunLoopSource(kCFAllocatorDefault, localPort, 0));
 	if(runLoopSource == NULL)
 	{
 		LogError("error: could not create a runloop source\n");
@@ -209,15 +208,13 @@ StartServerAndRunLoop(ReplayContext *context)
 	}
 
 	CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
-	
+
 	StartReceivingActions(context);
-	
+
 	CFRunLoopRun(); //the runloop will be stopped when we receive kReplayMessageFinishAndWaitForAllActions from "dispatch"
 
 	CFMessagePortInvalidate(localPort);
 	CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
-	CFRelease(localPort);
-	CFRelease(runLoopSource);
 
 	FinishReceivingActionsAndWait(context);
 
