@@ -126,12 +126,12 @@ output_not_contains() {
     [ -z "$result" ]
 }
 
-source "${SCRIPT_DIR}/test_figerprint_functions/fingerprint_basic_tests.sh"
-source "${SCRIPT_DIR}/test_figerprint_functions/fingerprint_xattr_tests.sh"
-source "${SCRIPT_DIR}/test_figerprint_functions/fingerprint_glob_tests.sh"
-source "${SCRIPT_DIR}/test_figerprint_functions/fingerprint_snapshot_tests.sh"
-source "${SCRIPT_DIR}/test_figerprint_functions/fingerprint_compare_tests.sh"
-source "${SCRIPT_DIR}/test_figerprint_functions/fingerprint_exclude_tests.sh"
+source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_basic_tests.sh"
+source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_xattr_tests.sh"
+source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_glob_tests.sh"
+source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_snapshot_tests.sh"
+source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_compare_tests.sh"
+source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_exclude_tests.sh"
 
 # ============================================================================
 # Run all tests
