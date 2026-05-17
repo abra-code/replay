@@ -215,10 +215,17 @@ ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *allTasks, //input li
 // via [producerTask linkNextTask:consumerTask].
 // ============================================================================
 
-// Helper: check if a concrete path matches a glob pattern using glob-cpp
+// Helper: check if a concrete path matches a glob pattern using glob-cpp.
+// The precompiled overload avoids re-constructing the automata on each call —
+// safe to reuse sequentially because Automata::Exec() calls ResetStates() after
+// every match, which now clears matched_str_ via State::ResetState().
+static bool concrete_matches_glob(const std::string& concretePath, glob::glob& g) {
+	return glob_match(concretePath, g);
+}
+
 static bool concrete_matches_glob(const std::string& concretePath, const std::string& pattern) {
 	glob::glob g(pattern);
-	return glob_match(concretePath, g);
+	return concrete_matches_glob(concretePath, g);
 }
 
 void
@@ -246,6 +253,7 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 		{
 			for(const auto& inputPattern : *inputSet)
 			{
+				glob::glob inputG(inputPattern);
 				for(__unsafe_unretained TaskProxy *producerTask in allTasks)
 				{
 					if(producerTask == consumerTask)
@@ -270,7 +278,7 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 						{
 							char path[2048];
 							GetPathForNode(outputs[i], path, sizeof(path));
-							if(concrete_matches_glob(path, inputPattern))
+							if(concrete_matches_glob(path, inputG))
 							{
 								[producerTask linkNextTask:consumerTask];
 								goto next_producer;
@@ -295,6 +303,7 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 
 		for(const auto& outputPattern : globOutputs)
 		{
+			glob::glob outputG(outputPattern);
 			for(__unsafe_unretained TaskProxy *consumerTask in allTasks)
 			{
 				if(consumerTask == producerTask)
@@ -307,7 +316,7 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 				{
 					char path[2048];
 					GetPathForNode(inputs[i], path, sizeof(path));
-					if(concrete_matches_glob(path, outputPattern))
+					if(concrete_matches_glob(path, outputG))
 					{
 						[producerTask linkNextTask:consumerTask];
 						goto next_consumer;
@@ -370,6 +379,7 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 
 		for(const auto& mutPat : mutatingPatterns)
 		{
+			glob::glob mutG(mutPat);
 			for(NSUInteger otherIndex = 0; otherIndex < taskCount; otherIndex++)
 			{
 				if(otherIndex == mutatorIndex)
@@ -434,7 +444,7 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 					{
 						char path[2048];
 						GetPathForNode(outputs[i], path, sizeof(path));
-						if(concrete_matches_glob(path, mutPat))
+						if(concrete_matches_glob(path, mutG))
 						{
 							[otherTask linkNextTask:mutatingTask];
 							break;
@@ -473,7 +483,7 @@ ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks)
 					{
 						char path[2048];
 						GetPathForNode(inputs[i], path, sizeof(path));
-						if(concrete_matches_glob(path, mutPat))
+						if(concrete_matches_glob(path, mutG))
 						{
 							consumed = true;
 							break;
