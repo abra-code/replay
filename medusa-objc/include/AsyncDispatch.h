@@ -7,14 +7,6 @@
 
 #include <dispatch/dispatch.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 void StartAsyncDispatch(intptr_t councurrencyLimit);
 void AsyncDispatch(dispatch_block_t block);
 void FinishAsyncDispatchAndWait(void);
-
-#ifdef __cplusplus
-}
-#endif

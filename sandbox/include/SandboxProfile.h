@@ -40,8 +40,6 @@
 
 #pragma once
 
-#ifdef __cplusplus
-
 #include <string>
 #include <vector>
 
@@ -104,5 +102,3 @@ bool InitializeSandbox(const std::string& profile_path,
                   bool verbose = false);
 
 }  // namespace sandbox
-
-#endif  // __cplusplus

@@ -8,10 +8,6 @@
 #import <Foundation/Foundation.h>
 #import "MedusaTask.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 //MedusaTask for recursive single-threaded execution
 @interface MedusaTaskProxy : NSObject<MedusaTask>
 
@@ -27,7 +23,3 @@ extern "C" {
 - (void)executeTask;
 
 @end
-
-#ifdef __cplusplus
-}
-#endif

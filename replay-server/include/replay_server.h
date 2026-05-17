@@ -7,10 +7,6 @@
 
 #import <Foundation/Foundation.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #define REPLAY_GROUP_ID "group"
 #define GetAppGroupIdentifier() @(REPLAY_GROUP_ID)
 
@@ -30,7 +26,3 @@ enum CallbackMessage
 	kCallbackMessageHeartbeat = 1,
 	kCallbackMessageExiting
 };
-
-#ifdef __cplusplus
-}
-#endif

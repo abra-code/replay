@@ -56,6 +56,9 @@ let package = Package(
         .target(
             name: "Common",
             path: "common",
+            cxxSettings: [
+                .unsafeFlags(["-std=c++20"]),
+            ]
         ),
 
         .target(
@@ -71,6 +74,9 @@ let package = Package(
             name: "Action",
             dependencies: ["Common"],
             path: "action",
+            cxxSettings: [
+                .unsafeFlags(["-std=c++20"]),
+            ]
         ),
 
         .target(
@@ -144,6 +150,9 @@ let package = Package(
             name: "DispatchTool",
             dependencies: ["Common", "Action", "ReplayServer"],
             path: "dispatch",
+            cxxSettings: [
+                .unsafeFlags(["-std=c++20"]),
+            ],
             linkerSettings: [
                 .linkedFramework("Foundation"),
             ]

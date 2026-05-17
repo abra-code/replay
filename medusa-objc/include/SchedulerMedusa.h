@@ -8,10 +8,6 @@
 #import <Foundation/Foundation.h>
 #import "TaskProxy.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 void
 ConnectImplicitProducers(FileNode *treeRoot);
 
@@ -21,7 +17,3 @@ ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *all_medusas, //input
 
 void
 ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks);
-
-#ifdef __cplusplus
-}
-#endif

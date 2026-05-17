@@ -8,10 +8,6 @@
 #import <Foundation/Foundation.h>
 #import "MedusaTask.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 @class MedusaTaskProxy;
 
 typedef struct OutputInfo
@@ -32,8 +28,4 @@ void ExecuteMedusaGraphRecursively(NSSet<MedusaTaskProxy *> *taskSet);
 
 #if ENABLE_DEBUG_DUMP
 void DumpRecursiveTaskTree(NSSet<MedusaTaskProxy *> *rootTaskSet);
-#endif
-
-#ifdef __cplusplus
-}
 #endif
