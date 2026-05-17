@@ -1,7 +1,7 @@
-#import <Foundation/Foundation.h>
 #import "ReplayAction.h"
 #import "ReplayActionPrivate.h"
 #include "FileSystemHelpers.h"
+#include "yyjson.hpp"
 #include <cerrno>
 
 bool
@@ -71,19 +71,19 @@ ListDirectory(const std::string &dirPath, ReplayContext *context, ActionContext 
 	return true;
 }
 
-static id TreeNodeToObject(const TreeNode &node)
+static Json::MutableVal TreeNodeToVal(Json::MutableDoc &doc, const TreeNode &node)
 {
-	NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithCapacity:3];
-	dict[@"name"] = @(node.name.c_str());
-	dict[@"type"] = node.isDirectory ? @"directory" : @"file";
+	Json::MutableVal obj = doc.new_obj();
+	doc.obj_add(obj, "name", doc.new_str(node.name));
+	doc.obj_add(obj, "type", doc.new_str(node.isDirectory ? "directory" : "file"));
 	if(node.isDirectory)
 	{
-		NSMutableArray *children = [NSMutableArray arrayWithCapacity:node.children.size()];
+		Json::MutableVal children = doc.new_arr();
 		for(const auto &child : node.children)
-			[children addObject:TreeNodeToObject(child)];
-		dict[@"children"] = children;
+			doc.arr_append(children, TreeNodeToVal(doc, child));
+		doc.obj_add(obj, "children", children);
 	}
-	return dict;
+	return obj;
 }
 
 bool
@@ -102,13 +102,12 @@ DirectoryTree(const std::string &dirPath, NSInteger maxDepth, ReplayContext *con
 			PrintMCPError(context, actionContext, -32603, std::move(errStr));
 			return false;
 		}
-		NSError *jsonError = nil;
-		NSData *jsonData = [NSJSONSerialization dataWithJSONObject:TreeNodeToObject(root)
-		                                                   options:0
-		                                                     error:&jsonError];
-		const char *jsonBytes = jsonData ? (const char *)[jsonData bytes] : "{}";
-		size_t jsonLen = jsonData ? (size_t)[jsonData length] : 2;
-		PrintMCPTextResult(context, actionContext, std::string(jsonBytes, jsonLen));
+		Json::MutableDoc doc;
+		doc.set_root(TreeNodeToVal(doc, root));
+		std::string jsonStr = doc.to_string();
+		if(jsonStr.empty())
+			jsonStr = "{}";
+		PrintMCPTextResult(context, actionContext, std::move(jsonStr));
 		return true;
 	}
 
@@ -141,19 +140,18 @@ DirectoryTree(const std::string &dirPath, NSInteger maxDepth, ReplayContext *con
 		return false;
 	}
 
-	NSError *jsonError = nil;
-	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:TreeNodeToObject(root)
-	                                                   options:0
-	                                                     error:&jsonError];
-	const char *jsonBytes = jsonData ? (const char *)[jsonData bytes] : "{}";
-	size_t jsonLen = jsonData ? (size_t)[jsonData length] : 2;
+	Json::MutableDoc doc;
+	doc.set_root(TreeNodeToVal(doc, root));
+	std::string jsonStr = doc.to_string();
+	if(jsonStr.empty())
+		jsonStr = "{}";
 
 	std::string output;
-	output.reserve(6 + dirPath.size() + 2 + jsonLen + 1);
+	output.reserve(6 + dirPath.size() + 2 + jsonStr.size() + 1);
 	output += "[tree:";
 	output += dirPath;
 	output += "]\n";
-	output.append(jsonBytes, jsonLen);
+	output += jsonStr;
 	output += "\n";
 	PrintToStdOut(context, std::move(output), actionContext->index);
 	return true;
