@@ -25,7 +25,8 @@ static std::vector<std::string> split_lines_for_diff(const std::string &s)
         size_t nl = s.find('\n', p);
         if (nl == std::string::npos)
         {
-            if (p < s.size()) v.push_back(s.substr(p));
+            if (p < s.size())
+                v.push_back(s.substr(p));
             break;
         }
         v.push_back(s.substr(p, nl - p));
@@ -147,7 +148,12 @@ static bool apply_whitespace_normalized(std::string &content,
         while (true)
         {
             size_t nl = old_str.find('\n', p);
-            if (nl == std::string::npos) { if (p < old_str.size()) old_lines.push_back(old_str.substr(p)); break; }
+            if (nl == std::string::npos)
+            {
+                if (p < old_str.size())
+                    old_lines.push_back(old_str.substr(p));
+                break;
+            }
             old_lines.push_back(old_str.substr(p, nl - p));
             p = nl + 1;
         }
@@ -162,7 +168,8 @@ static bool apply_whitespace_normalized(std::string &content,
     size_t old_min = SIZE_MAX;
     for (const auto &line : old_lines)
     {
-        if (line.empty()) continue;
+        if (line.empty())
+            continue;
         size_t ws = 0;
         while (ws < line.size() && (line[ws] == ' ' || line[ws] == '\t')) ++ws;
         old_min = std::min(old_min, ws);
@@ -185,7 +192,11 @@ static bool apply_whitespace_normalized(std::string &content,
             size_t nl = content.find('\n', p);
             if (nl == std::string::npos)
             {
-                if (p < content.size()) { line_starts.push_back(p); content_lines.push_back(content.substr(p)); }
+                if (p < content.size())
+                {
+                    line_starts.push_back(p);
+                    content_lines.push_back(content.substr(p));
+                }
                 break;
             }
             line_starts.push_back(p);
@@ -218,7 +229,8 @@ static bool apply_whitespace_normalized(std::string &content,
     for (int i = 0; i < m; ++i)
     {
         const auto &cl = content_lines[match_at + i];
-        if (cl.empty()) continue;
+        if (cl.empty())
+            continue;
         size_t ws = 0;
         while (ws < cl.size() && (cl[ws] == ' ' || cl[ws] == '\t')) ++ws;
         c_min = std::min(c_min, ws);
@@ -231,7 +243,11 @@ static bool apply_whitespace_normalized(std::string &content,
     for (int i = 0; i < m; ++i)
     {
         const auto &cl = content_lines[match_at + i];
-        if (!cl.empty()) { actual_indent = cl.substr(0, c_min); break; }
+        if (!cl.empty())
+        {
+            actual_indent = cl.substr(0, c_min);
+            break;
+        }
     }
 
     // Byte range of matched region (including trailing newlines except possibly last)
@@ -247,7 +263,11 @@ static bool apply_whitespace_normalized(std::string &content,
             while (true)
             {
                 size_t nl = new_str.find('\n', p);
-                if (nl == std::string::npos) { new_lines.push_back(new_str.substr(p)); break; }
+                if (nl == std::string::npos)
+                {
+                    new_lines.push_back(new_str.substr(p));
+                    break;
+                }
                 new_lines.push_back(new_str.substr(p, nl - p));
                 p = nl + 1;
             }
@@ -256,7 +276,8 @@ static bool apply_whitespace_normalized(std::string &content,
         size_t new_min = SIZE_MAX;
         for (const auto &line : new_lines)
         {
-            if (line.empty()) continue;
+            if (line.empty())
+                continue;
             size_t ws = 0;
             while (ws < line.size() && (line[ws] == ' ' || line[ws] == '\t')) ++ws;
             new_min = std::min(new_min, ws);
@@ -299,7 +320,11 @@ static std::vector<ReplaceChunk> parse_replacement(const std::string &repl)
 			char next = repl[i + 1];
 			if (next >= '0' && next <= '9')
 			{
-				if (!cur.empty()) { chunks.push_back({std::move(cur), -1}); cur.clear(); }
+				if (!cur.empty())
+				{
+					chunks.push_back({std::move(cur), -1});
+					cur.clear();
+				}
 				chunks.push_back({"", next - '0'});
 				i += 2;
 			}
@@ -326,7 +351,8 @@ static std::vector<ReplaceChunk> parse_replacement(const std::string &repl)
 			cur += repl[i++];
 		}
 	}
-	if (!cur.empty()) chunks.push_back({std::move(cur), -1});
+	if (!cur.empty())
+		chunks.push_back({std::move(cur), -1});
 	return chunks;
 }
 

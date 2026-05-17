@@ -8,14 +8,22 @@
 
 static void format_permissions(mode_t mode, char out[11])
 {
-	if      (S_ISREG(mode))  out[0] = '-';
-	else if (S_ISDIR(mode))  out[0] = 'd';
-	else if (S_ISLNK(mode))  out[0] = 'l';
-	else if (S_ISCHR(mode))  out[0] = 'c';
-	else if (S_ISBLK(mode))  out[0] = 'b';
-	else if (S_ISFIFO(mode)) out[0] = 'p';
-	else if (S_ISSOCK(mode)) out[0] = 's';
-	else                     out[0] = '?';
+	if(S_ISREG(mode))
+		out[0] = '-';
+	else if(S_ISDIR(mode))
+		out[0] = 'd';
+	else if(S_ISLNK(mode))
+		out[0] = 'l';
+	else if(S_ISCHR(mode))
+		out[0] = 'c';
+	else if(S_ISBLK(mode))
+		out[0] = 'b';
+	else if(S_ISFIFO(mode))
+		out[0] = 'p';
+	else if(S_ISSOCK(mode))
+		out[0] = 's';
+	else
+		out[0] = '?';
 	out[1] = (mode & S_IRUSR) ? 'r' : '-';
 	out[2] = (mode & S_IWUSR) ? 'w' : '-';
 	out[3] = (mode & S_IXUSR) ? ((mode & S_ISUID) ? 's' : 'x') : ((mode & S_ISUID) ? 'S' : '-');
@@ -122,10 +130,14 @@ GetFileInfo(const std::string &path, ReplayContext *context, ActionContext *acti
 	format_iso8601(st.st_mtimespec.tv_sec, modified);
 
 	const char *typeStr;
-	if      (S_ISREG(st.st_mode))  typeStr = "file";
-	else if (S_ISDIR(st.st_mode))  typeStr = "directory";
-	else if (S_ISLNK(st.st_mode))  typeStr = "symlink";
-	else                            typeStr = "other";
+	if(S_ISREG(st.st_mode))
+		typeStr = "file";
+	else if(S_ISDIR(st.st_mode))
+		typeStr = "directory";
+	else if(S_ISLNK(st.st_mode))
+		typeStr = "symlink";
+	else
+		typeStr = "other";
 
 	std::string output;
 	output.reserve(128 + path.size());

@@ -383,19 +383,22 @@ static void dispatch_mcp_tool(const std::string &tool,
     if (tool == "read_file")
     {
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
-        if (path.empty()) return;
+        if (path.empty())
+            return;
         ReadFile(path, context, ac);
     }
     else if (tool == "list_directory")
     {
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
-        if (path.empty()) return;
+        if (path.empty())
+            return;
         ListDirectory(path, context, ac);
     }
     else if (tool == "directory_tree")
     {
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
-        if (path.empty()) return;
+        if (path.empty())
+            return;
         NSInteger depth = -1;  // -1 = unlimited (standard MCP default)
         if (auto dv = args.obj_get("depth").get_sint(); dv)
             depth = (NSInteger)*dv;
@@ -406,13 +409,15 @@ static void dispatch_mcp_tool(const std::string &tool,
     else if (tool == "get_file_info")
     {
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
-        if (path.empty()) return;
+        if (path.empty())
+            return;
         GetFileInfo(path, context, ac);
     }
     else if (tool == "write_file")
     {
         auto path = validate_and_get(args, "path", *opts, true, ac, context);
-        if (path.empty()) return;
+        if (path.empty())
+            return;
         auto content_sv = args.obj_get("content").get_str();
         if (!content_sv)
         {
@@ -425,22 +430,26 @@ static void dispatch_mcp_tool(const std::string &tool,
     else if (tool == "create_directory")
     {
         auto path = validate_and_get(args, "path", *opts, true, ac, context);
-        if (path.empty()) return;
+        if (path.empty())
+            return;
         CreateDirectory(path, context, ac);
     }
     else if (tool == "move_file")
     {
         auto src = validate_and_get(args, "source", *opts, true, ac, context);
-        if (src.empty()) return;
+        if (src.empty())
+            return;
         auto dst = validate_and_get(args, "destination", *opts, true, ac, context);
-        if (dst.empty()) return;
+        if (dst.empty())
+            return;
         posix_mkdir_p(posix_parent_dir(dst));
         MoveItem(src, dst, context, ac);
     }
     else if (tool == "delete_file")
     {
         auto path = validate_and_get(args, "path", *opts, true, ac, context);
-        if (path.empty()) return;
+        if (path.empty())
+            return;
         DeleteItem(path, context, ac);
     }
     else if (tool == "edit_file")
@@ -729,9 +738,11 @@ static void dispatch_mcp_tool(const std::string &tool,
         std::string pattern(*pat_sv);
 
         bool use_regex = false;
-        if (auto v = args.obj_get("regex").get_bool(); v) use_regex = *v;
+        if (auto v = args.obj_get("regex").get_bool(); v)
+            use_regex = *v;
         bool case_insensitive = false;
-        if (auto v = args.obj_get("caseInsensitive").get_bool(); v) case_insensitive = *v;
+        if (auto v = args.obj_get("caseInsensitive").get_bool(); v)
+            case_insensitive = *v;
 
         int context_lines = 0;
         if (auto v = args.obj_get("contextLines").get_sint(); v && *v >= 0)
@@ -831,7 +842,8 @@ static void dispatch_mcp_tool(const std::string &tool,
             files = glob_files_in_dir(vr.canonical, {"**/*"}, exclude_strs, 0);
         }
 
-        if (early_error) return;
+        if (early_error)
+            return;
 
         if (files.empty())
         {
@@ -875,7 +887,8 @@ static void dispatch_mcp_tool(const std::string &tool,
     else if (tool == "glob_search")
     {
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
-        if (path.empty()) return;
+        if (path.empty())
+            return;
 
         NSMutableArray<NSString *> *patterns = [NSMutableArray array];
         {
@@ -917,8 +930,10 @@ static void dispatch_mcp_tool(const std::string &tool,
         }
 
         NSInteger maxR = 1000;
-        if (auto mv = args.obj_get("max").get_sint(); mv && *mv > 0) maxR = (NSInteger)*mv;
-        else if (auto mv2 = args.obj_get("max").get_uint(); mv2) maxR = (NSInteger)*mv2;
+        if (auto mv = args.obj_get("max").get_sint(); mv && *mv > 0)
+            maxR = (NSInteger)*mv;
+        else if (auto mv2 = args.obj_get("max").get_uint(); mv2)
+            maxR = (NSInteger)*mv2;
 
         NSString *rootNS = [NSString stringWithUTF8String:path.c_str()];
         GlobFiles(rootNS, patterns, excludes, maxR, context, ac);
@@ -999,7 +1014,8 @@ static void add_str_prop(Json::MutableDoc &doc, Json::MutableVal props,
 {
     auto p = doc.new_obj();
     doc.obj_add(p, "type", doc.new_str("string"));
-    if (!desc.empty()) doc.obj_add(p, "description", doc.new_str(desc));
+    if (!desc.empty())
+        doc.obj_add(p, "description", doc.new_str(desc));
     doc.obj_add(props, name, p);
 }
 
@@ -1008,7 +1024,8 @@ static void add_bool_prop(Json::MutableDoc &doc, Json::MutableVal props,
 {
     auto p = doc.new_obj();
     doc.obj_add(p, "type", doc.new_str("boolean"));
-    if (!desc.empty()) doc.obj_add(p, "description", doc.new_str(desc));
+    if (!desc.empty())
+        doc.obj_add(p, "description", doc.new_str(desc));
     doc.obj_add(props, name, p);
 }
 
@@ -1017,7 +1034,8 @@ static void add_int_prop(Json::MutableDoc &doc, Json::MutableVal props,
 {
     auto p = doc.new_obj();
     doc.obj_add(p, "type", doc.new_str("integer"));
-    if (!desc.empty()) doc.obj_add(p, "description", doc.new_str(desc));
+    if (!desc.empty())
+        doc.obj_add(p, "description", doc.new_str(desc));
     doc.obj_add(props, name, p);
 }
 
