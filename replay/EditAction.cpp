@@ -1,6 +1,5 @@
-#import <Foundation/Foundation.h>
-#import "ReplayAction.h"
-#import "ReplayActionPrivate.h"
+#include "ReplayAction.h"
+#include "ReplayActionPrivate.h"
 #include <regex.h>
 #include <unistd.h>
 #include <cerrno>
@@ -139,7 +138,7 @@ static bool normalized_region_matches(
 static bool apply_whitespace_normalized(std::string &content,
                                          const std::string &old_str,
                                          const std::string &new_str,
-                                         NSString * __nullable * __nonnull outError)
+                                         std::string &outError)
 {
     // Split old_str into lines (no trailing-newline element)
     std::vector<std::string> old_lines;
@@ -160,7 +159,7 @@ static bool apply_whitespace_normalized(std::string &content,
     }
     if (old_lines.empty())
     {
-        *outError = @"oldText is empty";
+        outError = "oldText is empty";
         return false;
     }
 
@@ -220,7 +219,7 @@ static bool apply_whitespace_normalized(std::string &content,
 
     if (match_at < 0)
     {
-        *outError = [NSString stringWithFormat:@"oldText not found: %s", old_str.c_str()];
+        outError = std::string("oldText not found: ") + old_str;
         return false;
     }
 
@@ -391,8 +390,8 @@ static size_t find_nocase(const std::string &text, const std::string &pattern, s
 // On failure, sets *outError and returns false.
 static bool apply_one_edit(std::string &content,
                            const std::string &old_text, const std::string &new_text,
-                           NSInteger limit, bool use_regex, bool case_insensitive,
-                           NSString * __nullable * __nonnull outError)
+                           int limit, bool use_regex, bool case_insensitive,
+                           std::string &outError)
 {
 	if (use_regex)
 	{
@@ -405,7 +404,7 @@ static bool apply_one_edit(std::string &content,
 		{
 			char buf[512];
 			regerror(comp_err, &re, buf, sizeof(buf));
-			*outError = [NSString stringWithFormat:@"regex compile error: %s", buf];
+			outError = std::string("regex compile error: ") + buf;
 			regfree(&re);
 			return false;
 		}
@@ -416,7 +415,7 @@ static bool apply_one_edit(std::string &content,
 
 		std::string result;
 		size_t pos = 0;
-		NSInteger count = 0;
+		int count = 0;
 
 		while (pos <= content.size())
 		{
@@ -432,7 +431,7 @@ static bool apply_one_edit(std::string &content,
 			{
 				char buf[512];
 				regerror(merr, &re, buf, sizeof(buf));
-				*outError = [NSString stringWithFormat:@"regex match error: %s", buf];
+				outError = std::string("regex match error: ") + buf;
 				regfree(&re);
 				return false;
 			}
@@ -462,7 +461,7 @@ static bool apply_one_edit(std::string &content,
 
 		if (limit > 0 && count == 0)
 		{
-			*outError = [NSString stringWithFormat:@"pattern not found: %s", old_text.c_str()];
+			outError = std::string("pattern not found: ") + old_text;
 			return false;
 		}
 
@@ -474,13 +473,13 @@ static bool apply_one_edit(std::string &content,
 		// Literal mode
 		if (old_text.empty())
 		{
-			*outError = @"oldText must not be empty";
+			outError = "oldText must not be empty";
 			return false;
 		}
 
 		std::string result;
 		size_t pos = 0;
-		NSInteger count = 0;
+		int count = 0;
 
 		while (pos < content.size())
 		{
@@ -507,11 +506,11 @@ static bool apply_one_edit(std::string &content,
 			// Standard MCP fallback: whitespace-normalized line matching
 			if (limit == 1 && !case_insensitive)
 			{
-				NSString *normError = nil;
-				if (apply_whitespace_normalized(content, old_text, new_text, &normError))
+				std::string normError;
+				if (apply_whitespace_normalized(content, old_text, new_text, normError))
 					return true;
 			}
-			*outError = [NSString stringWithFormat:@"oldText not found: %s", old_text.c_str()];
+			outError = std::string("oldText not found: ") + old_text;
 			return false;
 		}
 
@@ -539,9 +538,9 @@ EditFileMCPCore(const std::string &filePath, const std::vector<FileEdit> &edits,
 			std::string modified = orig;
 			for (const auto &edit : edits)
 			{
-				NSString *editError = nil;
-				if (!apply_one_edit(modified, edit.old_text, edit.new_text, edit.limit, edit.use_regex, edit.case_insensitive, &editError))
-					return {false, -32603, [editError UTF8String]};
+				std::string editError;
+				if (!apply_one_edit(modified, edit.old_text, edit.new_text, edit.limit, edit.use_regex, edit.case_insensitive, editError))
+					return {false, -32603, editError};
 			}
 			return {true, 0, make_unified_diff(filePath, orig, modified)};
 		}
@@ -574,9 +573,9 @@ EditFileMCPCore(const std::string &filePath, const std::vector<FileEdit> &edits,
 
 	for (const auto &edit : edits)
 	{
-		NSString *editError = nil;
-		if (!apply_one_edit(content, edit.old_text, edit.new_text, edit.limit, edit.use_regex, edit.case_insensitive, &editError))
-			return {false, -32603, [editError UTF8String]};
+		std::string editError;
+		if (!apply_one_edit(content, edit.old_text, edit.new_text, edit.limit, edit.use_regex, edit.case_insensitive, editError))
+			return {false, -32603, editError};
 	}
 
 	size_t lastSlash = filePath.rfind('/');
@@ -839,10 +838,10 @@ EditFile(const std::string &filePath, const std::vector<FileEdit> &edits, bool a
 	// Apply each edit in sequence
 	for (const auto &edit : edits)
 	{
-		NSString *editError = nil;
-		if (!apply_one_edit(content, edit.old_text, edit.new_text, edit.limit, edit.use_regex, edit.case_insensitive, &editError))
+		std::string editError;
+		if (!apply_one_edit(content, edit.old_text, edit.new_text, edit.limit, edit.use_regex, edit.case_insensitive, editError))
 		{
-			std::string errStr = std::string("error: edit \"") + filePath + "\": " + [editError UTF8String] + "\n";
+			std::string errStr = std::string("error: edit \"") + filePath + "\": " + editError + "\n";
 			context->lastError.set(errStr, 1);
 			PrintToStdErr(context, std::move(errStr));
 			ActionWithNoOutput(context, actionContext->index);

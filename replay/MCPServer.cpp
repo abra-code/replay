@@ -9,10 +9,9 @@
 //  (unordered FIFO). Protocol messages are handled inline and written directly.
 //
 
-#import <Foundation/Foundation.h>
-#import <dispatch/dispatch.h>
-#import "ReplayAction.h"
-#import "ReplayActionPrivate.h"
+#include <dispatch/dispatch.h>
+#include "ReplayAction.h"
+#include "ReplayActionPrivate.h"
 #include "MCPServer.h"
 #include "FileSystemHelpers.h"
 #include "GlobOverlap.h"
@@ -398,11 +397,11 @@ static void dispatch_mcp_tool(const std::string &tool,
         auto path = validate_and_get(args, "path", *opts, false, ac, context);
         if (path.empty())
             return;
-        NSInteger depth = -1;  // -1 = unlimited (standard MCP default)
+        intptr_t depth = -1;  // -1 = unlimited (standard MCP default)
         if (auto dv = args.obj_get("depth").get_sint(); dv)
-            depth = (NSInteger)*dv;
+            depth = (intptr_t)*dv;
         else if (auto dv2 = args.obj_get("depth").get_uint(); dv2)
-            depth = (NSInteger)*dv2;
+            depth = (intptr_t)*dv2;
         DirectoryTree(path, depth, context, ac);
     }
     else if (tool == "get_file_info")
@@ -665,14 +664,13 @@ static void dispatch_mcp_tool(const std::string &tool,
         else if (auto tv2 = args.obj_get("timeout").get_uint(); tv2)
             timeout_sec = (int)std::min((uint64_t)kMaxCommandTimeout, *tv2);
 
-        // Pass execution parameters via ActionContext settings.
-        // ExcecuteTool detects context->mcpServer and delegates to ExcecuteToolMCPCore.
-        // Local dict keeps the NSDictionary alive through the synchronous ExcecuteTool call.
-        NSDictionary *execSettings = @{
-            @"workingDirectory": @(working_dir.c_str()),
-            @"timeout":          @(timeout_sec),
-        };
-        ac->settings = ActionStep((__bridge CFDictionaryRef)execSettings);
+        CFObj<CFStringRef> workingDirStr(CFStringCreateWithCString(nullptr, working_dir.c_str(), kCFStringEncodingUTF8));
+        CFObj<CFNumberRef> timeoutNum(CFNumberCreate(nullptr, kCFNumberIntType, &timeout_sec));
+        const void *execKeys[2]   = { CFSTR("workingDirectory"), CFSTR("timeout") };
+        const void *execValues[2] = { (CFStringRef)workingDirStr, (CFNumberRef)timeoutNum };
+        CFObj<CFDictionaryRef> execSettings(CFDictionaryCreate(nullptr, execKeys, execValues, 2,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+        ac->settings = ActionStep(execSettings.Get());
         ExcecuteTool("/bin/sh", {"-c", command}, context, ac);
     }
     else if (tool == "search_files")
@@ -1521,17 +1519,18 @@ static void handle_message(const std::string &line,
         std::string captured_tool = std::string(*name_sv);
         auto shared_doc = std::make_shared<Json::Document>(std::move(doc));
 
-        AsyncDispatch(^{
-            @autoreleasepool {
-                ActionContext ac;
-                ac.index        = -1;
-                ac.mcpRequestID = captured_id;
+        AsyncDispatch([captured_id   = std::move(captured_id),
+                       captured_tool = std::move(captured_tool),
+                       shared_doc    = std::move(shared_doc),
+                       context, opts]() {
+            ActionContext ac;
+            ac.index        = -1;
+            ac.mcpRequestID = captured_id;
 
-                Json::Val req_params = shared_doc->root().obj_get("params");
-                Json::Val tool_args  = req_params.obj_get("arguments");
+            Json::Val req_params = shared_doc->root().obj_get("params");
+            Json::Val tool_args  = req_params.obj_get("arguments");
 
-                dispatch_mcp_tool(captured_tool, tool_args, context, &ac, opts);
-            }
+            dispatch_mcp_tool(captured_tool, tool_args, context, &ac, opts);
         });
         return;
     }
