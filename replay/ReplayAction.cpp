@@ -1,91 +1,77 @@
-#import <Foundation/Foundation.h>
-#import "ReplayAction.h"
-#import "ReplayActionPrivate.h"
-#import "StringAndPath.h"
-#import "ActionFromName.h"
+#include "ReplayAction.h"
+#include "ReplayActionPrivate.h"
+#include "ActionFromName.h"
 #include "GlobOverlap.h"
 #include "FileSystemHelpers.h"
 #include <string>
 #include <vector>
 
 
-static inline dispatch_block_t
-CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::string toPath, ReplayContext *context, ActionStep step, NSInteger actionIndex)
+static inline std::function<void()>
+CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::string toPath, ReplayContext *context, ActionStep step, intptr_t actionIndex)
 {
 	if(fromPath.empty() || toPath.empty())
-		return nil;
+		return nullptr;
 
-	dispatch_block_t action = NULL;
+	std::function<void()> action;
 	switch(replayAction)
 	{
 		case kFileActionClone:
 		{
-            action = ^{ @autoreleasepool {
+			action = [fromPath, toPath, context, step, actionIndex]() {
 				ActionContext localContext = { .settings = step, .index = actionIndex };
 				__unused bool isOK = CloneItem(fromPath, toPath, context, &localContext);
-            }};
+			};
 		}
 		break;
 
 		case kFileActionMove:
 		{
-            action = ^{ @autoreleasepool {
+			action = [fromPath, toPath, context, step, actionIndex]() {
 				ActionContext localContext = { .settings = step, .index = actionIndex };
 				__unused bool isOK = MoveItem(fromPath, toPath, context, &localContext);
-            }};
+			};
 		}
 		break;
 
 		case kFileActionHardlink:
 		{
-            action = ^{ @autoreleasepool {
+			action = [fromPath, toPath, context, step, actionIndex]() {
 				ActionContext localContext = { .settings = step, .index = actionIndex };
 				__unused bool isOK = HardlinkItem(fromPath, toPath, context, &localContext);
-            }};
+			};
 		}
 		break;
 
 		case kFileActionSymlink:
 		{
-            action = ^{ @autoreleasepool {
+			action = [fromPath, toPath, context, step, actionIndex]() {
 				ActionContext localContext = { .settings = step, .index = actionIndex };
 				__unused bool isOK = SymlinkItem(fromPath, toPath, context, &localContext);
-            }};
+			};
 		}
 		break;
 
 		default:
-		{
-		}
 		break;
 	}
 	return action;
 }
 
-static inline NSArray<NSString*> *
+static inline std::vector<std::string>
 GetExpandedPathsFromVector(const std::optional<std::vector<std::string>>& rawPaths, ReplayContext *context)
 {
+	std::vector<std::string> result;
 	if(!rawPaths.has_value())
-		return nil;
-	NSMutableArray<NSString*> *expandedPaths = [NSMutableArray arrayWithCapacity:rawPaths->size()];
+		return result;
+	result.reserve(rawPaths->size());
 	for(const auto& onePath : *rawPaths)
 	{
 		auto expanded = ExpandEnvVars(onePath.c_str(), context);
 		if(expanded.has_value())
-		{
-			NSURL *oneURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:expanded->c_str()]];
-			[expandedPaths addObject:oneURL.absoluteURL.path];
-		}
+			result.push_back(std::move(*expanded));
 	}
-	return expandedPaths;
-}
-
-static inline NSArray<NSString*> *
-PathArrayFromString(const std::string &path)
-{
-	if(!path.empty())
-		return @[[NSString stringWithUTF8String:path.c_str()]];
-	return nil;
+	return result;
 }
 
 
@@ -97,18 +83,17 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 	if(context->stopOnError && (context->lastError.hasError()))
 		return;
 
- @autoreleasepool {
 	bool isSrcDestAction = false;
 	Action replayAction = ActionFromName(step.string_value("action"), isSrcDestAction);
 
 	if(replayAction == kActionInvalid)
 		return;
 
-	dispatch_block_t action = NULL;
-	NSArray<NSString*> *inputs = nil;
-	NSArray<NSString*> *mutatingInputs = nil;
-	NSArray<NSString*> *exclusiveInputs = nil;
-	NSArray<NSString*> *outputs = nil;
+	std::function<void()> action;
+	std::vector<std::string> inputs;
+	std::vector<std::string> mutatingInputs;
+	std::vector<std::string> exclusiveInputs;
+	std::vector<std::string> outputs;
 
 	if(isSrcDestAction)
 	{
@@ -120,7 +105,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 			auto expandedDest = ExpandEnvVars(destinationPath->c_str(), context);
 			if(!expandedSource.has_value() || !expandedDest.has_value())
 			{
-				actionHandler(nil, nil, nil, nil, nil);
+				actionHandler({}, {}, {}, {}, {});
 			}
 			else if(globoverlap::is_glob_pattern(*expandedSource))
 			{
@@ -128,10 +113,10 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				// "to" is treated as destination directory (multiple sources to one dir).
 				std::string globPattern = *expandedSource;
 				std::string capturedDestDir = *expandedDest;
-				NSInteger actionIndex = ++(context->actionCounter);
+				intptr_t actionIndex = ++(context->actionCounter);
 				Action capturedAction = replayAction;
 
-				action = ^{ @autoreleasepool {
+				action = [globPattern, capturedDestDir, capturedAction, context, step, actionIndex]() {
 					auto matches = expand_glob(globPattern);
 					if(matches.empty())
 					{
@@ -155,18 +140,18 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							default: break;
 						}
 					}
-				}};
+				};
 
 				if(context->concurrent)
 				{
 					// The glob pattern is the input for dependency analysis
 					if(replayAction == kFileActionMove)
-						exclusiveInputs = PathArrayFromString(globPattern);
+						exclusiveInputs = {globPattern};
 					else
-						inputs = PathArrayFromString(globPattern);
-					outputs = PathArrayFromString(capturedDestDir);
+						inputs = {globPattern};
+					outputs = {capturedDestDir};
 				}
-				actionHandler(action, inputs, nil, exclusiveInputs, outputs);
+				actionHandler(std::move(action), inputs, {}, exclusiveInputs, outputs);
 			}
 			else
 			{
@@ -174,18 +159,18 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				std::string fromPath = *expandedSource;
 				std::string toPath = *expandedDest;
 
-				NSInteger actionIndex = ++(context->actionCounter);
+				intptr_t actionIndex = ++(context->actionCounter);
 				action = CreateSourceDestinationAction(replayAction, fromPath, toPath, context, step, actionIndex);
 
 				if(context->concurrent)
 				{
 					if(replayAction == kFileActionMove)
-						exclusiveInputs = PathArrayFromString(fromPath);
+						exclusiveInputs = {fromPath};
 					else
-						inputs = PathArrayFromString(fromPath);
-					outputs = PathArrayFromString(toPath);
+						inputs = {fromPath};
+					outputs = {toPath};
 				}
-				actionHandler(action, inputs, nil, exclusiveInputs, outputs);
+				actionHandler(std::move(action), inputs, {}, exclusiveInputs, outputs);
 			}
 		}
 		else
@@ -213,10 +198,10 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					{
 						// Glob item: expand at execution time, act on each match
 						std::string globPattern = *expandedOpt;
-						NSInteger actionIndex = ++(context->actionCounter);
+						intptr_t actionIndex = ++(context->actionCounter);
 						Action capturedAction = replayAction;
 
-						action = ^{ @autoreleasepool {
+						action = [globPattern, capturedDestDir, capturedAction, context, step, actionIndex]() {
 							auto matches = expand_glob(globPattern);
 							if(matches.empty())
 							{
@@ -240,17 +225,18 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 									default: break;
 								}
 							}
-						}};
+						};
 
+						inputs.clear(); exclusiveInputs.clear(); outputs.clear();
 						if(context->concurrent)
 						{
 							if(replayAction == kFileActionMove)
-								exclusiveInputs = PathArrayFromString(globPattern);
+								exclusiveInputs = {globPattern};
 							else
-								inputs = PathArrayFromString(globPattern);
-							outputs = PathArrayFromString(capturedDestDir);
+								inputs = {globPattern};
+							outputs = {capturedDestDir};
 						}
-						actionHandler(action, inputs, nil, exclusiveInputs, outputs);
+						actionHandler(std::move(action), inputs, {}, exclusiveInputs, outputs);
 					}
 					else
 					{
@@ -259,18 +245,19 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						auto slash = srcPath.rfind('/');
 						std::string fileName = (slash != std::string::npos) ? srcPath.substr(slash + 1) : srcPath;
 						std::string dstPath = capturedDestDir + "/" + fileName;
-						NSInteger actionIndex = ++(context->actionCounter);
+						intptr_t actionIndex = ++(context->actionCounter);
 						action = CreateSourceDestinationAction(replayAction, srcPath, dstPath, context, step, actionIndex);
 
+						inputs.clear(); exclusiveInputs.clear(); outputs.clear();
 						if(context->concurrent)
 						{
 							if(replayAction == kFileActionMove)
-								exclusiveInputs = PathArrayFromString(srcPath);
+								exclusiveInputs = {srcPath};
 							else
-								inputs = PathArrayFromString(srcPath);
-							outputs = PathArrayFromString(dstPath);
+								inputs = {srcPath};
+							outputs = {dstPath};
 						}
-						actionHandler(action, inputs, nil, exclusiveInputs, outputs);
+						actionHandler(std::move(action), inputs, {}, exclusiveInputs, outputs);
 					}
 				}
 			}
@@ -292,9 +279,9 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						{
 							// Glob item: expand at execution time, delete each match
 							std::string globPattern = *expandedOpt;
-							NSInteger actionIndex = ++(context->actionCounter);
+							intptr_t actionIndex = ++(context->actionCounter);
 
-							action = ^{ @autoreleasepool {
+							action = [globPattern, context, step, actionIndex]() {
 								auto matches = expand_glob(globPattern);
 								if(matches.empty())
 								{
@@ -310,29 +297,27 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 									ActionContext localContext = { .settings = step, .index = actionIndex };
 									__unused bool isOK = DeleteItem(match, context, &localContext);
 								}
-							}};
+							};
 
+							exclusiveInputs.clear();
 							if(context->concurrent)
-							{
-								exclusiveInputs = PathArrayFromString(globPattern);
-							}
-							actionHandler(action, nil, nil, exclusiveInputs, nil);
+								exclusiveInputs = {globPattern};
+							actionHandler(std::move(action), {}, {}, exclusiveInputs, {});
 						}
 						else
 						{
 							// Concrete item — original behavior
 							std::string capturedPath = *expandedOpt;
-							NSInteger actionIndex = ++(context->actionCounter);
-							action = ^{ @autoreleasepool {
+							intptr_t actionIndex = ++(context->actionCounter);
+							action = [capturedPath, context, step, actionIndex]() {
 								ActionContext actionContext = { .settings = step, .index = actionIndex };
 								__unused bool isOK = DeleteItem(capturedPath, context, &actionContext);
-							}};
+							};
 
+							exclusiveInputs.clear();
 							if(context->concurrent)
-							{
-								exclusiveInputs = PathArrayFromString(capturedPath);
-							}
-							actionHandler(action, nil, nil, exclusiveInputs, nil);
+								exclusiveInputs = {capturedPath};
+							actionHandler(std::move(action), {}, {}, exclusiveInputs, {});
 						}
 					}
 					else if(context->stopOnError)
@@ -359,19 +344,18 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					if(expandedOpt.has_value())
 					{
 						std::string capturedPath = *expandedOpt;
-						NSInteger actionIndex = ++(context->actionCounter);
-						action = ^{ @autoreleasepool {
+						intptr_t actionIndex = ++(context->actionCounter);
+						action = [capturedPath, context, step, actionIndex]() {
 							ActionContext actionContext = { .settings = step, .index = actionIndex };
 							__unused bool isOK = ReadFile(capturedPath, context, &actionContext);
-						}};
+						};
 						// ReadFile prints two strings (verbose descriptor + content), reserve second slot
 						++(context->actionCounter);
 
+						inputs.clear();
 						if(context->concurrent)
-						{
-							inputs = PathArrayFromString(capturedPath);
-						}
-						actionHandler(action, inputs, nil, nil, nil);
+							inputs = {capturedPath};
+						actionHandler(std::move(action), inputs, {}, {}, {});
 					}
 					else if(context->stopOnError)
 					{
@@ -395,18 +379,16 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				if(expandedOpt.has_value())
 				{
 					std::string capturedPath = *expandedOpt;
-					NSInteger actionIndex = ++(context->actionCounter);
-					action = ^{ @autoreleasepool {
+					intptr_t actionIndex = ++(context->actionCounter);
+					action = [capturedPath, context, step, actionIndex]() {
 						ActionContext actionContext = { .settings = step, .index = actionIndex };
 						__unused bool isOK = ListDirectory(capturedPath, context, &actionContext);
-					}};
+					};
 					++(context->actionCounter);
 
 					if(context->concurrent)
-					{
-						inputs = PathArrayFromString(capturedPath);
-					}
-					actionHandler(action, inputs, nil, nil, nil);
+						inputs = {capturedPath};
+					actionHandler(std::move(action), inputs, {}, {}, {});
 				}
 			}
 			else
@@ -425,19 +407,17 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				if(expandedOpt.has_value())
 				{
 					std::string capturedPath = *expandedOpt;
-					NSInteger capturedDepth = step.int_value("depth", 5);
-					NSInteger actionIndex = ++(context->actionCounter);
-					action = ^{ @autoreleasepool {
+					intptr_t capturedDepth = step.int_value("depth", 5);
+					intptr_t actionIndex = ++(context->actionCounter);
+					action = [capturedPath, capturedDepth, context, step, actionIndex]() {
 						ActionContext actionContext = { .settings = step, .index = actionIndex };
 						__unused bool isOK = DirectoryTree(capturedPath, capturedDepth, context, &actionContext);
-					}};
+					};
 					++(context->actionCounter);
 
 					if(context->concurrent)
-					{
-						inputs = PathArrayFromString(capturedPath);
-					}
-					actionHandler(action, inputs, nil, nil, nil);
+						inputs = {capturedPath};
+					actionHandler(std::move(action), inputs, {}, {}, {});
 				}
 			}
 			else
@@ -456,18 +436,16 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				if(expandedOpt.has_value())
 				{
 					std::string capturedPath = *expandedOpt;
-					NSInteger actionIndex = ++(context->actionCounter);
-					action = ^{ @autoreleasepool {
+					intptr_t actionIndex = ++(context->actionCounter);
+					action = [capturedPath, context, step, actionIndex]() {
 						ActionContext actionContext = { .settings = step, .index = actionIndex };
 						__unused bool isOK = GetFileInfo(capturedPath, context, &actionContext);
-					}};
+					};
 					++(context->actionCounter);
 
 					if(context->concurrent)
-					{
-						inputs = PathArrayFromString(capturedPath);
-					}
-					actionHandler(action, inputs, nil, nil, nil);
+						inputs = {capturedPath};
+					actionHandler(std::move(action), inputs, {}, {}, {});
 				}
 			}
 			else
@@ -484,50 +462,40 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 
 			if(rawRootOpt.has_value() && rawGlobsOpt.has_value() && !rawGlobsOpt->empty())
 			{
-				NSString *rawRoot = [NSString stringWithUTF8String:rawRootOpt->c_str()];
-				NSString *expandedRoot = StringByExpandingEnvironmentVariablesWithErrorCheck(rawRoot, context);
-				if(expandedRoot == nil)
-					expandedRoot = rawRoot;
+				auto expandedRootOpt = ExpandEnvVars(rawRootOpt->c_str(), context);
+				std::string capturedRoot = expandedRootOpt.has_value() ? *expandedRootOpt : *rawRootOpt;
 
-				NSMutableArray<NSString*> *expandedGlobs = [NSMutableArray new];
+				std::vector<std::string> capturedGlobs;
 				for(const auto& p : *rawGlobsOpt)
 				{
-					NSString *nsP = [NSString stringWithUTF8String:p.c_str()];
-					NSString *ep = StringByExpandingEnvironmentVariablesWithErrorCheck(nsP, context);
-					if(ep != nil)
-						[expandedGlobs addObject:ep];
+					auto ep = ExpandEnvVars(p.c_str(), context);
+					if(ep.has_value())
+						capturedGlobs.push_back(std::move(*ep));
 				}
 
 				auto rawExcludesOpt = step.string_array("exclude");
-				NSMutableArray<NSString*> *expandedExcludes = [NSMutableArray new];
+				std::vector<std::string> capturedExcludes;
 				if(rawExcludesOpt.has_value())
 				{
 					for(const auto& p : *rawExcludesOpt)
 					{
-						NSString *nsP = [NSString stringWithUTF8String:p.c_str()];
-						NSString *ep = StringByExpandingEnvironmentVariablesWithErrorCheck(nsP, context);
-						if(ep != nil)
-							[expandedExcludes addObject:ep];
+						auto ep = ExpandEnvVars(p.c_str(), context);
+						if(ep.has_value())
+							capturedExcludes.push_back(std::move(*ep));
 					}
 				}
 
-				NSInteger maxResults = step.int_value("max", 1000);
-				NSString *capturedRoot = expandedRoot;
-				NSArray<NSString*> *capturedGlobs = [expandedGlobs copy];
-				NSArray<NSString*> *capturedExcludes = [expandedExcludes copy];
-				NSInteger capturedMax = maxResults;
-				NSInteger actionIndex = ++(context->actionCounter);
-				action = ^{ @autoreleasepool {
+				intptr_t capturedMax = step.int_value("max", 1000);
+				intptr_t actionIndex = ++(context->actionCounter);
+				action = [capturedRoot, capturedGlobs = std::move(capturedGlobs), capturedExcludes = std::move(capturedExcludes), capturedMax, context, step, actionIndex]() {
 					ActionContext actionContext = { .settings = step, .index = actionIndex };
 					__unused bool isOK = GlobFiles(capturedRoot, capturedGlobs, capturedExcludes, capturedMax, context, &actionContext);
-				}};
+				};
 				++(context->actionCounter);
 
 				if(context->concurrent)
-				{
-					inputs = @[expandedRoot];
-				}
-				actionHandler(action, inputs, nil, nil, nil);
+					inputs = {capturedRoot};
+				actionHandler(std::move(action), inputs, {}, {}, {});
 			}
 			else
 			{
@@ -616,8 +584,8 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							std::string globPattern = *expandedOpt;
 							std::vector<FileEdit> capturedEdits = editsVec;
 							bool capturedDryRun = actionDryRun;
-							NSInteger actionIndex = ++(context->actionCounter);
-							action = ^{ @autoreleasepool {
+							intptr_t actionIndex = ++(context->actionCounter);
+							action = [globPattern, capturedEdits = std::move(capturedEdits), capturedDryRun, context, step, actionIndex]() {
 								auto matches = expand_glob(globPattern);
 								if(matches.empty())
 								{
@@ -633,13 +601,13 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 									ActionContext actionContext = { .settings = step, .index = actionIndex };
 									__unused bool isOK = EditFile(match, capturedEdits, capturedDryRun, context, &actionContext);
 								}
-							}};
+							};
 							++(context->actionCounter);
 
+							mutatingInputs.clear();
 							if(context->concurrent)
-								mutatingInputs = PathArrayFromString(globPattern);
-							actionHandler(action, nil, mutatingInputs, nil, nil);
-							mutatingInputs = nil;
+								mutatingInputs = {globPattern};
+							actionHandler(std::move(action), {}, mutatingInputs, {}, {});
 						}
 						else
 						{
@@ -647,19 +615,17 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							std::string capturedPath = *expandedOpt;
 							std::vector<FileEdit> capturedEdits = editsVec;
 							bool capturedDryRun = actionDryRun;
-							NSInteger actionIndex = ++(context->actionCounter);
-							action = ^{ @autoreleasepool {
+							intptr_t actionIndex = ++(context->actionCounter);
+							action = [capturedPath, capturedEdits = std::move(capturedEdits), capturedDryRun, context, step, actionIndex]() {
 								ActionContext actionContext = { .settings = step, .index = actionIndex };
 								__unused bool isOK = EditFile(capturedPath, capturedEdits, capturedDryRun, context, &actionContext);
-							}};
+							};
 							++(context->actionCounter);
 
+							mutatingInputs.clear();
 							if(context->concurrent)
-							{
-								mutatingInputs = PathArrayFromString(capturedPath);
-							}
-							actionHandler(action, nil, mutatingInputs, nil, nil);
-							mutatingInputs = nil;
+								mutatingInputs = {capturedPath};
+							actionHandler(std::move(action), {}, mutatingInputs, {}, {});
 						}
 					}
 				}
@@ -699,16 +665,14 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					{
 						std::string capturedPath = *pathOpt;
 						std::string capturedBlob = blobContent;
-						NSInteger actionIndex = ++(context->actionCounter);
-						action = ^{ @autoreleasepool {
+						intptr_t actionIndex = ++(context->actionCounter);
+						action = [capturedPath, capturedBlob, context, step, actionIndex]() {
 							ActionContext actionContext = { .settings = step, .index = actionIndex };
 							__unused bool isOK = CreateFileFromBlob(capturedPath, capturedBlob, context, &actionContext);
-						}};
+						};
 						if(context->concurrent)
-						{
-							outputs = PathArrayFromString(capturedPath);
-						}
-						actionHandler(action, nil, nil, nil, outputs);
+							outputs = {capturedPath};
+						actionHandler(std::move(action), {}, {}, {}, outputs);
 					}
 				}
 				else
@@ -737,17 +701,15 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					if(contentOK && pathOpt.has_value())
 					{
 						std::string capturedPath = *pathOpt;
-						NSInteger actionIndex = ++(context->actionCounter);
-                        action = ^{ @autoreleasepool {
+						intptr_t actionIndex = ++(context->actionCounter);
+						action = [capturedPath, capturedContent, context, step, actionIndex]() {
 							ActionContext actionContext = { .settings = step, .index = actionIndex };
 							__unused bool isOK = CreateFile(capturedPath, capturedContent, context, &actionContext);
-                        }};
+						};
 
 						if(context->concurrent)
-						{
-							outputs = PathArrayFromString(capturedPath);
-						}
-						actionHandler(action, nil, nil, nil, outputs);
+							outputs = {capturedPath};
+						actionHandler(std::move(action), {}, {}, {}, outputs);
 					}
 				}
 			}
@@ -760,17 +722,15 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					if(pathOpt.has_value())
 					{
 						std::string capturedPath = *pathOpt;
-						NSInteger actionIndex = ++(context->actionCounter);
-                        action = ^{ @autoreleasepool {
+						intptr_t actionIndex = ++(context->actionCounter);
+						action = [capturedPath, context, step, actionIndex]() {
 							ActionContext actionContext = { .settings = step, .index = actionIndex };
 							__unused bool isOK = CreateDirectory(capturedPath, context, &actionContext);
-                        }};
+						};
 
 						if(context->concurrent)
-						{
-							outputs = PathArrayFromString(capturedPath);
-						}
-						actionHandler(action, nil, nil, nil, outputs);
+							outputs = {capturedPath};
+						actionHandler(std::move(action), {}, {}, {}, outputs);
 					}
 				}
 				else
@@ -813,11 +773,11 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					if(argsOK)
 					{
 						std::string capturedToolPath = *expandedToolOpt;
-						NSInteger actionIndex = ++(context->actionCounter);
-						action = ^{ @autoreleasepool {
-                                ActionContext actionContext = { .settings = step, .index = actionIndex };
-                                __unused bool isOK = ExcecuteTool(capturedToolPath, capturedArgs, context, &actionContext);
-                        }};
+						intptr_t actionIndex = ++(context->actionCounter);
+						action = [capturedToolPath, capturedArgs = std::move(capturedArgs), context, step, actionIndex]() {
+							ActionContext actionContext = { .settings = step, .index = actionIndex };
+							__unused bool isOK = ExcecuteTool(capturedToolPath, capturedArgs, context, &actionContext);
+						};
 
 						// [execute] action is expected to print two strings:
 						// - verbose action description (or null string if not verbose)
@@ -832,7 +792,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							outputs = GetExpandedPathsFromVector(step.string_array("outputs"), context);
 						}
 
-						actionHandler(action, inputs, nil, exclusiveInputs, outputs);
+						actionHandler(std::move(action), inputs, {}, exclusiveInputs, outputs);
 					}
 				}
 			}
@@ -866,11 +826,11 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 			// capturedText is empty (textOK=false) only if string is malformed or missing environment variable
 			if(textOK)
 			{
-				NSInteger actionIndex = ++(context->actionCounter);
-				action = ^{ @autoreleasepool {
+				intptr_t actionIndex = ++(context->actionCounter);
+				action = [capturedText, context, step, actionIndex]() {
 					ActionContext actionContext = { .settings = step, .index = actionIndex };
 					__unused bool isOK = Echo(capturedText, context, &actionContext);
-				}};
+				};
 
 				// [echo] action is expected to print two strings:
 				// - verbose action description (or null string if not verbose)
@@ -878,7 +838,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				// so we need to increase the counter second time
 				++(context->actionCounter);
 
-				actionHandler(action, nil, nil, nil, outputs);
+				actionHandler(std::move(action), {}, {}, {}, {});
 			}
 		}
 		else if((replayAction == kActionWait) || (replayAction == kActionStartServer))
@@ -887,5 +847,4 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 			assert((replayAction != kActionWait) && (replayAction != kActionStartServer));
 		}
 	}
- } //autoreleasepool
 }

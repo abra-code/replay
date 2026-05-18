@@ -6,7 +6,8 @@
 //
 
 #include <dispatch/dispatch.h>
+#include <functional>
 
 void StartAsyncDispatch(intptr_t councurrencyLimit);
-void AsyncDispatch(dispatch_block_t block);
+void AsyncDispatch(std::function<void()> work);
 void FinishAsyncDispatchAndWait(void);

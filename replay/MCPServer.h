@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#import "ReplayAction.h"
+#include "ReplayAction.h"
 
 struct MCPAllowedDir {
     std::string path;   // canonical absolute path

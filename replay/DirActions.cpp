@@ -1,5 +1,5 @@
-#import "ReplayAction.h"
-#import "ReplayActionPrivate.h"
+#include "ReplayAction.h"
+#include "ReplayActionPrivate.h"
 #include "FileSystemHelpers.h"
 #include "yyjson.hpp"
 #include <cerrno>
@@ -87,7 +87,7 @@ static Json::MutableVal TreeNodeToVal(Json::MutableDoc &doc, const TreeNode &nod
 }
 
 bool
-DirectoryTree(const std::string &dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext)
+DirectoryTree(const std::string &dirPath, intptr_t maxDepth, ReplayContext *context, ActionContext *actionContext)
 {
 	if(!context->mcpServer && context->stopOnError && (context->lastError.hasError()))
 		return false;

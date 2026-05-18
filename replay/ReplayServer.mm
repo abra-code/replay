@@ -13,13 +13,13 @@
 #include "CFType.h"
 
 CFMessagePortRef
-CreateCallbackPort(NSString *batchName)
+CreateCallbackPort(const std::string &batchName)
 {
 	CFMessagePortRef remotePort = NULL;
-	CFStringRef portName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kDispatchListenerPortFormat, GetAppGroupIdentifier(), batchName);
+	CFStringRef portName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kDispatchListenerPortFormat, GetAppGroupIdentifier(), @(batchName.c_str()));
 	if(portName == NULL)
 	{
-		LogError("error: could not create port name %s\n", ((__bridge NSString *)portName).UTF8String);
+		LogError("error: could not create port name %s\n", batchName.c_str());
 		return remotePort;
 	}
 	remotePort = CFMessagePortCreateRemote(kCFAllocatorDefault, portName);//should return non-null if listener port created
@@ -128,7 +128,7 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 
 		case kReplayMessageFinishAndWaitForAllActions:
 		{
-			assert(context->batchName != nil);
+			assert(!context->batchName.empty());
 			context->callbackPort = CreateCallbackPort(context->batchName);
 			stopLoop = true;
 		}
@@ -188,8 +188,8 @@ void
 StartServerAndRunLoop(ReplayContext *context)
 {
 	CFObj<CFMessagePortRef> localPort;
-	assert(context->batchName != nil);
-	CFObj<CFStringRef> portName(CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kReplayServerPortFormat, GetAppGroupIdentifier(), context->batchName));
+	assert(!context->batchName.empty());
+	CFObj<CFStringRef> portName(CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kReplayServerPortFormat, GetAppGroupIdentifier(), @(context->batchName.c_str())));
 	if(portName == NULL)
 	{
 		LogError("error: could not create port name %s\n", ((__bridge NSString *)(CFStringRef)portName).UTF8String);

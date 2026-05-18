@@ -1,5 +1,5 @@
 #import "ConcurrentDispatchWithNoDependency.h"
-#import "AsyncDispatch.h"
+#include "AsyncDispatch.h"
 
 void
 StartConcurrentDispatchWithNoDependency(ReplayContext *context)
@@ -26,14 +26,14 @@ DispatchTasksConcurrentlyWithNoDependency(const std::vector<ActionStep>& playlis
 	for (const auto& step : playlist)
 	{
 		HandleActionStep(step, context,
-			^(dispatch_block_t action,
-			__unused NSArray<NSString*> *inputs,
-			__unused NSArray<NSString*> *mutatingInputs,
-			__unused NSArray<NSString*> *exclusiveInputs,
-			__unused NSArray<NSString*> *outputs)
+			[](std::function<void()> action,
+			__unused std::vector<std::string> inputs,
+			__unused std::vector<std::string> mutatingInputs,
+			__unused std::vector<std::string> exclusiveInputs,
+			__unused std::vector<std::string> outputs)
 			{
-				if (action != NULL)
-					AsyncDispatch(action);
+				if(action)
+					AsyncDispatch(std::move(action));
 			});
 	}
 
@@ -49,13 +49,13 @@ DispatchTaskConcurrentlyWithNoDependency(NSDictionary *stepDescription, ReplayCo
 {
 	ActionStep step((__bridge CFDictionaryRef)stepDescription);
 	HandleActionStep(step, context,
-		^(dispatch_block_t action,
-		__unused NSArray<NSString*> *inputs,
-		__unused NSArray<NSString*> *mutatingInputs,
-		__unused NSArray<NSString*> *exclusiveInputs,
-		__unused NSArray<NSString*> *outputs)
+		[](std::function<void()> action,
+		__unused std::vector<std::string> inputs,
+		__unused std::vector<std::string> mutatingInputs,
+		__unused std::vector<std::string> exclusiveInputs,
+		__unused std::vector<std::string> outputs)
 		{
-			if (action != NULL)
-				AsyncDispatch(action);
+			if(action)
+				AsyncDispatch(std::move(action));
 		});
 }

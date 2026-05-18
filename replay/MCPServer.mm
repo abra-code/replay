@@ -890,7 +890,7 @@ static void dispatch_mcp_tool(const std::string &tool,
         if (path.empty())
             return;
 
-        NSMutableArray<NSString *> *patterns = [NSMutableArray array];
+        std::vector<std::string> patterns;
         {
             auto pats_val = args.obj_get("patterns");
             if (pats_val.is_arr())
@@ -900,21 +900,21 @@ static void dispatch_mcp_tool(const std::string &tool,
                 {
                     auto pv = it.next();
                     if (auto s = pv.get_str(); s)
-                        [patterns addObject:[NSString stringWithUTF8String:std::string(*s).c_str()]];
+                        patterns.push_back(std::string(*s));
                 }
             }
             else if (auto s = args.obj_get("pattern").get_str(); s)
             {
-                [patterns addObject:[NSString stringWithUTF8String:std::string(*s).c_str()]];
+                patterns.push_back(std::string(*s));
             }
-            if ([patterns count] == 0)
+            if (patterns.empty())
             {
                 PrintMCPError(context, ac, -32602, "Missing required param: patterns or pattern");
                 return;
             }
         }
 
-        NSMutableArray<NSString *> *excludes = [NSMutableArray array];
+        std::vector<std::string> excludes;
         {
             auto excl_val = args.obj_get("excludePatterns");
             if (excl_val.is_arr())
@@ -924,19 +924,18 @@ static void dispatch_mcp_tool(const std::string &tool,
                 {
                     auto ev = it.next();
                     if (auto s = ev.get_str(); s)
-                        [excludes addObject:[NSString stringWithUTF8String:std::string(*s).c_str()]];
+                        excludes.push_back(std::string(*s));
                 }
             }
         }
 
-        NSInteger maxR = 1000;
+        intptr_t maxR = 1000;
         if (auto mv = args.obj_get("max").get_sint(); mv && *mv > 0)
-            maxR = (NSInteger)*mv;
+            maxR = (intptr_t)*mv;
         else if (auto mv2 = args.obj_get("max").get_uint(); mv2)
-            maxR = (NSInteger)*mv2;
+            maxR = (intptr_t)*mv2;
 
-        NSString *rootNS = [NSString stringWithUTF8String:path.c_str()];
-        GlobFiles(rootNS, patterns, excludes, maxR, context, ac);
+        GlobFiles(path, patterns, excludes, maxR, context, ac);
     }
     else if (tool == "read_multiple_files")
     {

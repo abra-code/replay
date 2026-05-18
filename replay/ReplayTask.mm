@@ -4,24 +4,24 @@
 #import "TaskScheduler.h"
 #include "GlobOverlap.h"
 #include "ReplaySignpost.h"
+#include <algorithm>
 
 
-static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path, TaskProxy* producer, bool isExclusiveInput)
+static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, const std::string &path, TaskProxy* producer, bool isExclusiveInput)
 {
-	NSString *lowercasePath = [path lowercaseString];
-	const char *posixPath = [lowercasePath fileSystemRepresentation];
-	FileNode *outNode = FindOrInsertFileNodeForPath(fileTreeRoot, posixPath);
+	std::string lowercasePath = path;
+	std::transform(lowercasePath.begin(), lowercasePath.end(), lowercasePath.begin(), ::tolower);
+	FileNode *outNode = FindOrInsertFileNodeForPath(fileTreeRoot, lowercasePath.c_str());
 	//Input nodes don't have a producer.
 	//important not to reset to NULL to not override what might have been set already
 	if(producer != nil)
 	{
 		if(outNode->producer != NULL)
 		{
-			posixPath = [path fileSystemRepresentation];
 			LogError("error: invalid playlist for concurrent execution.\n"
 				"The output path: \"%s\"\n"
 				"is specified as a product of two or more actions.\n"
-				"See \"replay --help\" for more information about concurrent execution constraints.\n", posixPath);
+				"See \"replay --help\" for more information about concurrent execution constraints.\n", path.c_str());
 			safe_exit(EXIT_FAILURE);
 		}
 		outNode->producer = (__bridge void *)producer;
@@ -30,15 +30,14 @@ static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, NSString *path
 	{//it is a consumer's request
 		if(isExclusiveInput)
 			outNode->isExclusiveInput = 1;
-		
+
 		if((outNode->isExclusiveInput != 0) && (outNode->hasConsumer != 0))
 		{//this input is marked as exclusive and now we are adding a second consumer. This is not allowed
-			posixPath = [path fileSystemRepresentation];
 			LogError("error: invalid playlist for concurrent execution.\n"
 				"The path: \"%s\"\n"
 				"is specified as an exclusive input for one action (like move or delete) but\n"
 				"there is more than one action consuming it.\n"
-				"See \"replay --help\" for more information about exclusive inputs.\n", posixPath);
+				"See \"replay --help\" for more information about exclusive inputs.\n", path.c_str());
 			safe_exit(EXIT_FAILURE);
 		}
 
@@ -54,19 +53,21 @@ TasksFromStep(const ActionStep& step, ReplayContext *context)
 	if(context->stopOnError && (context->lastError.hasError()))
 		return nil;
 
-	__block NSMutableArray<TaskProxy *> *tasksFromStep = [NSMutableArray arrayWithCapacity:0];
+	NSMutableArray<TaskProxy *> *tasksFromStep = [NSMutableArray arrayWithCapacity:0];
 
 	HandleActionStep(step, context,
-		^( __nullable dispatch_block_t action,
-			NSArray<NSString*> * __nullable inputs,
-			NSArray<NSString*> * __nullable mutatingInputs,
-			NSArray<NSString*> * __nullable exclusiveInputs,
-			NSArray<NSString*> * __nullable outputs)
+		[&tasksFromStep, &step, context](
+			std::function<void()> action,
+			std::vector<std::string> inputs,
+			std::vector<std::string> mutatingInputs,
+			std::vector<std::string> exclusiveInputs,
+			std::vector<std::string> outputs)
 		{
-			if(action == nil)
+			if(!action)
 				return;
 
-			TaskProxy *oneTask = [[TaskProxy alloc] initWithTask:action];
+			dispatch_block_t block = ^{ action(); };
+			TaskProxy *oneTask = [[TaskProxy alloc] initWithTask:block];
 			{
 				auto actionName = step.string_value("action");
 				oneTask.stepActionName = actionName.has_value() ? @(actionName->c_str()) : nil;
@@ -82,15 +83,7 @@ TasksFromStep(const ActionStep& step, ReplayContext *context)
 			std::vector<std::string> globMutatingInputList;
 			std::vector<std::string> concreteMutatingPathList;
 
-			NSUInteger regularInputCount = 0;
-			if(inputs != nil)
-				regularInputCount = inputs.count;
-
-			NSUInteger exclusiveInputCount = 0;
-			if(exclusiveInputs != nil)
-				exclusiveInputCount = exclusiveInputs.count;
-
-			NSUInteger totalInputCount = regularInputCount + exclusiveInputCount;
+			size_t totalInputCount = inputs.size() + exclusiveInputs.size();
 			FileNode** inputList = NULL;
 			if(totalInputCount > 0)
 			{
@@ -98,93 +91,86 @@ TasksFromStep(const ActionStep& step, ReplayContext *context)
 				inputList = (FileNode**)malloc(sizeof(FileNode*) * totalInputCount);
 			}
 
-			NSUInteger concreteInputIndex = 0;
-			if(inputs != nil)
+			size_t concreteInputIndex = 0;
+			for(const auto& oneInput : inputs)
 			{
-				for(NSString *oneInput in inputs)
+				if(globoverlap::is_glob_pattern(oneInput))
 				{
-					std::string path([oneInput UTF8String]);
-					if(globoverlap::is_glob_pattern(path))
-					{
-						// Lowercase to match GetPathForNode output (FileTree stores lowercased
-						// paths); concrete_matches_glob compares them case-sensitively.
-						globInputList.push_back(std::string([[oneInput lowercaseString] UTF8String]));
-					}
-					else
-					{
-						inputList[concreteInputIndex] = FileNodeFromPath(context->fileTreeRoot, oneInput, nil, false);
-						concreteInputIndex++;
-					}
+					// Lowercase to match GetPathForNode output (FileTree stores lowercased
+					// paths); concrete_matches_glob compares them case-sensitively.
+					std::string lowerPath = oneInput;
+					std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::tolower);
+					globInputList.push_back(std::move(lowerPath));
+				}
+				else
+				{
+					inputList[concreteInputIndex] = FileNodeFromPath(context->fileTreeRoot, oneInput, nil, false);
+					concreteInputIndex++;
 				}
 			}
 
-			if(exclusiveInputs != nil)
+			for(const auto& oneInput : exclusiveInputs)
 			{
-				for(NSString *oneInput in exclusiveInputs)
+				if(globoverlap::is_glob_pattern(oneInput))
 				{
-					std::string path([oneInput UTF8String]);
-					if(globoverlap::is_glob_pattern(path))
-					{
-						globExclusiveInputList.push_back(std::string([[oneInput lowercaseString] UTF8String]));
-					}
-					else
-					{
-						inputList[concreteInputIndex] = FileNodeFromPath(context->fileTreeRoot, oneInput, nil, true);
-						concreteInputIndex++;
-					}
+					std::string lowerPath = oneInput;
+					std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::tolower);
+					globExclusiveInputList.push_back(std::move(lowerPath));
+				}
+				else
+				{
+					inputList[concreteInputIndex] = FileNodeFromPath(context->fileTreeRoot, oneInput, nil, true);
+					concreteInputIndex++;
 				}
 			}
 
-			if(mutatingInputs != nil)
+			for(const auto& oneInput : mutatingInputs)
 			{
-				for(NSString *oneInput in mutatingInputs)
+				if(globoverlap::is_glob_pattern(oneInput))
 				{
-					std::string path([oneInput UTF8String]);
-					if(globoverlap::is_glob_pattern(path))
-					{
-						globMutatingInputList.push_back(std::string([[oneInput lowercaseString] UTF8String]));
-						continue;
-					}
-
-					// Concrete mutating path. ConnectGlobDependencies handles producer
-					// and consumer chaining uniformly via concreteMutatingPaths and
-					// playlist-order Pass B; the FileNode is inserted here for the
-					// exclusive-input collision check, the parent-walk in
-					// ConnectImplicitProducers (which links a parent dir's producer
-					// to the mutator), and to chain a prior playlist producer that
-					// only exists as a tree-walk ancestor (e.g. clone of an enclosing
-					// directory whose contents have no per-file producer task).
-					NSString *lowercasePath = [oneInput lowercaseString];
-					const char *posixPath = [lowercasePath fileSystemRepresentation];
-					FileNode *node = FindOrInsertFileNodeForPath(context->fileTreeRoot, posixPath);
-
-					if(node->isExclusiveInput != 0)
-					{
-						posixPath = [oneInput fileSystemRepresentation];
-						LogError("error: invalid playlist for concurrent execution.\n"
-							"The path: \"%s\"\n"
-							"is specified as a mutating input (e.g. edit) but another action has marked it\n"
-							"as an exclusive input (delete or move). These cannot apply to the same path.\n"
-							"See \"replay --help\" for more information.\n", posixPath);
-						safe_exit(EXIT_FAILURE);
-					}
-
-					// Conditional FileTree producer-replacement: only when no prior
-					// consumer has registered this path. Without prior consumers the
-					// FileTree edge mutator -> next-consumer is the right direction;
-					// with prior consumers, that edge would conflict with Pass B's
-					// pre-mutation reader edge (consumer -> mutator), creating a
-					// cycle. Skipping the replacement in that case lets Pass B
-					// handle ordering on both sides per playlist position.
-					if(node->hasConsumer == 0)
-					{
-						node->producer = (__bridge void *)oneTask;
-					}
-
-					// Lowercase posix path so concrete-vs-concrete and concrete-vs-glob
-					// comparisons in ConnectGlobDependencies match GetPathForNode output.
-					concreteMutatingPathList.push_back(std::string([lowercasePath UTF8String]));
+					std::string lowerPath = oneInput;
+					std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::tolower);
+					globMutatingInputList.push_back(std::move(lowerPath));
+					continue;
 				}
+
+				// Concrete mutating path. ConnectGlobDependencies handles producer
+				// and consumer chaining uniformly via concreteMutatingPaths and
+				// playlist-order Pass B; the FileNode is inserted here for the
+				// exclusive-input collision check, the parent-walk in
+				// ConnectImplicitProducers (which links a parent dir's producer
+				// to the mutator), and to chain a prior playlist producer that
+				// only exists as a tree-walk ancestor (e.g. clone of an enclosing
+				// directory whose contents have no per-file producer task).
+				std::string lowercasePath = oneInput;
+				std::transform(lowercasePath.begin(), lowercasePath.end(), lowercasePath.begin(), ::tolower);
+				FileNode *node = FindOrInsertFileNodeForPath(context->fileTreeRoot, lowercasePath.c_str());
+
+				if(node->isExclusiveInput != 0)
+				{
+					LogError("error: invalid playlist for concurrent execution.\n"
+						"The path: \"%s\"\n"
+						"is specified as a mutating input (e.g. edit) but another action has marked it\n"
+						"as an exclusive input (delete or move). These cannot apply to the same path.\n"
+						"See \"replay --help\" for more information.\n", oneInput.c_str());
+					safe_exit(EXIT_FAILURE);
+				}
+
+				// Conditional FileTree producer-replacement: only when no prior
+				// consumer has registered this path. Without prior consumers the
+				// FileTree edge mutator -> next-consumer is the right direction;
+				// with prior consumers, that edge would conflict with Pass B's
+				// pre-mutation reader edge (consumer -> mutator), creating a
+				// cycle. Skipping the replacement in that case lets Pass B
+				// handle ordering on both sides per playlist position.
+				if(node->hasConsumer == 0)
+				{
+					node->producer = (__bridge void *)oneTask;
+				}
+
+				// Lowercase posix path so concrete-vs-concrete and concrete-vs-glob
+				// comparisons in ConnectGlobDependencies match GetPathForNode output.
+				concreteMutatingPathList.push_back(std::move(lowercasePath));
 			}
 
 			if(concreteInputIndex > 0)
@@ -204,35 +190,32 @@ TasksFromStep(const ActionStep& step, ReplayContext *context)
 
 			std::vector<std::string> globOutputList;
 
-			if(outputs != nil)
+			if(!outputs.empty())
 			{
-				NSUInteger outputCount = outputs.count;
-				if(outputCount > 0)
+				FileNode** outputList = (FileNode**)malloc(sizeof(FileNode*) * outputs.size());
+				size_t concreteOutputIndex = 0;
+				for(const auto& oneOutput : outputs)
 				{
-					FileNode** outputList = (FileNode**)malloc(sizeof(FileNode*) * outputCount);
-					NSUInteger concreteOutputIndex = 0;
-					for(NSString *oneOutput in outputs)
+					if(globoverlap::is_glob_pattern(oneOutput))
 					{
-						std::string path([oneOutput UTF8String]);
-						if(globoverlap::is_glob_pattern(path))
-						{
-							globOutputList.push_back(std::string([[oneOutput lowercaseString] UTF8String]));
-						}
-						else
-						{
-							outputList[concreteOutputIndex] = FileNodeFromPath(context->fileTreeRoot, oneOutput, oneTask, false);
-							concreteOutputIndex++;
-						}
-					}
-					if(concreteOutputIndex > 0)
-					{
-						oneTask.outputCount = concreteOutputIndex;
-						oneTask.outputs = outputList;
+						std::string lowerPath = oneOutput;
+						std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::tolower);
+						globOutputList.push_back(std::move(lowerPath));
 					}
 					else
 					{
-						free(outputList);
+						outputList[concreteOutputIndex] = FileNodeFromPath(context->fileTreeRoot, oneOutput, oneTask, false);
+						concreteOutputIndex++;
 					}
+				}
+				if(concreteOutputIndex > 0)
+				{
+					oneTask.outputCount = concreteOutputIndex;
+					oneTask.outputs = outputList;
+				}
+				else
+				{
+					free(outputList);
 				}
 			}
 
@@ -286,7 +269,7 @@ VerifyAllTasksExecuted(NSArray<TaskProxy*> *allTasks)
 			[oneTask describeTaskToStdErr];
 		}
 	}
-	
+
 	if(atLeastOneNotExecuted)
 	{
 		safe_exit(EXIT_FAILURE);

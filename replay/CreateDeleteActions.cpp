@@ -1,6 +1,6 @@
-#import <Foundation/Foundation.h>
-#import "ReplayAction.h"
-#import "ReplayActionPrivate.h"
+
+#include "ReplayAction.h"
+#include "ReplayActionPrivate.h"
 #include "ABase64.h"
 #include "PosixFileOps.h"
 #include <cerrno>

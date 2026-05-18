@@ -1,4 +1,5 @@
 #import "SerialDispatch.h"
+#include <memory>
 
 void
 StartSerialDispatch(ReplayContext *context)
@@ -11,11 +12,7 @@ StartSerialDispatch(ReplayContext *context)
 void
 FinishSerialDispatchAndWait(ReplayContext *context)
 {
-	dispatch_sync(context->queue, ^{
-#if TRACE
-			printf("executing terminating sync task\n");
-#endif
-		});
+	dispatch_sync_f(context->queue, nullptr, [](void*){});
 }
 
 void
@@ -30,14 +27,20 @@ DispatchTasksSerially(const std::vector<ActionStep>& playlist, ReplayContext *co
 	for (const auto& step : playlist)
 	{
 		HandleActionStep(step, context,
-			^(dispatch_block_t action,
-			__unused NSArray<NSString*> *inputs,
-			__unused NSArray<NSString*> *mutatingInputs,
-			__unused NSArray<NSString*> *exclusiveInputs,
-			__unused NSArray<NSString*> *outputs)
+			[context](std::function<void()> action,
+			__unused std::vector<std::string> inputs,
+			__unused std::vector<std::string> mutatingInputs,
+			__unused std::vector<std::string> exclusiveInputs,
+			__unused std::vector<std::string> outputs)
 			{
-				if (action != NULL)
-					dispatch_async(context->queue, action);
+				if(action)
+				{
+					auto* fn = new std::function<void()>(std::move(action));
+					dispatch_async_f(context->queue, fn, [](void* ctx) {
+						std::unique_ptr<std::function<void()>> f{static_cast<std::function<void()>*>(ctx)};
+						(*f)();
+					});
+				}
 			});
 	}
 
@@ -53,13 +56,19 @@ DispatchTaskSerially(NSDictionary *stepDescription, ReplayContext *context)
 {
 	ActionStep step((__bridge CFDictionaryRef)stepDescription);
 	HandleActionStep(step, context,
-		^(dispatch_block_t action,
-		__unused NSArray<NSString*> *inputs,
-		__unused NSArray<NSString*> *mutatingInputs,
-		__unused NSArray<NSString*> *exclusiveInputs,
-		__unused NSArray<NSString*> *outputs)
+		[context](std::function<void()> action,
+		__unused std::vector<std::string> inputs,
+		__unused std::vector<std::string> mutatingInputs,
+		__unused std::vector<std::string> exclusiveInputs,
+		__unused std::vector<std::string> outputs)
 		{
-			if (action != NULL)
-				dispatch_async(context->queue, action);
+			if(action)
+			{
+				auto* fn = new std::function<void()>(std::move(action));
+				dispatch_async_f(context->queue, fn, [](void* ctx) {
+					std::unique_ptr<std::function<void()>> f{static_cast<std::function<void()>*>(ctx)};
+					(*f)();
+				});
+			}
 		});
 }

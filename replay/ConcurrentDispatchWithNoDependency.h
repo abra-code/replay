@@ -1,4 +1,4 @@
-#import "ReplayAction.h"
+#include "ReplayAction.h"
 #include <vector>
 
 void StartConcurrentDispatchWithNoDependency(ReplayContext *context);

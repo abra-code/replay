@@ -1,9 +1,12 @@
-#import <Foundation/Foundation.h>
+#pragma once
 #include "FileTree.h"
 #include "LogStream.h"
 #include "ActionStep.h"
+#include <CoreFoundation/CFMessagePort.h>
+#include <dispatch/dispatch.h>
 
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -83,18 +86,16 @@ struct FileEdit {
     bool        case_insensitive = false;
 };
 
-NS_ASSUME_NONNULL_BEGIN
-
 typedef struct
 {
 	std::unordered_map<std::string, std::string> environment;
 	ReplayError lastError;
-	FileNode * __nullable fileTreeRoot;
-	OutputSerializer* outputSerializer; // always non-null during execution
+	FileNode *fileTreeRoot;
+	OutputSerializer *outputSerializer; // always non-null during execution
 	dispatch_queue_t queue; // used only for serial execution
 	intptr_t councurrencyLimit; //maximum number of tasks allowed to be executed concurrently. 0 = unlimited
-	NSInteger actionCounter; //counter incremented with each serially created action
-	NSString *batchName; //when running in server mode the batch name is provided for unique message port name
+	intptr_t actionCounter; //counter incremented with each serially created action
+	std::string batchName; //when running in server mode the batch name is provided for unique message port name
 	CFMessagePortRef callbackPort; //the port to report back progress status and finish event
 	bool concurrent;
 	bool analyzeDependencies;
@@ -109,17 +110,17 @@ typedef struct
 typedef struct
 {
 	ActionStep settings;
-	NSInteger index;
+	intptr_t index;
 	std::string mcpRequestID; // raw JSON of the JSON-RPC id field; empty when not in MCP mode
 } ActionContext;
 
-typedef void (^action_handler_t)(__nullable dispatch_block_t action,
-								NSArray<NSString*> * __nullable inputs,
-								NSArray<NSString*> * __nullable mutatingInputs,
-								NSArray<NSString*> * __nullable exclusiveInputs,
-								NSArray<NSString*> * __nullable outputs);
+using action_handler_t = std::function<void(
+	std::function<void()>,
+	std::vector<std::string>,
+	std::vector<std::string>,
+	std::vector<std::string>,
+	std::vector<std::string>)>;
 
-NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen);
 void HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actionHandler);
 
 bool CloneItem(const std::string &fromPath, const std::string &toPath, ReplayContext *context, ActionContext *actionContext);
@@ -132,9 +133,9 @@ bool CreateDirectory(const std::string &itemPath, ReplayContext *context, Action
 bool DeleteItem(const std::string &itemPath, ReplayContext *context, ActionContext *actionContext);
 bool ReadFile(const std::string &filePath, ReplayContext *context, ActionContext *actionContext);
 bool ListDirectory(const std::string &dirPath, ReplayContext *context, ActionContext *actionContext);
-bool DirectoryTree(const std::string &dirPath, NSInteger maxDepth, ReplayContext *context, ActionContext *actionContext);
+bool DirectoryTree(const std::string &dirPath, intptr_t maxDepth, ReplayContext *context, ActionContext *actionContext);
 bool GetFileInfo(const std::string &path, ReplayContext *context, ActionContext *actionContext);
-bool GlobFiles(NSString *rootDir, NSArray<NSString*> *globPatterns, NSArray<NSString*> *excludePatterns, NSInteger maxResults, ReplayContext *context, ActionContext *actionContext);
+bool GlobFiles(const std::string &rootDir, const std::vector<std::string> &globPatterns, const std::vector<std::string> &excludePatterns, intptr_t maxResults, ReplayContext *context, ActionContext *actionContext);
 bool EditFile(const std::string &filePath, const std::vector<FileEdit> &edits, bool actionDryRun, ReplayContext *context, ActionContext *actionContext);
 bool ExcecuteTool(const std::string &toolPath, const std::vector<std::string> &arguments, ReplayContext *context, ActionContext *actionContext);
 bool Echo(const std::string &text, ReplayContext *context, ActionContext *actionContext);
@@ -149,5 +150,3 @@ MCPExecuteResult ExcecuteToolMCPCore(const std::string &toolPath, const std::vec
 MCPGrepResult GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
                                bool use_regex, bool case_insensitive,
                                int context_lines, int max_matches);
-
-NS_ASSUME_NONNULL_END

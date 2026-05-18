@@ -514,7 +514,7 @@ int main(int argc, const char * argv[])
 	context.queue = nil;
 	context.councurrencyLimit = 0; //unlimited
 	context.actionCounter = -1;
-	context.batchName = NULL;
+	context.batchName = {};
 	context.callbackPort = NULL;
 	context.concurrent = true;
 	context.analyzeDependencies = true;
@@ -586,7 +586,7 @@ int main(int argc, const char * argv[])
 
 			case 'r':
 				// start server
-				context.batchName = @(optarg);
+				context.batchName = optarg;
 			break;
 			
 			case 'l':
@@ -722,7 +722,7 @@ int main(int argc, const char * argv[])
 	}
 
 	// when executed with --start-server BATCH_NAME option start server and wait for messages in runloop
-	if(context.batchName != nil)
+	if(!context.batchName.empty())
 	{
 		StartServerAndRunLoop(&context);
 		safe_exit(context.lastError.hasError() ? EXIT_FAILURE : EXIT_SUCCESS);

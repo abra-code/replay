@@ -1,16 +1,18 @@
 #pragma once
 // Shared inline output helpers for action implementation files.
-// Include only in action .mm files — not in public headers.
+// Include only in action .mm/.cpp files — not in public headers.
 
-#import <Foundation/Foundation.h>
-#import "ReplayAction.h"
+#include "ReplayAction.h"
 #include "MCPServer.h"
 #include "OutputSerializer.h"
 #include <cassert>
 #include <string>
 #include <vector>
 
-static inline void PrintToStdOut(ReplayContext *context, std::string str, NSInteger actionIndex)
+#include <optional>
+std::optional<std::string> ExpandEnvVars(const char *str, ReplayContext *context);
+
+static inline void PrintToStdOut(ReplayContext *context, std::string str, intptr_t actionIndex)
 {
     assert(context->outputSerializer != nullptr);
     context->outputSerializer->scheduleString(
@@ -25,7 +27,7 @@ static inline void PrintToStdErr(ReplayContext *context, std::string str)
     context->outputSerializer->scheduleErrorString(std::move(str));
 }
 
-static inline void ActionWithNoOutput(ReplayContext *context, NSInteger actionIndex)
+static inline void ActionWithNoOutput(ReplayContext *context, intptr_t actionIndex)
 {
     if(context->orderedOutput)
     {
