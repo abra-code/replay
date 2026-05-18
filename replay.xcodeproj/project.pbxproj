@@ -49,10 +49,10 @@
 			);
 			target = 1D19043324DE9EE900276D83 /* replay */;
 		};
-		1DB179DF2F7DFA1700E67624 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		1DF9B0E42FBACB1100E0C4ED /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				main.mm,
+				main.cpp,
 			);
 			target = 1D19043324DE9EE900276D83 /* replay */;
 		};
@@ -61,7 +61,7 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		1DA1C8E72F7C3D9D000F2E31 /* common */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = common; sourceTree = "<group>"; };
 		1DA1C8EE2F7C3DBB000F2E31 /* file-tree */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1C8F12F7C3DC1000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "file-tree"; sourceTree = "<group>"; };
-		1DA1C8FA2F7C3DE9000F2E31 /* medusa-objc */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DB179DF2F7DFA1700E67624 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "medusa-objc"; sourceTree = "<group>"; };
+		1DA1C8FA2F7C3DE9000F2E31 /* medusa-objc */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DF9B0E42FBACB1100E0C4ED /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "medusa-objc"; sourceTree = "<group>"; };
 		1DA1C9072F7C3E4B000F2E31 /* scheduler */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1C90B2F7C3E50000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = scheduler; sourceTree = "<group>"; };
 		1DA1C91F2F7C4097000F2E31 /* replay */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = replay; sourceTree = "<group>"; };
 		1DB179DD2F7DF9C500E67624 /* action */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = action; sourceTree = "<group>"; };

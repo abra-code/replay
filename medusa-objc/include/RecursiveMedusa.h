@@ -1,31 +1,23 @@
-//
-//  RecursiveMedusa.h
-//
-//  Created by Tomasz Kukielka on 9/13/20.
-//  Copyright © 2020 Tomasz Kukielka. All rights reserved.
-//
+#pragma once
+#include "MedusaTaskProxy.h"
+#include <unordered_set>
+#include <vector>
 
-#import <Foundation/Foundation.h>
-#import "MedusaTask.h"
+struct OutputInfo {
+	MedusaTaskProxy* producer = nullptr;
+	std::unordered_set<MedusaTaskProxy*> consumers;
+};
 
-@class MedusaTaskProxy;
+void IndexAllOutputsForRecursiveExecution(const std::vector<MedusaTaskProxy*>& allTasks,
+                                          OutputInfo* outputInfoArray, size_t outputArrayCount);
 
-typedef struct OutputInfo
-{
-	__unsafe_unretained id<MedusaTask> producer;
-	__strong NSMutableSet< id<MedusaTask> > *consumers; //consumers of this one output
-} OutputInfo;
+void ConnectImplicitProducersForRecursiveExecution(FileNode* treeRoot);
 
-void IndexAllOutputsForRecursiveExecution(NSArray< id<MedusaTask> > *all_medusas,
-                       	OutputInfo *outputInfoArray, NSUInteger outputArrayCount);
+std::unordered_set<MedusaTaskProxy*>
+ConnectDynamicInputsForRecursiveExecution(const std::vector<MedusaTaskProxy*>& allTasks);
 
-void ConnectImplicitProducersForRecursiveExecution(FileNode *treeRoot);
-
-NSSet<MedusaTaskProxy *> * //medusas without dynamic dependencies to be executed first produced here
-ConnectDynamicInputsForRecursiveExecution(NSArray<MedusaTaskProxy *> *allTasks); //input list of all raw unconnected medusas
-
-void ExecuteMedusaGraphRecursively(NSSet<MedusaTaskProxy *> *taskSet);
+void ExecuteMedusaGraphRecursively(std::unordered_set<MedusaTaskProxy*> taskSet);
 
 #if ENABLE_DEBUG_DUMP
-void DumpRecursiveTaskTree(NSSet<MedusaTaskProxy *> *rootTaskSet);
+void DumpRecursiveTaskTree(const std::unordered_set<MedusaTaskProxy*>& rootTaskSet);
 #endif

@@ -1,19 +1,10 @@
-//
-//  SchedulerMedusa.h
-//
-//  Created by Tomasz Kukielka on 9/20/20.
-//  Copyright © 2020 Tomasz Kukielka. All rights reserved.
-//
+#pragma once
+#include "TaskProxy.h"
+#include <vector>
 
-#import <Foundation/Foundation.h>
-#import "TaskProxy.h"
+void ConnectImplicitProducers(FileNode* treeRoot);
 
-void
-ConnectImplicitProducers(FileNode *treeRoot);
+void ConnectDynamicInputsForScheduler(const std::vector<TaskProxy*>& allTasks,
+                                      TaskProxy* rootTask);
 
-void
-ConnectDynamicInputsForScheduler(NSArray< id<MedusaTask> > *all_medusas, //input list of all raw unconnected medusas
-								TaskProxy *rootTask);
-
-void
-ConnectGlobDependencies(NSArray<TaskProxy*> *allTasks);
+void ConnectGlobDependencies(const std::vector<TaskProxy*>& allTasks);

@@ -1,19 +1,16 @@
-//
-//  TaskScheduler.h
-//
-//  Created by Tomasz Kukielka on 9/5/20.
-//  Copyright © 2020 Tomasz Kukielka. All rights reserved.
-//
+#pragma once
+#include "TaskProxy.h"
+#include <memory>
 
-#import <Foundation/Foundation.h>
+// Thin scheduler shell: owns the root sentinel task and drives graph execution.
+// User tasks are owned by the caller; this object only owns rootTask_.
+class TaskScheduler {
+public:
+	explicit TaskScheduler(intptr_t concurrencyLimit);
 
-@class TaskProxy;
+	TaskProxy* rootTask() const { return rootTask_.get(); }
+	void startExecutionAndWait();
 
-@interface TaskScheduler : NSObject
-
-@property(nonatomic, readonly, strong, direct) TaskProxy *rootTask;
-
-- (instancetype) initWithConcurrencyLimit:(intptr_t)concurrencyLimit __attribute__((objc_direct));
-- (void)startExecutionAndWait __attribute__((objc_direct));
-
-@end //TaskScheduler
+private:
+	std::unique_ptr<TaskProxy> rootTask_;
+};

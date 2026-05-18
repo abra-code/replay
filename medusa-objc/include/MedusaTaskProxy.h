@@ -1,25 +1,25 @@
-//
-//  MedusaTaskProxy.h
-//
-//  Created by Tomasz Kukielka on 9/20/20.
-//  Copyright © 2020 Tomasz Kukielka. All rights reserved.
-//
+#pragma once
+#include "FileTree.h"
+#include <functional>
 
-#import <Foundation/Foundation.h>
-#import "MedusaTask.h"
+// Single-threaded recursive execution task node (not used in the concurrent scheduler path).
+struct MedusaTaskProxy {
+	std::function<void()> taskBlock;
+	FileNode** inputs = nullptr;
+	size_t inputCount = 0;
+	FileNode** outputs = nullptr;
+	size_t outputCount = 0;
+	bool executed = false;
 
-//MedusaTask for recursive single-threaded execution
-@interface MedusaTaskProxy : NSObject<MedusaTask>
+	explicit MedusaTaskProxy(std::function<void()> task);
+	~MedusaTaskProxy();
 
-@property(nonatomic) bool executed;
+	MedusaTaskProxy(const MedusaTaskProxy&) = delete;
+	MedusaTaskProxy& operator=(const MedusaTaskProxy&) = delete;
 
-@property(nonatomic) NSUInteger inputCount;
-@property(nonatomic, unsafe_unretained) FileNode** inputs;
+	void executeTask();
 
-@property(nonatomic) NSUInteger outputCount;
-@property(nonatomic, unsafe_unretained) FileNode** outputs;
-
-- (id)initWithTask:(dispatch_block_t)task;
-- (void)executeTask;
-
-@end
+#if ENABLE_DEBUG_DUMP
+	void dumpDescription() const;
+#endif
+};
