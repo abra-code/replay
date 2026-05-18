@@ -1,23 +1,21 @@
 //
-//  main.m
+//  main.cpp
 //  replay
 //
 //  Created by Tomasz Kukielka on 8/8/20.
 //  Copyright © 2020 Tomasz Kukielka. All rights reserved.
 //
 
-#import <Foundation/Foundation.h>
-#include <CoreFoundation/CoreFoundation.h>
 #include <pthread.h>
 #include <getopt.h>
-#import "ReplayAction.h"
+#include "ReplayAction.h"
 #include "OutputSerializer.h"
-#import "TaskProxy.h"
-#import "ReplayTask.h"
-#import "SerialDispatch.h"
-#import "ConcurrentDispatchWithNoDependency.h"
-#import "ActionStream.h"
-#import "ReplayServer.h"
+#include "TaskProxy.h"
+#include "ReplayTask.h"
+#include "SerialDispatch.h"
+#include "ConcurrentDispatchWithNoDependency.h"
+#include "ActionStream.h"
+#include "ReplayServer.h"
 #include "replay_version.h"
 #include "SandboxProfile.h"
 #include "PlaylistSandboxPaths.h"
@@ -511,7 +509,7 @@ int main(int argc, const char * argv[])
 	context.environment = env_map_from_environ();
 	context.fileTreeRoot = NULL;
 	context.outputSerializer = &OutputSerializer::shared();
-	context.queue = nil;
+	context.queue = nullptr;
 	context.councurrencyLimit = 0; //unlimited
 	context.actionCounter = -1;
 	context.batchName = {};

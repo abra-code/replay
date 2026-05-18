@@ -1,29 +1,29 @@
 //
-//  ReplayServer.m
+//  ReplayServer.cpp
 //
 //  Created by Tomasz Kukielka on 12/26/20.
 //  Copyright © 2020 Tomasz Kukielka. All rights reserved.
 //
 
-#import "ReplayServer.h"
-#import "ConcurrentDispatchWithNoDependency.h"
-#import "SerialDispatch.h"
-#import "ActionStream.h"
+#import "replay_server.h"
+#include "ReplayServer.h"
+#include "ConcurrentDispatchWithNoDependency.h"
+#include "SerialDispatch.h"
+#include "ActionStream.h"
 #include "CFObj.h"
 #include "CFType.h"
 
 CFMessagePortRef
 CreateCallbackPort(const std::string &batchName)
 {
-	CFMessagePortRef remotePort = NULL;
-	CFStringRef portName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kDispatchListenerPortFormat, GetAppGroupIdentifier(), @(batchName.c_str()));
+	CFObj<CFStringRef> batchStr(CFStringCreateWithCString(kCFAllocatorDefault, batchName.c_str(), kCFStringEncodingUTF8));
+	CFObj<CFStringRef> portName(CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kDispatchListenerPortFormat, CFSTR(REPLAY_GROUP_ID), (CFStringRef)batchStr));
 	if(portName == NULL)
 	{
 		LogError("error: could not create port name %s\n", batchName.c_str());
-		return remotePort;
+		return NULL;
 	}
-	remotePort = CFMessagePortCreateRemote(kCFAllocatorDefault, portName);//should return non-null if listener port created
-	return remotePort;
+	return CFMessagePortCreateRemote(kCFAllocatorDefault, portName);
 }
 
 void
@@ -32,36 +32,29 @@ SendCallbackMessage(ReplayContext *context, SInt32 messageID)
 	if(context->callbackPort == NULL)
 		return;
 
-	NSMutableDictionary *callbackInfo = [NSMutableDictionary new];
-	
-	if(context->lastError.hasError())
-		callbackInfo[@"lastError"] = @(context->lastError.description().c_str());
-
-	if(messageID == kCallbackMessageHeartbeat)
-	{
-		
-	}
-	else if(messageID == kCallbackMessageExiting)
-	{
-		
-	}
-	else
-	{
+	if(messageID != kCallbackMessageHeartbeat && messageID != kCallbackMessageExiting)
 		return;
+
+	CFObj<CFMutableDictionaryRef> callbackInfo(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+
+	if(context->lastError.hasError())
+	{
+		CFObj<CFStringRef> errStr(CFStringCreateWithCString(kCFAllocatorDefault, context->lastError.description().c_str(), kCFStringEncodingUTF8));
+		CFDictionarySetValue(callbackInfo, CFSTR("lastError"), errStr);
 	}
 
-	CFObj<CFDataRef> plistData(CFPropertyListCreateData(kCFAllocatorDefault, (__bridge CFDictionaryRef)callbackInfo, kCFPropertyListBinaryFormat_v1_0, 0, NULL));
+	CFObj<CFDataRef> plistData(CFPropertyListCreateData(kCFAllocatorDefault, callbackInfo, kCFPropertyListBinaryFormat_v1_0, 0, NULL));
 	if(plistData != NULL)
 	{
-		/*int result =*/ CFMessagePortSendRequest(context->callbackPort, messageID, plistData, 5/*send timeout*/, 0/*rcv timout*/, NULL, NULL);
+		/*int result =*/ CFMessagePortSendRequest(context->callbackPort, messageID, plistData, 5/*send timeout*/, 0/*rcv timeout*/, NULL, NULL);
 	}
 }
 
-static inline NSDictionary *
+static inline ActionStep
 ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 {
 	CFDictionaryRef replayMessage = NULL;
-    if((inData != NULL) && (CFDataGetLength(inData) > 0))
+	if((inData != NULL) && (CFDataGetLength(inData) > 0))
 	{//CFData containing property list dictionary
 		CFErrorRef error = NULL;
 		CFPropertyListRef rawMessage = CFPropertyListCreateWithData(kCFAllocatorDefault, inData, kCFPropertyListImmutable, NULL, &error);
@@ -71,9 +64,7 @@ ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 				CFRelease(error);
 			LogError("error: corrupt mesage - cannot unpack property list dictionary from data\n");
 			if(context->stopOnError)
-			{
 				context->lastError.set("error: corrupt message - cannot unpack property list dictionary from data", 1);
-			}
 		}
 		else
 		{
@@ -83,14 +74,14 @@ ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 				CFRelease(rawMessage);
 				LogError("error: invalid message - cannot unpack property list dictionary from data\n");
 				if(context->stopOnError)
-				{
 					context->lastError.set("error: invalid message - cannot unpack property list dictionary from data", 1);
-				}
 			}
 		}
 	}
-	NSDictionary *actionDescription = CFBridgingRelease(replayMessage);
-	return actionDescription;
+	// ActionStep ctor retains; replayMessage raw pointer released by going out of scope
+	// via the CFObj wrapper below -> net retain = 1 in ActionStep.
+	CFObj<CFDictionaryRef> owned(replayMessage);
+	return ActionStep((CFDictionaryRef)owned);
 }
 
 
@@ -101,7 +92,7 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 
 	ReplayContext *context = (ReplayContext *)info;
 	bool stopLoop = false;
-	NSDictionary *actionDescription = nil;
+	ActionStep actionDescription;
 
 	switch(inMessageID)
 	{
@@ -114,7 +105,7 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 			actionDescription = ActionDictionaryFromData(context, inData);
 		}
 		break;
-		
+
 		case kReplayMessageQueueActionLine:
 		{
 			if(inData != NULL)
@@ -148,12 +139,12 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 
 	if((inMessageID == kReplayMessageQueueActionDictionary) || (inMessageID == kReplayMessageQueueActionLine))
 	{
-		if(actionDescription != nil)
+		if(!actionDescription.empty())
 		{
 			if(context->concurrent)
-				DispatchTaskConcurrentlyWithNoDependency(actionDescription, context);
+				DispatchTaskConcurrentlyWithNoDependency(std::move(actionDescription), context);
 			else
-				DispatchTaskSerially(actionDescription, context);
+				DispatchTaskSerially(std::move(actionDescription), context);
 		}
 		else
 		{
@@ -171,16 +162,18 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 		CFRunLoopStop(CFRunLoopGetCurrent());
 	}
 
-	NSMutableDictionary *replayReply = [NSMutableDictionary new];
 	pid_t myPid = getpid();
-	NSNumber *pidNum = @(myPid);
-	replayReply[@"pid"] = pidNum;
-	
+	CFObj<CFMutableDictionaryRef> replayReply(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+	CFObj<CFNumberRef> pidNum(CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &myPid));
+	CFDictionarySetValue(replayReply, CFSTR("pid"), pidNum);
+
 	if(context->lastError.hasError())
-		replayReply[@"lastError"] = @(context->lastError.description().c_str());
-	
-	CFDataRef plistData = CFPropertyListCreateData(kCFAllocatorDefault, (__bridge CFMutableDictionaryRef)replayReply, kCFPropertyListBinaryFormat_v1_0, 0, NULL);
-	return plistData;
+	{
+		CFObj<CFStringRef> errStr(CFStringCreateWithCString(kCFAllocatorDefault, context->lastError.description().c_str(), kCFStringEncodingUTF8));
+		CFDictionarySetValue(replayReply, CFSTR("lastError"), errStr);
+	}
+
+	return CFPropertyListCreateData(kCFAllocatorDefault, replayReply, kCFPropertyListBinaryFormat_v1_0, 0, NULL);
 }
 
 
@@ -189,10 +182,11 @@ StartServerAndRunLoop(ReplayContext *context)
 {
 	CFObj<CFMessagePortRef> localPort;
 	assert(!context->batchName.empty());
-	CFObj<CFStringRef> portName(CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kReplayServerPortFormat, GetAppGroupIdentifier(), @(context->batchName.c_str())));
+	CFObj<CFStringRef> batchStr(CFStringCreateWithCString(kCFAllocatorDefault, context->batchName.c_str(), kCFStringEncodingUTF8));
+	CFObj<CFStringRef> portName(CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kReplayServerPortFormat, CFSTR(REPLAY_GROUP_ID), (CFStringRef)batchStr));
 	if(portName == NULL)
 	{
-		LogError("error: could not create port name %s\n", ((__bridge NSString *)(CFStringRef)portName).UTF8String);
+		LogError("error: could not create port name %s\n", context->batchName.c_str());
 		safe_exit(EXIT_FAILURE);
 	}
 
@@ -225,4 +219,3 @@ StartServerAndRunLoop(ReplayContext *context)
 	//notify "dispatch" that "replay" server is exiting
 	SendCallbackMessage(context, kCallbackMessageExiting);
 }
-

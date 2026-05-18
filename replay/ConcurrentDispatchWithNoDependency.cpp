@@ -1,4 +1,4 @@
-#import "ConcurrentDispatchWithNoDependency.h"
+#include "ConcurrentDispatchWithNoDependency.h"
 #include "AsyncDispatch.h"
 
 void
@@ -45,10 +45,9 @@ DispatchTasksConcurrentlyWithNoDependency(const std::vector<ActionStep>& playlis
 }
 
 void
-DispatchTaskConcurrentlyWithNoDependency(NSDictionary *stepDescription, ReplayContext *context)
+DispatchTaskConcurrentlyWithNoDependency(ActionStep step, ReplayContext *context)
 {
-	ActionStep step((__bridge CFDictionaryRef)stepDescription);
-	HandleActionStep(step, context,
+	HandleActionStep(std::move(step), context,
 		[](std::function<void()> action,
 		__unused std::vector<std::string> inputs,
 		__unused std::vector<std::string> mutatingInputs,

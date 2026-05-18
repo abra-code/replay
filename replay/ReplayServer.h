@@ -5,8 +5,6 @@
 //  Copyright © 2020 Tomasz Kukielka. All rights reserved.
 //
 
-#import <Foundation/Foundation.h>
-#import "ReplayAction.h"
-#import "replay_server.h"
+#include "ReplayAction.h"
 
 void StartServerAndRunLoop(ReplayContext *context);

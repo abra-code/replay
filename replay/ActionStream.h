@@ -5,10 +5,9 @@
 //  Copyright © 2020 Tomasz Kukielka. All rights reserved.
 //
 
-#import <Foundation/Foundation.h>
-#import "ReplayAction.h"
+#include "ReplayAction.h"
 
-NSDictionary * ActionDescriptionFromLine(const char *line, ssize_t linelen);
+ActionStep ActionDescriptionFromLine(const char *line, ssize_t linelen);
 void StartReceivingActions(ReplayContext *context);
 void FinishReceivingActionsAndWait(ReplayContext *context);
 void StreamActionsFromStdIn(ReplayContext *context);

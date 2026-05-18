@@ -1,4 +1,4 @@
-#import "SerialDispatch.h"
+#include "SerialDispatch.h"
 #include <memory>
 
 void
@@ -52,10 +52,9 @@ DispatchTasksSerially(const std::vector<ActionStep>& playlist, ReplayContext *co
 }
 
 void
-DispatchTaskSerially(NSDictionary *stepDescription, ReplayContext *context)
+DispatchTaskSerially(ActionStep step, ReplayContext *context)
 {
-	ActionStep step((__bridge CFDictionaryRef)stepDescription);
-	HandleActionStep(step, context,
+	HandleActionStep(std::move(step), context,
 		[context](std::function<void()> action,
 		__unused std::vector<std::string> inputs,
 		__unused std::vector<std::string> mutatingInputs,

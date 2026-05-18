@@ -5,10 +5,10 @@
 //  Copyright © 2020 Tomasz Kukielka. All rights reserved.
 //
 
-#import <Foundation/Foundation.h>
+#include <CoreFoundation/CoreFoundation.h>
 
 #define REPLAY_GROUP_ID "group"
-#define GetAppGroupIdentifier() @(REPLAY_GROUP_ID)
+#define GetAppGroupIdentifier() CFSTR(REPLAY_GROUP_ID)
 
 static CFStringRef kReplayServerPortFormat = CFSTR("%@.replay-port.%@");
 static CFStringRef kDispatchListenerPortFormat = CFSTR("%@.dispatch-port.%@");
