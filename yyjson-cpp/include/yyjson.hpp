@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -345,11 +346,10 @@ public:
     std::string to_string(yyjson_write_flag flags = YYJSON_WRITE_NOFLAG) const noexcept
     {
         size_t len = 0;
-        char *json = yyjson_mut_write(doc_, flags, &len);
+        std::unique_ptr<char, decltype(&free)> json(
+            yyjson_mut_write(doc_, flags, &len), free);
         if (json == nullptr) return {};
-        std::string result(json, len);
-        free(json);
-        return result;
+        return std::string(json.get(), len);
     }
 
     yyjson_mut_doc *raw_doc() const noexcept { return doc_; }

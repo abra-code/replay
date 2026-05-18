@@ -58,12 +58,11 @@ static std::string extract_request_id(Json::Val id_val)
         return "null";
     yyjson_write_err err{};
     size_t len = 0;
-    char *raw = yyjson_val_write_opts(id_val.raw(), 0, nullptr, &len, &err);
+    std::unique_ptr<char, decltype(&free)> raw(
+        yyjson_val_write_opts(id_val.raw(), 0, nullptr, &len, &err), free);
     if (raw == nullptr)
         return "null";
-    std::string result(raw, len);
-    free(raw);
-    return result;
+    return std::string(raw.get(), len);
 }
 
 // ============================================================================

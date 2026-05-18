@@ -8,6 +8,7 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <regex>
 #include <ctime>
 #include <map>
@@ -173,14 +174,14 @@ void compute_file_hash(const std::string &path, FileInfo &info)
     
     if ((info.size < MMAP_THRESHOLD) && (info.size > 0))
     {
-        void* buffer = malloc(info.size);
+        std::unique_ptr<char, decltype(&free)> buffer(
+            static_cast<char*>(malloc(info.size)), free);
         if (buffer != nullptr)
         {
-            if (read(fd, buffer, info.size) == (ssize_t)info.size)
+            if (read(fd, buffer.get(), info.size) == (ssize_t)info.size)
             {
-                compute_buffer_hash(buffer, info.size, info);
+                compute_buffer_hash(buffer.get(), info.size, info);
             }
-            free(buffer);
         }
     }
     else if (info.size >= MMAP_THRESHOLD)

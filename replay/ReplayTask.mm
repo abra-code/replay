@@ -5,6 +5,7 @@
 #include "GlobOverlap.h"
 #include "ReplaySignpost.h"
 #include <algorithm>
+#include <memory>
 
 
 static inline FileNode * FileNodeFromPath(FileNode *fileTreeRoot, const std::string &path, TaskProxy* producer, bool isExclusiveInput)
@@ -84,12 +85,10 @@ TasksFromStep(const ActionStep& step, ReplayContext *context)
 			std::vector<std::string> concreteMutatingPathList;
 
 			size_t totalInputCount = inputs.size() + exclusiveInputs.size();
-			FileNode** inputList = NULL;
-			if(totalInputCount > 0)
-			{
-				// Allocate for worst case (all concrete); actual count may be smaller
-				inputList = (FileNode**)malloc(sizeof(FileNode*) * totalInputCount);
-			}
+			// Allocate for worst case (all concrete); actual count may be smaller
+			std::unique_ptr<FileNode*, decltype(&free)> inputOwner(
+				totalInputCount > 0 ? (FileNode**)malloc(sizeof(FileNode*) * totalInputCount) : nullptr, free);
+			FileNode** inputList = inputOwner.get();
 
 			size_t concreteInputIndex = 0;
 			for(const auto& oneInput : inputs)
@@ -176,11 +175,7 @@ TasksFromStep(const ActionStep& step, ReplayContext *context)
 			if(concreteInputIndex > 0)
 			{
 				oneTask.inputCount = concreteInputIndex;
-				oneTask.inputs = inputList;
-			}
-			else if(inputList != NULL)
-			{
-				free(inputList);
+				oneTask.inputs = inputOwner.release();
 			}
 
 			[oneTask setGlobInputs:std::move(globInputList)];
@@ -192,7 +187,9 @@ TasksFromStep(const ActionStep& step, ReplayContext *context)
 
 			if(!outputs.empty())
 			{
-				FileNode** outputList = (FileNode**)malloc(sizeof(FileNode*) * outputs.size());
+				std::unique_ptr<FileNode*, decltype(&free)> outputOwner(
+					(FileNode**)malloc(sizeof(FileNode*) * outputs.size()), free);
+				FileNode** outputList = outputOwner.get();
 				size_t concreteOutputIndex = 0;
 				for(const auto& oneOutput : outputs)
 				{
@@ -211,11 +208,7 @@ TasksFromStep(const ActionStep& step, ReplayContext *context)
 				if(concreteOutputIndex > 0)
 				{
 					oneTask.outputCount = concreteOutputIndex;
-					oneTask.outputs = outputList;
-				}
-				else
-				{
-					free(outputList);
+					oneTask.outputs = outputOwner.release();
 				}
 			}
 

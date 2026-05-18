@@ -5,6 +5,9 @@
 #include <filesystem>
 #include <fts.h>
 #include <iostream>
+#include <memory>
+
+using FTSPtr = std::unique_ptr<FTS, decltype(&fts_close)>;
 
 std::vector<Glob> compile_globs(const std::unordered_set<std::string>& glob_patterns) noexcept
 {
@@ -219,7 +222,7 @@ int walk_directory(const std::string& search_dir,
         return 0;
 
     char* paths[2] = { const_cast<char*>(search_dir.c_str()), nullptr };
-    FTS* fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR | fts_flags, nullptr);
+    FTSPtr fts(fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR | fts_flags, nullptr), fts_close);
     if (fts == nullptr)
         return errno != 0 ? errno : EXIT_FAILURE;
 
@@ -227,7 +230,7 @@ int walk_directory(const std::string& search_dir,
     int result = 0;
     FTSENT* ent;
 
-    while ((ent = fts_read(fts)) != nullptr)
+    while ((ent = fts_read(fts.get())) != nullptr)
     {
         switch (ent->fts_info)
         {
@@ -237,7 +240,7 @@ int walk_directory(const std::string& search_dir,
                                                      compiled_excl,
                                                      search_dir.c_str(), search_dir.size()))
                 {
-                    fts_set(fts, ent, FTS_SKIP);
+                    fts_set(fts.get(), ent, FTS_SKIP);
                 }
                 break;
 
@@ -286,6 +289,5 @@ int walk_directory(const std::string& search_dir,
         }
     }
 
-    fts_close(fts);
     return result;
 }

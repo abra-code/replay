@@ -1,8 +1,8 @@
 #include "FileSystemHelpers.h"
+#include "PosixFileOps.h"
 #include "GlobOverlap.h"
 #include "GlobSearch.h"
 #include <dirent.h>
-#include <fts.h>
 #include <sys/stat.h>
 #include <algorithm>
 #include <cstdlib>
@@ -72,7 +72,7 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 	}
 
 	char *paths[2] = { const_cast<char *>(path), nullptr };
-	FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, fts_name_compar);
+	FTSPtr fts(fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, fts_name_compar), fts_close);
 	if (fts == nullptr)
 		return false;
 
@@ -85,7 +85,7 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 	std::vector<TreeNode *> levelToNode;
 
 	FTSENT *ent;
-	while ((ent = fts_read(fts)) != nullptr)
+	while ((ent = fts_read(fts.get())) != nullptr)
 	{
 		int lvl = ent->fts_level;
 
@@ -98,7 +98,7 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 					// Root dir itself. maxDepth == 0: root only; maxDepth < 0: unlimited.
 					if (maxDepth == 0)
 					{
-						fts_set(fts, ent, FTS_SKIP);
+						fts_set(fts.get(), ent, FTS_SKIP);
 						break;
 					}
 					if ((int)levelToNode.size() < 1)
@@ -123,7 +123,7 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 					}
 					else
 					{
-						fts_set(fts, ent, FTS_SKIP);
+						fts_set(fts.get(), ent, FTS_SKIP);
 					}
 				}
 				break;
@@ -154,7 +154,6 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 		}
 	}
 
-	fts_close(fts);
 	return true;
 }
 
@@ -193,12 +192,12 @@ std::vector<std::string> expand_glob(const std::string &pattern)
 	glob::glob compiled_glob(lowercase_suffix);
 
 	char *paths[2] = { const_cast<char *>(base_dir.c_str()), nullptr };
-	FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, nullptr);
+	FTSPtr fts(fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, nullptr), fts_close);
 	if (fts == nullptr)
 		return results;
 
 	FTSENT *ent;
-	while ((ent = fts_read(fts)) != nullptr) {
+	while ((ent = fts_read(fts.get())) != nullptr) {
 		switch (ent->fts_info) {
 			case FTS_F:
 			case FTS_SL:
@@ -223,7 +222,6 @@ std::vector<std::string> expand_glob(const std::string &pattern)
 		}
 	}
 
-	fts_close(fts);
 	return results;
 }
 
@@ -325,11 +323,10 @@ glob_walk_one(const std::string &dir,
 
 	for (const auto &sym : symlinks)
 	{
-		char *resolved = realpath(sym.c_str(), nullptr);
+		std::unique_ptr<char, decltype(&free)> resolved(realpath(sym.c_str(), nullptr), free);
 		if (resolved == nullptr)
 			continue;
-		std::string target(resolved);
-		free(resolved);
+		std::string target(resolved.get());
 
 		// Symlinks pointing within root are reachable by regular traversal — skip
 		bool under_root = (target.size() >= root.size() &&
@@ -366,12 +363,12 @@ std::vector<std::string> find_entries_by_name(
 	std::vector<std::string> results;
 
 	char *paths[2] = { const_cast<char *>(root.c_str()), nullptr };
-	FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, fts_name_compar);
+	FTSPtr fts(fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, fts_name_compar), fts_close);
 	if (fts == nullptr)
 		return results;
 
 	FTSENT *ent;
-	while ((ent = fts_read(fts)) != nullptr)
+	while ((ent = fts_read(fts.get())) != nullptr)
 	{
 		switch (ent->fts_info)
 		{
@@ -381,12 +378,12 @@ std::vector<std::string> find_entries_by_name(
 					break; // root itself — not a result candidate
 				if (is_path_excluded(ent->fts_path, compiled_excl, root.c_str()))
 				{
-					fts_set(fts, ent, FTS_SKIP);
+					fts_set(fts.get(), ent, FTS_SKIP);
 					break;
 				}
 				if (max_results > 0 && results.size() >= max_results)
 				{
-					fts_set(fts, ent, FTS_SKIP);
+					fts_set(fts.get(), ent, FTS_SKIP);
 					break;
 				}
 				if (strcasestr(ent->fts_name, name_substr.c_str()) != nullptr)
@@ -413,7 +410,6 @@ std::vector<std::string> find_entries_by_name(
 		}
 	}
 
-	fts_close(fts);
 	return results;
 }
 

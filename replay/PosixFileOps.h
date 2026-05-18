@@ -9,7 +9,11 @@
 #include <cerrno>
 #include <climits>
 #include <cstring>
+#include <memory>
 #include <string>
+
+// RAII guard for FTS* — automatically calls fts_close on scope exit.
+using FTSPtr = std::unique_ptr<FTS, decltype(&fts_close)>;
 
 // Returns the parent directory component of path (everything before the last '/').
 // Returns "/" when there is no slash or the only slash is the leading one.
@@ -77,31 +81,26 @@ static inline bool posix_remove_recursive(const std::string &path)
 	}
 
 	char *paths[2] = {const_cast<char *>(path.c_str()), nullptr};
-	FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_XDEV, nullptr);
+	FTSPtr fts(fts_open(paths, FTS_PHYSICAL | FTS_XDEV, nullptr), fts_close);
 	if(fts == nullptr)
-	{
 		return false;
-	}
+
 	bool ok = true;
 	FTSENT *ent;
-	while((ent = fts_read(fts)) != nullptr)
+	while((ent = fts_read(fts.get())) != nullptr)
 	{
 		switch(ent->fts_info)
 		{
 			case FTS_DP:
 				if(rmdir(ent->fts_accpath) != 0)
-				{
 					ok = false;
-				}
 				break;
 			case FTS_F:
 			case FTS_SL:
 			case FTS_SLNONE:
 			case FTS_DEFAULT:
 				if(unlink(ent->fts_accpath) != 0)
-				{
 					ok = false;
-				}
 				break;
 			case FTS_ERR:
 			case FTS_NS:
@@ -111,7 +110,6 @@ static inline bool posix_remove_recursive(const std::string &path)
 				break;
 		}
 	}
-	fts_close(fts);
 	return ok;
 }
 
