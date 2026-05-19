@@ -48,13 +48,6 @@
 			);
 			target = 1DC15FAC250ECF020089C423 /* medusa-objc */;
 		};
-		1DF9B0E32FBAC33500E0C4ED /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				CFType.cpp,
-			);
-			target = 1DC15FAC250ECF020089C423 /* medusa-objc */;
-		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -63,7 +56,7 @@
 		1DDD17D52F7C36D900DB718A /* medusa-cpp */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "medusa-cpp"; sourceTree = "<group>"; };
 		1DDD17E22F7C37E800DB718A /* medusa-objc */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "medusa-objc"; sourceTree = "<group>"; };
 		1DDD17F22F7C388200DB718A /* file-tree */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DDD17F52F7C389500DB718A /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "file-tree"; sourceTree = "<group>"; };
-		1DDD18052F7C3A6B00DB718A /* common */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DF9B0E32FBAC33500E0C4ED /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = common; sourceTree = "<group>"; };
+		1DDD18052F7C3A6B00DB718A /* common */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (); explicitFileTypes = {}; explicitFolders = (); path = common; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
