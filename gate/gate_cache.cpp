@@ -258,36 +258,36 @@ static int serialize_dict_to_plist(CFDictionaryRef dict, const std::string& path
     return out.fail() ? 1 : 0;
 }
 
-// Load a binary plist into a CFMutableDictionary. Returns nullptr on failure.
-static CFMutableDictionaryRef load_plist_as_cfdict(const std::string& path)
+// Load a binary plist into a CFMutableDictionary. Returns empty CFMutableDict on failure.
+static CFMutableDict load_plist_as_cfdict(const std::string& path)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (file.fail())
-        return nullptr;
+        return {};
 
     std::streamsize size = file.tellg();
     if (size <= 0)
-        return nullptr;
+        return {};
 
     file.seekg(0, std::ios::beg);
     std::vector<char> buffer(size);
     if (!file.read(buffer.data(), size))
-        return nullptr;
+        return {};
 
     CFObj<CFDataRef> data(CFDataCreate(kCFAllocatorDefault, (const UInt8*)buffer.data(), size));
     if (data == nullptr)
-        return nullptr;
+        return {};
 
     CFErrorRef error = nullptr;
     CFPropertyListFormat plist_format;
-    CFMutableDictionaryRef dict = (CFMutableDictionaryRef)CFPropertyListCreateWithData(
-        kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &plist_format, &error);
+    CFMutableDict dict((CFMutableDictionaryRef)CFPropertyListCreateWithData(
+        kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &plist_format, &error), kCFObjDontRetain);
 
     if (dict == nullptr)
     {
         if (error != nullptr)
             CFRelease(error);
-        return nullptr;
+        return {};
     }
 
     return dict;
@@ -308,10 +308,9 @@ bool cache_lookup(const std::string& cache_dir,
 
     flock(fd, LOCK_SH);
 
-    CFMutableDictionaryRef raw_dict = (format == CacheFormat::Json)
+    CFMutableDict dict = (format == CacheFormat::Json)
         ? load_json_file_as_cfdict(path.c_str())
         : load_plist_as_cfdict(path);
-    CFMutableDict dict(raw_dict, kCFObjDontRetain);
     flock(fd, LOCK_UN);
     close(fd);
 

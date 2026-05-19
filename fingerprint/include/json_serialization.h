@@ -8,6 +8,7 @@
 #pragma once
 
 #include <CoreFoundation/CoreFoundation.h>
+#include "CFDict.h"
 
 namespace Json { class MutableDoc; }
 
@@ -18,6 +19,5 @@ int write_json_doc_to_file(const Json::MutableDoc& doc, const char* path);
 // Parses a JSON file with yyjson and converts the resulting tree to a
 // CFMutableDictionary hierarchy of CFString / CFNumber / CFBoolean /
 // CFMutableArray / CFMutableDictionary.
-// Returns a +1-retained CFMutableDictionaryRef on success, nullptr on failure
-// or when the root is not an object. Callers must release (typically via CFObj<>).
-CFMutableDictionaryRef load_json_file_as_cfdict(const char* path);
+// Returns an empty CFMutableDict on failure or when the root is not an object.
+CFMutableDict load_json_file_as_cfdict(const char* path);

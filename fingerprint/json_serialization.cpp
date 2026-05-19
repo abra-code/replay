@@ -110,7 +110,7 @@ int write_json_doc_to_file(const Json::MutableDoc& doc, const char* path)
     return EXIT_SUCCESS;
 }
 
-CFMutableDictionaryRef load_json_file_as_cfdict(const char* path)
+CFMutableDict load_json_file_as_cfdict(const char* path)
 {
     yyjson_read_err err{};
     Json::Document doc = Json::parse_file(path, YYJSON_READ_NOFLAG, &err);
@@ -118,15 +118,15 @@ CFMutableDictionaryRef load_json_file_as_cfdict(const char* path)
     {
         std::fprintf(stderr, "Error: failed to parse JSON file %s: %s\n",
                      path, (err.msg != nullptr) ? err.msg : "unknown error");
-        return nullptr;
+        return {};
     }
 
     Json::Val root = doc.root();
     if (!root.is_obj())
     {
         std::fprintf(stderr, "Error: JSON root is not an object: %s\n", path);
-        return nullptr;
+        return {};
     }
 
-    return (CFMutableDictionaryRef)yyjson_to_cf(root);
+    return CFMutableDict((CFMutableDictionaryRef)yyjson_to_cf(root), kCFObjDontRetain);
 }

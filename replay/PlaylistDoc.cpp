@@ -223,7 +223,7 @@ PlaylistDoc LoadPlaylist(const char* playlistPath, ReplayContext* context)
         if (CFType<CFDictionaryRef>::DynamicCast(plist) == nullptr &&
             CFType<CFArrayRef>::DynamicCast(plist) == nullptr)
             return false;
-        result.cfRoot.Adopt(plist.Detach());
+        result.cfRoot = std::move(plist);
         return true;
     };
 

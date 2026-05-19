@@ -1034,13 +1034,13 @@ void fingerprint::list_matched_files() noexcept
     std::fwrite(out.data(), 1, out.size(), stdout);
 }
 
-static CFMutableDictionaryRef load_tsv_as_cfdict(const std::string& path) noexcept
+static CFMutableDict load_tsv_as_cfdict(const std::string& path) noexcept
 {
     std::ifstream infile(path);
     if (infile.fail())
     {
         std::cerr << "Error: cannot open snapshot file: " << path << "\n";
-        return nullptr;
+        return {};
     }
 
     CFMutableDict root_dict;
@@ -1087,7 +1087,7 @@ static CFMutableDictionaryRef load_tsv_as_cfdict(const std::string& path) noexce
 
     root_dict.SetValue(CFSTR("files"), (CFMutableArrayRef)files_arr);
 
-    return (CFMutableDictionaryRef)root_dict.Detach();
+    return root_dict;
 }
 
 static void compare_metadata(CFDictionaryRef snap1, CFDictionaryRef snap2, FileHashAlgorithm& hash_algorithm) noexcept;
@@ -1179,7 +1179,7 @@ static CFMutableArr cfarray_from_strings(const std::vector<std::string>& vec) no
     return arr;
 }
 
-static CFMutableDictionaryRef build_snapshot_dictionary(const SnapshotMetadata& metadata) noexcept
+static CFMutableDict build_snapshot_dictionary(const SnapshotMetadata& metadata) noexcept
 {
     CFMutableDict root_dict;
     CFMutableDict params_dict;
@@ -1239,7 +1239,7 @@ static CFMutableDictionaryRef build_snapshot_dictionary(const SnapshotMetadata& 
 
     root_dict.SetValue(CFSTR("files"), (CFMutableArrayRef)files_arr);
 
-    return (CFMutableDictionaryRef)root_dict.Detach();
+    return root_dict;
 }
 
 // Parallel JSON builder: emits the same shape as build_snapshot_dictionary,
@@ -1323,7 +1323,7 @@ int fingerprint::save_snapshot_plist(const std::string& path, const SnapshotMeta
     std::sort(s_all_matched_files.begin(), s_all_matched_files.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
 
-    CFObj<CFMutableDictionaryRef> root_dict(build_snapshot_dictionary(metadata));
+    CFMutableDict root_dict = build_snapshot_dictionary(metadata);
 
     CFErrorRef error = nullptr;
     CFObj<CFDataRef> plist_data(CFPropertyListCreateData(kCFAllocatorDefault, root_dict,
@@ -1485,7 +1485,7 @@ CFMutableDictionaryRef fingerprint::load_snapshot(const std::string& path) noexc
 
     if (ext == ".tsv" || ext.empty())
     {
-        CFObj<CFMutableDictionaryRef> snapshot(load_tsv_as_cfdict(path));
+        CFMutableDict snapshot = load_tsv_as_cfdict(path);
         if (snapshot == nullptr)
             return nullptr;
         sort_snapshot_files(snapshot);
@@ -1494,7 +1494,7 @@ CFMutableDictionaryRef fingerprint::load_snapshot(const std::string& path) noexc
 
     if (ext == ".json")
     {
-        CFObj<CFMutableDictionaryRef> snapshot(load_json_file_as_cfdict(path.c_str()));
+        CFMutableDict snapshot = load_json_file_as_cfdict(path.c_str());
         if (snapshot == nullptr)
             return nullptr;
         sort_snapshot_files(snapshot);

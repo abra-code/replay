@@ -94,6 +94,17 @@ public:
         Adopt(inRef.mRef, kCFObjRetain);
         return *this;
     }
+
+    CFObj& operator=(CFObj&& inRef) noexcept
+    {
+        if (mRef != inRef.mRef)
+        {
+            Release();
+            mRef = inRef.mRef;
+            inRef.mRef = nullptr;
+        }
+        return *this;
+    }
     
     operator T() const noexcept
     {

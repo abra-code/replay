@@ -24,7 +24,7 @@ ActionStep::ActionStep(yyjson_val* val, std::shared_ptr<Json::Document> doc) noe
 ActionStep::~ActionStep() noexcept = default;
 
 ActionStep::ActionStep(const ActionStep& o) noexcept
-    : _dict(static_cast<CFDictionaryRef>(o._dict), kCFObjRetain),
+    : _dict(o._dict),
       _yyjson_val(o._yyjson_val), _doc(o._doc)
 {
 }
