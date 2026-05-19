@@ -122,7 +122,7 @@ DisplayHelp(void)
 		"  --allow-read PATH    Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.\n"
 		"  --allow-write PATH   Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.\n"
 		"  --deny-network       With sandbox active, deny outbound network (allowed by default).\n"
-		"  --mcp-server             Start an MCP (Model Context Protocol) stdio server.\n"
+		"  --mcp-server       Start an MCP (Model Context Protocol) stdio server.\n"
 		"                     Use --allow-read PATH for read-only dirs and --allow-write PATH for\n"
 		"                     read-write dirs (repeatable). Both flags imply --sandbox.\n"
 		"                     Implements the standard MCP filesystem tool set plus extended tools:\n"

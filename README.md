@@ -88,6 +88,14 @@ Options:
   --allow-read PATH    Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.
   --allow-write PATH   Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.
   --deny-network       With sandbox active, deny outbound network (allowed by default).
+  --mcp-server       Start an MCP (Model Context Protocol) stdio server.
+                     Use --allow-read PATH for read-only dirs and --allow-write PATH for
+                     read-write dirs (repeatable). Both flags imply --sandbox.
+                     Implements the standard MCP filesystem tool set plus extended tools:
+                     read_file, read_multiple_files, write_file, edit_file (with regex),
+                     create_directory, list_directory, directory_tree, move_file,
+                     delete_file, search_files, get_file_info,
+                     list_allowed_directories, glob_search.
   -V, --version      Display version.
   -h, --help         Display this help.
 
@@ -446,8 +454,16 @@ Supported actions are the same as "replay" actions plus a couple of special cont
    hardlink /from/item/path /to/item/path
    symlink /from/item/path /to/item/path
    create file /path/to/new/file "New File Content"
+   create file /path/to/new/file blob <base64>
    create directory /path/to/new/dir
    delete /path/to/item1 /path/to/item2 /path/to/itemN
+   read /path/to/item1 /path/to/item2 /path/to/itemN
+   list /path/to/directory
+   tree /path/to/directory [depth]
+   info /path/to/file/or/directory
+   glob /root/dir **/*.ext [more/**/*.ext ...] [!exclude/**]
+   edit /path/to/file.txt <oldText> <newText> [regex=true] [limit=N] [case-insensitive=true]
+   edit /path/to/src/*.cpp <oldText> <newText>   (glob: all matches edited by one task)
    execute /path/to/tool param1 param2 paramN
    echo "String to print"
    wait
@@ -490,7 +506,17 @@ The content of  `fingerprint --help`:
 Usage: fingerprint [-g, --glob=PATTERN]... [OPTIONS]... [PATH]...
 Calculate a combined hash, aka fingerprint, of all files in specified path(s) matching the GLOB pattern(s)
 OPTIONS:
-  -g, --glob=PATTERN  Glob patterns (repeatable, unexpanded) to match files under directories
+  -g, --glob=PATTERN  Glob patterns (repeatable, case-insensitive) to match files under directories
+        If the pattern contains '/' the match is applied to file paths relative to search directory,
+        otherwise the match is applied to filename only regardless of directory depth
+  -r, --regex=PATTERN Extended regex patterns (repeatable, case-insensitive)
+        Uses ECMAScript syntax (also known as JavaScript regex)
+        Pattern match is always applied to file paths relative to search directory
+  -e, --exclude=PATTERN  Exclude paths from fingerprinting (repeatable, supports ${VAR}/$(VAR))
+        Three accepted shapes (relative paths resolve against the current directory):
+          - literal file or directory  : excludes the file, or prunes the whole subtree
+          - glob with '/'              : matched against absolute file paths (e.g. 'src/**/*.gen.h')
+          - glob without '/'           : gitignore-style, matches basename at any depth (e.g. '*.gen.h')
   -H, --hash=ALGO     File content hash algorithm: crc32c (default) or blake3
   -F, --fingerprint-mode=MODE  Options to include paths in final fingerprint:
         default  : only file content hashes (rename-insensitive) - default if not specified
@@ -504,6 +530,12 @@ OPTIONS:
   -I, --inputs=FILE   Read input paths from FILE (one path per line, repeatable)
                       Supports Xcode .xcfilelist with ${VAR}/$(VAR) and plain lists.
   -l, --list          List matched files with their hashes
+  -s, --snapshot=PATH Save snapshot of matched files with hashes to PATH (.tsv, .plist, or .json)
+  -c, --compare=PATH  Compare snapshot PATH with current fingerprint run or with another snapshot
+                      Passing two snapshot paths to compare executes fingerprint in comparison mode:
+                      fingerprint --compare=/path/to/snapshot1.json --compare=/path/to/snapshot2.json
+                      Using --compare once allows comparing previous fingerprint run to the current:
+                      fingerprint --compare=mydir-snapshot-previous.plist path/to/mydir
   -h, --help          Print this help message
   -V, --version       Display version.
   -v, --verbose       Print all status information
