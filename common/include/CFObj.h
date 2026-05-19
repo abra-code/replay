@@ -34,13 +34,19 @@ public:
             CFRetain(mRef);
     }
 
-    explicit CFObj(const CFObj& inRef) noexcept
-        : mRef(inRef)
+    CFObj(const CFObj& inRef) noexcept
+        : mRef(inRef.mRef)
     {
         if(mRef != nullptr)
             CFRetain(mRef);
     }
-    
+
+    CFObj(CFObj&& inRef) noexcept
+        : mRef(inRef.mRef)
+    {
+        inRef.mRef = nullptr;
+    }
+
     virtual ~CFObj() noexcept
     {
         Release();
