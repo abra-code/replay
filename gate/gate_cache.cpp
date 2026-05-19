@@ -18,6 +18,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include "json_serialization.h"
+#include "yyjson.hpp"
 #include "CFObj.h"
 #include "CFStr.h"
 #include "CFArr.h"
@@ -183,14 +184,53 @@ static std::string cache_file_path(const std::string& cache_dir,
     return cache_dir + "/" + signature + "." + ext;
 }
 
-// Serialize a CFDictionary to a file in the given format.
-// Returns 0 on success.
-static int serialize_cache(CFDictionaryRef dict, const std::string& path, CacheFormat format)
+// Build the cache entry JSON directly via yyjson — parallel to the CFDict
+// builder in cache_store_plist. Keeps the JSON path off CFDictionary entirely.
+static void build_cache_json(const CacheEntry& entry, Json::MutableDoc& doc)
 {
-    if (format == CacheFormat::Json)
-        return serialize_dict_to_json(dict, path.c_str());
+    auto arr_from_vec = [&](const std::vector<std::string>& vec) {
+        Json::MutableVal arr = doc.new_arr();
+        for (const auto& s : vec)
+            doc.arr_append(arr, doc.new_str(s));
+        return arr;
+    };
 
-    // Binary plist
+    auto hex64 = [](uint64_t val) {
+        char buf[17];
+        snprintf(buf, sizeof(buf), "%016llx", (unsigned long long)val);
+        return std::string(buf);
+    };
+
+    Json::MutableVal root = doc.new_obj();
+    doc.obj_add(root, "version",            doc.new_sint(1));
+    doc.obj_add(root, "command",            doc.new_str(entry.command));
+    doc.obj_add(root, "inputs",             arr_from_vec(entry.inputs));
+    doc.obj_add(root, "outputs",            arr_from_vec(entry.outputs));
+    doc.obj_add(root, "exclude_inputs",     arr_from_vec(entry.exclude_inputs));
+    doc.obj_add(root, "input_fingerprint",  doc.new_str(hex64(entry.input_fingerprint)));
+    doc.obj_add(root, "output_fingerprint", doc.new_str(hex64(entry.output_fingerprint)));
+    doc.obj_add(root, "hash_algorithm",     doc.new_str(entry.hash_algorithm));
+    doc.obj_add(root, "timestamp",          doc.new_str(entry.timestamp));
+    doc.set_root(root);
+}
+
+// Populate a CFMutableDict with the cache entry fields (for binary-plist serialization).
+static void populate_cache_cfdict(const CacheEntry& entry, CFMutableDict& dict)
+{
+    dict.SetValue(CFSTR("version"), (int64_t)1);
+    dict.SetValue(CFSTR("command"), CFStr(entry.command));
+    dict.SetValue(CFSTR("inputs"), cfarray_from_vector(entry.inputs));
+    dict.SetValue(CFSTR("outputs"), cfarray_from_vector(entry.outputs));
+    dict.SetValue(CFSTR("exclude_inputs"), cfarray_from_vector(entry.exclude_inputs));
+    dict.SetValue(CFSTR("input_fingerprint"), hex64_to_cfstr(entry.input_fingerprint));
+    dict.SetValue(CFSTR("output_fingerprint"), hex64_to_cfstr(entry.output_fingerprint));
+    dict.SetValue(CFSTR("hash_algorithm"), CFStr(entry.hash_algorithm));
+    dict.SetValue(CFSTR("timestamp"), CFStr(entry.timestamp));
+}
+
+// Serialize a CFDictionary to a binary plist file. Returns 0 on success.
+static int serialize_dict_to_plist(CFDictionaryRef dict, const std::string& path)
+{
     CFErrorRef error = nullptr;
     CFObj<CFDataRef> data(CFPropertyListCreateData(kCFAllocatorDefault, dict,
         kCFPropertyListBinaryFormat_v1_0, 0, &error));
@@ -218,14 +258,9 @@ static int serialize_cache(CFDictionaryRef dict, const std::string& path, CacheF
     return out.fail() ? 1 : 0;
 }
 
-// Deserialize a CFMutableDictionary from a file in the given format.
-// Returns nullptr on failure.
-static CFMutableDictionaryRef deserialize_cache(const std::string& path, CacheFormat format)
+// Load a binary plist into a CFMutableDictionary. Returns nullptr on failure.
+static CFMutableDictionaryRef load_plist_as_cfdict(const std::string& path)
 {
-    if (format == CacheFormat::Json)
-        return deserialize_json_from_file(path.c_str());
-
-    // Binary plist
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (file.fail())
         return nullptr;
@@ -273,7 +308,10 @@ bool cache_lookup(const std::string& cache_dir,
 
     flock(fd, LOCK_SH);
 
-    CFMutableDict dict(deserialize_cache(path, format), kCFObjDontRetain);
+    CFMutableDictionaryRef raw_dict = (format == CacheFormat::Json)
+        ? load_json_file_as_cfdict(path.c_str())
+        : load_plist_as_cfdict(path);
+    CFMutableDict dict(raw_dict, kCFObjDontRetain);
     flock(fd, LOCK_UN);
     close(fd);
 
@@ -336,21 +374,22 @@ bool cache_store(const std::string& cache_dir,
     }
     flock(fd, LOCK_EX);
 
-    // Build the flat entry dictionary
-    CFMutableDict dict;
-    dict.SetValue(CFSTR("version"), (int64_t)1);
-    dict.SetValue(CFSTR("command"), CFStr(entry.command));
-    dict.SetValue(CFSTR("inputs"), cfarray_from_vector(entry.inputs));
-    dict.SetValue(CFSTR("outputs"), cfarray_from_vector(entry.outputs));
-    dict.SetValue(CFSTR("exclude_inputs"), cfarray_from_vector(entry.exclude_inputs));
-    dict.SetValue(CFSTR("input_fingerprint"), hex64_to_cfstr(entry.input_fingerprint));
-    dict.SetValue(CFSTR("output_fingerprint"), hex64_to_cfstr(entry.output_fingerprint));
-    dict.SetValue(CFSTR("hash_algorithm"), CFStr(entry.hash_algorithm));
-    dict.SetValue(CFSTR("timestamp"), CFStr(entry.timestamp));
-
-    // Atomic write: serialize to temp file, then rename
+    // Atomic write: serialize to temp file, then rename.
+    // JSON path bypasses CFDictionary entirely (parallel yyjson builder).
     std::string tmp_path = path + ".tmp";
-    int result = serialize_cache(dict, tmp_path, format);
+    int result;
+    if (format == CacheFormat::Json)
+    {
+        Json::MutableDoc doc;
+        build_cache_json(entry, doc);
+        result = write_json_doc_to_file(doc, tmp_path.c_str());
+    }
+    else
+    {
+        CFMutableDict dict;
+        populate_cache_cfdict(entry, dict);
+        result = serialize_dict_to_plist(dict, tmp_path);
+    }
     if (result == 0)
     {
         rename(tmp_path.c_str(), path.c_str());

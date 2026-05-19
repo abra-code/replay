@@ -31,6 +31,7 @@
 #include "FileInfo.h"
 #include "dispatch_queues_helper.h"
 #include "json_serialization.h"
+#include "yyjson.hpp"
 #include "CFObj.h"
 #include "CFType.h"
 #include "CFStr.h"
@@ -1241,6 +1242,76 @@ static CFMutableDictionaryRef build_snapshot_dictionary(const SnapshotMetadata& 
     return (CFMutableDictionaryRef)root_dict.Detach();
 }
 
+// Parallel JSON builder: emits the same shape as build_snapshot_dictionary,
+// but directly into a yyjson MutableDoc — bypassing CFDictionary entirely.
+static void build_snapshot_json(const SnapshotMetadata& metadata, Json::MutableDoc& doc) noexcept
+{
+    auto arr_from_strings = [&](const std::vector<std::string>& vec) {
+        Json::MutableVal arr = doc.new_arr();
+        for (const auto& s : vec)
+            doc.arr_append(arr, doc.new_str(s));
+        return arr;
+    };
+
+    Json::MutableVal root = doc.new_obj();
+
+    Json::MutableVal params = doc.new_obj();
+    doc.obj_add(params, "input_paths",      arr_from_strings(metadata.input_paths));
+    doc.obj_add(params, "glob_patterns",    arr_from_strings(metadata.glob_patterns));
+    doc.obj_add(params, "regex_patterns",   arr_from_strings(metadata.regex_patterns));
+    doc.obj_add(params, "exclude_patterns", arr_from_strings(metadata.exclude_patterns));
+
+    const char* hash_algo = (metadata.hash_algorithm == FileHashAlgorithm::CRC32C) ? "crc32c" : "blake3";
+    doc.obj_add(params, "hash_algorithm", doc.new_str(hash_algo));
+
+    const char* fp_mode = "default";
+    switch (metadata.fingerprint_mode)
+    {
+        case FingerprintOptions::HashAbsolutePaths: fp_mode = "absolute"; break;
+        case FingerprintOptions::HashRelativePaths: fp_mode = "relative"; break;
+        default: fp_mode = "default"; break;
+    }
+    doc.obj_add(params, "fingerprint_mode", doc.new_str(fp_mode));
+
+    char fp_hex[32];
+    std::snprintf(fp_hex, sizeof(fp_hex), "%016llx", (unsigned long long)metadata.fingerprint);
+    doc.obj_add(params, "fingerprint", doc.new_str(fp_hex));
+
+    if (!metadata.snapshot_timestamp.empty())
+        doc.obj_add(params, "snapshot_timestamp", doc.new_str(metadata.snapshot_timestamp));
+
+    doc.obj_add(root, "fingerprint_params", params);
+
+    Json::MutableVal files_arr = doc.new_arr();
+    for (const auto& [file_path, info] : s_all_matched_files)
+    {
+        if (info.is_nonexistent()) continue;
+
+        Json::MutableVal file_obj = doc.new_obj();
+        doc.obj_add(file_obj, "path", doc.new_str(file_path));
+
+        char hash_hex[32];
+        if (g_hash == FileHashAlgorithm::CRC32C)
+            std::snprintf(hash_hex, sizeof(hash_hex), "%08x", info.hash.crc32c);
+        else
+            std::snprintf(hash_hex, sizeof(hash_hex), "%016llx", (unsigned long long)info.hash.blake3);
+        doc.obj_add(file_obj, "hash", doc.new_str(hash_hex));
+
+        doc.obj_add(file_obj, "inode",    doc.new_sint((int64_t)info.inode));
+        doc.obj_add(file_obj, "size",     doc.new_sint((int64_t)info.size));
+        doc.obj_add(file_obj, "mtime_ns", doc.new_sint((int64_t)info.mtime_ns));
+
+        char mode_oct[16];
+        std::snprintf(mode_oct, sizeof(mode_oct), "%04o", info.mode & 07777);
+        doc.obj_add(file_obj, "mode", doc.new_str(mode_oct));
+
+        doc.arr_append(files_arr, file_obj);
+    }
+    doc.obj_add(root, "files", files_arr);
+
+    doc.set_root(root);
+}
+
 int fingerprint::save_snapshot_plist(const std::string& path, const SnapshotMetadata& metadata) noexcept
 {
     if (path.empty())
@@ -1299,12 +1370,10 @@ int fingerprint::save_snapshot_json(const std::string& path, const SnapshotMetad
     std::sort(s_all_matched_files.begin(), s_all_matched_files.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
 
-    CFObj<CFMutableDictionaryRef> root_dict(build_snapshot_dictionary(metadata));
+    Json::MutableDoc doc;
+    build_snapshot_json(metadata, doc);
 
-    int result = serialize_dict_to_json(root_dict, path.c_str());
-    root_dict = nullptr;
-    
-    return result;
+    return write_json_doc_to_file(doc, path.c_str());
 }
 
 int fingerprint::save_snapshot(const std::string& path, const SnapshotMetadata& metadata) noexcept
@@ -1425,7 +1494,7 @@ CFMutableDictionaryRef fingerprint::load_snapshot(const std::string& path) noexc
 
     if (ext == ".json")
     {
-        CFObj<CFMutableDictionaryRef> snapshot(deserialize_json_from_file(path.c_str()));
+        CFObj<CFMutableDictionaryRef> snapshot(load_json_file_as_cfdict(path.c_str()));
         if (snapshot == nullptr)
             return nullptr;
         sort_snapshot_files(snapshot);

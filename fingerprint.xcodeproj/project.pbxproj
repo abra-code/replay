@@ -349,6 +349,8 @@
 			fileSystemSynchronizedGroups = (
 				1D7ED2A02E9648EB003BA8A7 /* fingerprint */,
 				1DB17C212F7E4A6200E67624 /* common */,
+				1DDC258D2FB2F7FD004B4724 /* src */,
+				1DDC25902FB2F9DB004B4724 /* yyjson-cpp */,
 				1DDD179B2F7B47F400DB718A /* glob-overlap */,
 			);
 			name = fingerprint;

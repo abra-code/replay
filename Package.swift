@@ -124,7 +124,7 @@ let package = Package(
 
         .target(
             name: "FingerprintLib",
-            dependencies: ["Common", "GlobCpp", "GlobOverlap", "Blake3", "FastCrc32"],
+            dependencies: ["Common", "GlobCpp", "GlobOverlap", "Blake3", "FastCrc32", "Yyjson", "YyjsonCpp"],
             path: "fingerprint",
             exclude: ["main.cpp"],
             cxxSettings: [
@@ -174,8 +174,11 @@ let package = Package(
 
         .executableTarget(
             name: "GateTool",
-            dependencies: ["Common", "FingerprintLib", "Sandbox", "FileHelpers"],
+            dependencies: ["Common", "FingerprintLib", "Sandbox", "FileHelpers", "Yyjson", "YyjsonCpp"],
             path: "gate",
+            cxxSettings: [
+                .unsafeFlags(["-std=c++20"]),
+            ],
             linkerSettings: [
                 .linkedFramework("Foundation"),
                 .linkedLibrary("objc"),

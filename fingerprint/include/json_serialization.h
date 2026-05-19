@@ -9,13 +9,15 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace Json { class MutableDoc; }
 
-int serialize_dict_to_json(CFDictionaryRef root_dict, const char* path);
-CFMutableDictionaryRef deserialize_json_from_file(const char* path);
+// Writes a yyjson mutable document to a file at `path` (pretty-printed).
+// Returns EXIT_SUCCESS or EXIT_FAILURE; errors are reported to stderr.
+int write_json_doc_to_file(const Json::MutableDoc& doc, const char* path);
 
-#ifdef __cplusplus
-}
-#endif
+// Parses a JSON file with yyjson and converts the resulting tree to a
+// CFMutableDictionary hierarchy of CFString / CFNumber / CFBoolean /
+// CFMutableArray / CFMutableDictionary.
+// Returns a +1-retained CFMutableDictionaryRef on success, nullptr on failure
+// or when the root is not an object. Callers must release (typically via CFObj<>).
+CFMutableDictionaryRef load_json_file_as_cfdict(const char* path);
