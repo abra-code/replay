@@ -142,7 +142,7 @@ bool Echo(const std::string &text, ReplayContext *context, ActionContext *action
 
 // These functions return C++ structs and take C++ types — C linkage not possible.
 MCPEditResult EditFileMCPCore(const std::string &filePath, const std::vector<FileEdit> &edits, bool dryRun);
-// workingDir: passed to NSTask setCurrentDirectoryPath; empty = inherited CWD.
+// workingDir: passed to posix_spawn_file_actions_addchdir_np; empty = inherited CWD.
 // timeoutSeconds: SIGTERM at deadline, SIGKILL after 3s grace.
 MCPExecuteResult ExcecuteToolMCPCore(const std::string &toolPath, const std::vector<std::string> &arguments,
                                       const std::string &workingDir, int timeoutSeconds);

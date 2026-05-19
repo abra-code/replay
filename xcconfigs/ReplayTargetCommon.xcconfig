@@ -3,3 +3,7 @@ INFOPLIST_FILE = $(SRCROOT)/common/Info.plist
 INFOPLIST_PREPROCESS = YES
 PRODUCT_BUNDLE_IDENTIFIER = com.abracode.replay
 
+// CoreFoundation is used by ActionStream, ReplayServer, and PlaylistDoc.
+// Previously auto-linked via Foundation when .mm files were present; now explicit.
+OTHER_LDFLAGS = $(inherited) -framework CoreFoundation
+

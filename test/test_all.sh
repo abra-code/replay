@@ -57,6 +57,7 @@ run_suite "$SCRIPT_DIR/test_replay_auto_sandbox.sh" "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_dispatch.sh"           "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_mcp_server.py"         "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_stress_playlist.py" "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_replay_execute_stress.py"  "$BUILD_DIR/replay"
 
 printf '\n'
 printf "${BOLD}========================================${NC}\n"

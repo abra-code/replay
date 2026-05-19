@@ -30,6 +30,7 @@
 #include "blake3.h"
 #include "replay_version.h"
 #include "SandboxProfile.h"
+#include "ChildProcess.h"
 
 
 // Globals required by fingerprint.cpp (declared extern there)
@@ -128,26 +129,20 @@ static std::string build_command_string(char* const* argv, int count)
 // Execute a command via posix_spawn. Returns the exit code.
 static int execute_command(char* const* argv)
 {
-    pid_t pid;
-    int status = posix_spawn(&pid, argv[0], nullptr, nullptr, argv, environ);
-    if (status != 0)
+    ChildProcess::Options opts;
+    for (char* const* p = argv; *p != nullptr; ++p)
+        opts.argv.emplace_back(*p);
+    opts.stdinDevNull = false; // gate inherits parent stdin for the wrapped tool
+
+    ChildProcess::Result r = ChildProcess::Run(opts);
+    if (!r.launched)
     {
-        std::cerr << "error: posix_spawn failed: " << strerror(status) << '\n';
+        std::cerr << "error: " << r.launch_error << '\n';
         return 2;
     }
-
-    if (waitpid(pid, &status, 0) == -1)
-    {
-        std::cerr << "error: waitpid failed\n";
-        return 2;
-    }
-
-    if (WIFEXITED(status))
-        return WEXITSTATUS(status);
-    if (WIFSIGNALED(status))
-        return 128 + WTERMSIG(status);
-
-    return 2;
+    if (r.term_signal > 0)
+        return 128 + r.term_signal;
+    return (r.exit_code >= 0) ? r.exit_code : 2;
 }
 
 // Get current timestamp as ISO string

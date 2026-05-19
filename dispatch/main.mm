@@ -11,43 +11,30 @@
 #import "ActionFromName.h"
 #include "replay_version.h"
 #include "CFObj.h"
+#include "ChildProcess.h"
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string>
+#include <vector>
 
 static inline BOOL
 StartChildProcess(NSString *toolPath, NSArray<NSString*> *arguments)
 {
-	NSTask *task = [[NSTask alloc] init];
-	[task setLaunchPath:toolPath];
-	[task setArguments:arguments];
+	ChildProcess::Options opts;
+	opts.argv.reserve([arguments count] + 1);
+	opts.argv.emplace_back([toolPath UTF8String]);
+	for (NSString *arg in arguments)
+		opts.argv.emplace_back([arg UTF8String]);
+	opts.detach = true; // fire-and-forget; replay server runs independently
 
-	[task setTerminationHandler: ^(NSTask *task) {
-		int toolStatus = [task terminationStatus];
-		if(toolStatus != EXIT_SUCCESS)
-		{
-			fprintf(stderr, "error: failed to execute \"%s\". Error: %d\n", [toolPath UTF8String], toolStatus);
-		}
-	}];
-
-/*
-	NSPipe *stdOutPipe = [NSPipe pipe];
-	[task setStandardOutput:stdOutPipe];
-*/
-	NSPipe *stdInPipe = [NSPipe pipe];
-	[task setStandardInput:stdInPipe];
-
-	NSError *operationError = nil;
-	BOOL isSuccessful = [task launchAndReturnError:&operationError];
-	
-	if (!isSuccessful)
+	ChildProcess::Result r = ChildProcess::Run(opts);
+	if (!r.launched)
 	{
-		NSString *errorDesc = [operationError localizedDescription];
-		if(errorDesc == nil)
-		{
-			errorDesc = [operationError localizedFailureReason];
-		}
-		fprintf(stderr, "error: failed to execute \"%s\". Error: %s\n", [toolPath UTF8String], [errorDesc UTF8String] );
+		fprintf(stderr, "error: failed to execute \"%s\". %s\n",
+		        [toolPath UTF8String], r.launch_error.c_str());
+		return NO;
 	}
-	
-	return isSuccessful;
+	return YES;
 }
 
 
@@ -156,8 +143,8 @@ StartReplayAndOpenRemotePort(NSString *pathToDispatch, CFStringRef portName, NSA
 		}
 		else
 		{
-			NSFileManager *fileManager = [NSFileManager defaultManager];
-			if(![fileManager fileExistsAtPath:replayPath])
+			struct stat st;
+			if (stat(replayPath.UTF8String, &st) != 0)
 			{
 				fprintf(stderr, "error: \"replay\" not found at %s\n", replayPath.UTF8String);
 			}

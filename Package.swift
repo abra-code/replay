@@ -97,7 +97,7 @@ let package = Package(
             name: "MedusaObjc",
             dependencies: ["Common", "FileTree", "GlobOverlap"],
             path: "medusa-objc",
-            exclude: ["main.mm"],
+            exclude: ["main.cpp"],
             cxxSettings: [
                 .unsafeFlags(["-std=c++20"]),
             ]
