@@ -132,6 +132,7 @@ source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_glob_tests.sh"
 source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_snapshot_tests.sh"
 source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_compare_tests.sh"
 source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_exclude_tests.sh"
+source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_regex_tests.sh"
 
 # ============================================================================
 # Run all tests
@@ -253,6 +254,19 @@ test_exclude_changing_excluded_file
 test_exclude_changing_kept_file
 test_exclude_relative_to_search_dir
 test_exclude_relative_glob_in_search_dir
+
+test_regex_basic_pattern
+test_regex_alternation
+test_regex_path_pattern
+test_regex_multiple_patterns
+test_regex_no_match
+test_regex_case_insensitive
+test_regex_combined_with_glob
+test_invalid_fingerprint_mode
+test_invalid_hash_algo
+test_invalid_xattr_mode
+test_missing_inputs_file
+test_no_paths_specified
 
 echo ""
 
