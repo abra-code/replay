@@ -88,11 +88,11 @@ def run_mcp(messages: list[dict], allow_write: list[str] = (), *,
             for m in messages:
                 proc.stdin.write(json.dumps(m) + "\n")
                 proc.stdin.flush()
-                
+
                 # JSON-RPC standard: Notifications do NOT have an 'id' and get no reply
                 if "id" not in m:
                     continue
-                    
+
                 # Only block and read if the message expects a response
                 line = proc.stdout.readline()
                 # If line is empty, the server process died or closed the stream
@@ -105,7 +105,7 @@ def run_mcp(messages: list[dict], allow_write: list[str] = (), *,
                         f"Server Exit Code: {return_code}\n"
                         f"Server Stderr Output:\n{stderr_err}"
                     )
-                
+
                 if line:
                     r = json.loads(line.strip())
                     responses[r.get("id")] = r
@@ -114,10 +114,10 @@ def run_mcp(messages: list[dict], allow_write: list[str] = (), *,
             for m in messages:
                 proc.stdin.write(json.dumps(m) + "\n")
             proc.stdin.flush()
-            
+
             # Close stdin so the server knows no more inputs are coming
             proc.stdin.close()
-            
+
             # Read all responses until the stream reaches EOF
             for line in proc.stdout:
                 if line.strip():
@@ -132,6 +132,93 @@ def run_mcp(messages: list[dict], allow_write: list[str] = (), *,
         proc.wait(timeout=5)
 
     return responses
+
+
+def run_mcp_stress_test(allow_write: list[str] = (), *,
+                        extra_args: list[str] = (),
+                        num_iterations: int = 100) -> tuple[subprocess.Popen, list[dict]]:
+    """Start replay --mcp-server with MallocStackLogging for leak analysis.
+
+    Does NOT close stdin - the server stays alive waiting for more requests.
+    Returns (process, list of response ids) for leak checking after stress test.
+
+    Caller MUST terminate the process when done.
+    """
+    allow_write_flags: list[str] = []
+    for d in allow_write:
+        allow_write_flags += ["--allow-write", d]
+    cmd = [str(REPLAY), *allow_write_flags, *extra_args, "--mcp-server"]
+
+    env = os.environ.copy()
+    env["MallocStackLogging"] = "lite"
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}}},
+        {"jsonrpc": "2.0", "method": "initialized"},
+    ]
+
+    for m in messages:
+        proc.stdin.write(json.dumps(m) + "\n")
+    proc.stdin.flush()
+
+    line = proc.stdout.readline()
+    if line:
+        _ = json.loads(line.strip())
+
+    response_ids = []
+    for i in range(num_iterations):
+        msg_id = i + 2
+
+        tool_choice = i % 8
+        if tool_choice == 0:
+            msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
+                   "params": {"name": "write_file",
+                              "arguments": {"path": f"{allow_write[0]}/stress_{i}.txt",
+                                            "content": f"stress-content-{i}"}}}
+        elif tool_choice == 1:
+            msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
+                   "params": {"name": "read_file",
+                              "arguments": {"path": f"{allow_write[0]}/stress_{i % 10}.txt"}}}
+        elif tool_choice == 2:
+            msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
+                   "params": {"name": "list_directory",
+                              "arguments": {"path": allow_write[0]}}}
+        elif tool_choice == 3:
+            msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
+                   "params": {"name": "glob_search",
+                              "arguments": {"path": allow_write[0], "pattern": "*.txt"}}}
+        elif tool_choice == 4:
+            msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
+                   "params": {"name": "get_file_info",
+                              "arguments": {"path": f"{allow_write[0]}/stress_{i % 5}.txt"}}}
+        elif tool_choice == 5:
+            msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
+                   "params": {"name": "search_files",
+                              "arguments": {"path": allow_write[0], "pattern": "stress"}}}
+        elif tool_choice == 6:
+            msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
+                   "params": {"name": "execute_command",
+                              "arguments": {"command": "echo stress_test", "workingDirectory": allow_write[0]}}}
+        else:
+            msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
+                   "params": {"name": "create_directory",
+                              "arguments": {"path": f"{allow_write[0]}/stress_dir_{i}"}}}
+
+        proc.stdin.write(json.dumps(msg) + "\n")
+        proc.stdin.flush()
+        response_ids.append(msg_id)
+
+    return proc, response_ids
 
 def text_of(resp: dict) -> str:
     """Extract content[0].text from a tools/call result response."""
@@ -1030,6 +1117,45 @@ def test_concurrent_requests(tmpdir: str) -> None:
     check("concurrent reads: all returned correct content", all_reads_ok)
 
 
+def test_stress_concurrent_leak_detection(tmpdir: str) -> None:
+    print("=== MCP: stress test with memory leak detection ===")
+
+    num_iterations = 100
+    proc, response_ids = run_mcp_stress_test([tmpdir], num_iterations=num_iterations)
+
+    try:
+        responses = {}
+        for msg_id in response_ids:
+            line = proc.stdout.readline()
+            if line:
+                r = json.loads(line.strip())
+                responses[r.get("id")] = r
+
+        check(f"stress test: received all {num_iterations} responses",
+              len(responses) == num_iterations, f"got {len(responses)}")
+
+        print("\n--- Running leaks analysis ---")
+        leaks_proc = subprocess.run(
+            ["leaks", str(proc.pid)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        output = leaks_proc.stdout + leaks_proc.stderr
+        print(f"leaks output:\n{output}")
+        if "0 leaks" in output or "Leak: 0" in output:
+            ok("memory leak check: no leaks detected")
+        else:
+            fail("memory leak check: potential leaks detected", output[:500])
+
+    finally:
+        if proc.stdin and not proc.stdin.closed:
+            proc.stdin.close()
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
 def test_tools_list_schema(tmpdir: str) -> None:
     print("=== MCP: tools/list inputSchema validation ===")
 
@@ -1755,6 +1881,7 @@ def main() -> int:
         test_parse_error(tmpdir)
         test_initialized_notification_no_response(tmpdir)
         test_concurrent_requests(tmpdir)
+        test_stress_concurrent_leak_detection(tmpdir)
 
     print()
     print("=" * 50)
