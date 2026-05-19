@@ -1,6 +1,6 @@
 # replay tools
 'replay' repository contains 4 tools:
-- replay: execute a list of declared actions
+- replay: execute a list of declared actions or run as stdio mcp server with hard sandbox
 - dispatch: companion tool for 'replay'
 - fingerprint: calculate deep directory hash - [readme](fingerprint/README.md)
 - gate: cached task execution tool - [readme](gate/README.md)
@@ -11,24 +11,26 @@ source <(/usr/bin/curl -fsSL 'https://raw.githubusercontent.com/abra-code/replay
 ```
 
 # replay
-A macOS tool to execute a list of declared actions. Supported actions include:
+A macOS tool to execute a list of declared actions.  
+
+Key features:
+- declared actions (aka playlist) with automatic dependnecy detection
+- stdio MCP server mode with optional sandbox
+- hard sandboxing via macOS Seatbelt (kernel-enforced filesystem and network restrictions) - shared by `replay` and `gate` - [readme](sandbox/README.md)
+- concurrent operations for fastest execution
+- serial operations if sequence is required
+- designed to improve performance of shell scripts running a series of slow tasks, which underutilize the CPU, storage or network resources
+- self contained fast C++ code - no external library or runtime dependencies; not calling external tools to perform file operations
+- supports cloning on APFS so duplicates don't take unnecessary space on disk
+- companion "dispatch" tool helps with ad hoc task distribution without the need to create a playlist
+  
+Supported actions include:
 - file operations like clone, move, create, delete, hardlink, symlink
 - filesystem inspection: read, list, tree, info, glob
 - text editing: edit (search-and-replace with regex support)
 - execution of child tools
 - text operations like echo
-
-Key features:
-- concurrent operations for fastest execution with optional automatic dependency resolution
-- serial operations supported if a sequence is required
-- designed to improve performance of shell scripts running a series of slow tasks, which
-  underutilize the CPU, storage or network resources
-- self contained code - not calling external tools to perform file operations
-- supports cloning on APFS so duplicates don't take unnecessary space on disk
-- companion "dispatch" tool helps with ad hoc task distribution without the need to create a playlist
-- hard sandboxing via macOS Seatbelt (kernel-enforced filesystem and network restrictions) - shared by `replay` and `gate` - [readme](sandbox/README.md)
-
-
+  
 The documentation is in both tools' help as below. Example usage in test scripts accompanying this code.
 \
 Example application can be found in Delta.app, where it is combined with find tool and delivers about 5-fold speed increase:
