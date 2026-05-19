@@ -252,6 +252,13 @@ std::string GenerateSbplProfile(const Config& config)
     if (config.allow_fork)
         p += "(allow process-fork)\n";
 
+    // Allow signaling processes inside this sandbox. Without this, kill()
+    // against a posix_spawned child fails with EPERM and a timeout-driven
+    // termination cannot actually kill the runaway child: Run() returns in
+    // bounded time (good) but the child is leaked, surviving its parent
+    // until its natural exit (bad).
+    p += "(allow signal (target same-sandbox))\n";
+
     // Deduplicate read_write paths (covers read access implicitly)
     std::vector<std::string> rw_dirs = DeduplicatePaths(config.read_write);
 

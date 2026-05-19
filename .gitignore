@@ -9,3 +9,4 @@ yyjson/test
 yyjson/doc
 yyjson/misc
 .claude
+test/__pycache__

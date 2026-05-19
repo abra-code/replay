@@ -124,6 +124,34 @@ void TruncateMarker(std::string &s, std::size_t maxBytes)
     }
 }
 
+// Poll-with-WNOHANG until the child is reaped or the deadline expires.
+// Used after SIGKILL so the call returns in bounded time even when signal
+// delivery is suppressed (e.g., a sandbox profile that denies `signal`).
+//
+// Each iteration: one non-blocking waitpid + one 20ms sleep. EINTR and
+// "child still running" both fall through to the sleep, so a flurry of
+// signals can't make this spin.
+bool WaitForExit(pid_t pid, int *statusOut, long long deadlineMillis)
+{
+    for(;;)
+    {
+        int status = 0;
+        pid_t r = waitpid(pid, &status, WNOHANG);
+        if(r == pid)
+        {
+            if(statusOut != nullptr)
+                *statusOut = status;
+            return true;
+        }
+        if(r < 0 && errno != EINTR)
+            return false; // ECHILD or similar — nothing left to reap
+        if(NowMillis() >= deadlineMillis)
+            return false;
+        struct timespec ts = {0, 20 * 1000 * 1000}; // 20 ms
+        nanosleep(&ts, nullptr);
+    }
+}
+
 } // namespace
 
 Result Run(const Options &opts)
@@ -188,9 +216,31 @@ Result Run(const Options &opts)
 
     char* const* envp = (opts.envp != nullptr) ? opts.envp : environ;
 
+    // Put the child in its own process group so a timeout-driven killpg() can
+    // signal the whole subtree (shell + every descendant) rather than just the
+    // immediate child. Without this, `/bin/sh -c "sleep 100"` would leave the
+    // sleep alive holding the pipe write end after we killed the shell.
+    //
+    // Also reset the child's signal mask to empty. We are typically called on
+    // a libdispatch worker thread, which blocks SIGTERM (and most other
+    // catchable signals) — without an explicit reset the child inherits that
+    // mask and silently ignores SIGTERM, forcing every timeout to fall through
+    // to the SIGKILL path 3 seconds later.
+    posix_spawnattr_t spawnattr;
+    posix_spawnattr_init(&spawnattr);
+    short spawnFlags = 0;
+    posix_spawnattr_getflags(&spawnattr, &spawnFlags);
+    spawnFlags |= POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK;
+    posix_spawnattr_setflags(&spawnattr, spawnFlags);
+    posix_spawnattr_setpgroup(&spawnattr, 0); // 0 = new pgrp, pgid == child pid
+    sigset_t emptyMask;
+    sigemptyset(&emptyMask);
+    posix_spawnattr_setsigmask(&spawnattr, &emptyMask);
+
     pid_t pid = 0;
-    int rc = posix_spawn(&pid, path, &fa, nullptr,
+    int rc = posix_spawn(&pid, path, &fa, &spawnattr,
                          const_cast<char* const*>(argv.data()), envp);
+    posix_spawnattr_destroy(&spawnattr);
     posix_spawn_file_actions_destroy(&fa);
 
     // Parent closes write ends so the child holds the only remaining writers
@@ -226,7 +276,11 @@ Result Run(const Options &opts)
     if(!finished)
     {
         res.timed_out = true;
-        kill(pid, SIGTERM); // give the child a chance to clean up
+        // Signal the whole process group, not just the immediate child:
+        // `/bin/sh -c "cmd"` may fork descendants that keep the pipe write
+        // end open. The child is its own pgrp leader (see posix_spawnattr
+        // above) so pid doubles as the pgid.
+        killpg(pid, SIGTERM);
         long long grace = NowMillis() + 3000;
         if(!DrainPipes(outPipe[0], errPipe[0],
                        wantOut ? &outBuf : nullptr,
@@ -234,12 +288,17 @@ Result Run(const Options &opts)
                        opts.maxOutputBytes,
                        grace))
         {
-            kill(pid, SIGKILL);
+            killpg(pid, SIGKILL);
+            // Bounded drain — SIGKILL'd processes die promptly, so give them
+            // a brief window to flush, then move on. The previous infinite
+            // timeout here hung indefinitely whenever signal delivery was
+            // suppressed (e.g. a sandbox profile that denies `signal`).
+            long long finalDrainEnd = NowMillis() + 500;
             DrainPipes(outPipe[0], errPipe[0],
                        wantOut ? &outBuf : nullptr,
                        wantErr ? &errBuf : nullptr,
                        opts.maxOutputBytes,
-                       -1);
+                       finalDrainEnd);
         }
     }
 
@@ -249,12 +308,28 @@ Result Run(const Options &opts)
     CloseIfOpen(errPipe[0]);
 
     int status = 0;
-    waitpid(pid, &status, 0);
-    if(WIFEXITED(status))
+    bool reaped;
+    if(res.timed_out)
+    {
+        // After SIGKILL the child should be reapable within milliseconds.
+        // Cap the wait so Run() returns in bounded time even if the kill
+        // never landed (sandbox denial, etc.) — the alternative is to hang
+        // here forever on a blocking waitpid.
+        long long waitDeadline = NowMillis() + 2000;
+        reaped = WaitForExit(pid, &status, waitDeadline);
+    }
+    else
+    {
+        pid_t r;
+        do { r = waitpid(pid, &status, 0); } while(r < 0 && errno == EINTR);
+        reaped = (r == pid);
+    }
+
+    if(reaped && WIFEXITED(status))
     {
         res.exit_code = WEXITSTATUS(status);
     }
-    else if(WIFSIGNALED(status))
+    else if(reaped && WIFSIGNALED(status))
     {
         res.exit_code = -1;
         res.term_signal = WTERMSIG(status);
