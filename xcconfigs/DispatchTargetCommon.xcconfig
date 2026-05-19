@@ -3,3 +3,6 @@ INFOPLIST_FILE = $(SRCROOT)/common/Info.plist
 INFOPLIST_PREPROCESS = YES
 PRODUCT_BUNDLE_IDENTIFIER = com.abracode.dispatch
 PRODUCT_NAME = $(TARGET_NAME)
+
+// dispatch is now pure C++; CoreFoundation no longer auto-links via Foundation.
+OTHER_LDFLAGS = $(inherited) -framework CoreFoundation

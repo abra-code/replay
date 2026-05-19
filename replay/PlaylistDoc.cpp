@@ -1,6 +1,9 @@
 #include "PlaylistDoc.h"
 #include "yyjson.hpp"
 #include "CFType.h"
+#include "CFArr.h"
+#include "CFDict.h"
+#include "CFStr.h"
 #include <filesystem>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -58,15 +61,16 @@ bool PlaylistDoc::valid() const noexcept
 // Step-array helpers (file-scope, not exposed in header)
 // ---------------------------------------------------------------------------
 
-static std::vector<ActionStep> cf_steps_from_array(CFArrayRef arr)
+static std::vector<ActionStep> cf_steps_from_array(CFArrayRef arrRef)
 {
-    CFIndex count = CFArrayGetCount(arr);
+    CFArr arr(arrRef);
+    CFIndex count = arr.GetCount();
     std::vector<ActionStep> steps;
     steps.reserve((size_t)count);
     for (CFIndex i = 0; i < count; i++)
     {
-        CFDictionaryRef dict = CFType<CFDictionaryRef>::DynamicCast(CFArrayGetValueAtIndex(arr, i));
-        if (dict != nullptr)
+        CFDictionaryRef dict = nullptr;
+        if (arr.GetValueAtIndex(i, dict))
             steps.emplace_back(dict);
     }
     return steps;
@@ -114,13 +118,13 @@ std::vector<ActionStep> PlaylistDoc::steps_for_key(const std::string& key) const
 {
     if (cfRoot != nullptr)
     {
-        CFDictionaryRef dict = CFType<CFDictionaryRef>::DynamicCast(cfRoot.Get());
-        if (dict == nullptr)
+        CFDictionaryRef dictRef = CFType<CFDictionaryRef>::DynamicCast(cfRoot.Get());
+        if (dictRef == nullptr)
             return {};
-        CFObj<CFStringRef> cfKey(CFStringCreateWithBytes(kCFAllocatorDefault,
-            (const UInt8*)key.data(), (CFIndex)key.size(), kCFStringEncodingUTF8, false));
-        CFArrayRef arr = CFType<CFArrayRef>::DynamicCast(CFDictionaryGetValue(dict, cfKey));
-        if (arr == nullptr)
+        CFDict dict(dictRef);
+        CFStr cfKey(key);
+        CFArrayRef arr = nullptr;
+        if (!dict.GetValue(cfKey, arr))
             return {};
         return cf_steps_from_array(arr);
     }

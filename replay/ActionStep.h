@@ -1,6 +1,7 @@
 #pragma once
 #include <CoreFoundation/CoreFoundation.h>
 #include "CFObj.h"
+#include "CFDict.h"
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -48,7 +49,7 @@ public:
     bool empty() const noexcept { return _dict == nullptr && _yyjson_val == nullptr; }
 
 private:
-    CFObj<CFDictionaryRef> _dict;
+    CFDict _dict;
     yyjson_val* _yyjson_val = nullptr;
     std::shared_ptr<Json::Document> _doc; // non-null only for yyjson-backed instances
 };

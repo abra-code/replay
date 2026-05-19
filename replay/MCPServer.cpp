@@ -17,6 +17,8 @@
 #include "GlobOverlap.h"
 #include "ABase64.h"
 #include "yyjson.hpp"
+#include "CFStr.h"
+#include "CFDict.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -664,13 +666,10 @@ static void dispatch_mcp_tool(const std::string &tool,
         else if (auto tv2 = args.obj_get("timeout").get_uint(); tv2)
             timeout_sec = (int)std::min((uint64_t)kMaxCommandTimeout, *tv2);
 
-        CFObj<CFStringRef> workingDirStr(CFStringCreateWithCString(nullptr, working_dir.c_str(), kCFStringEncodingUTF8));
-        CFObj<CFNumberRef> timeoutNum(CFNumberCreate(nullptr, kCFNumberIntType, &timeout_sec));
-        const void *execKeys[2]   = { CFSTR("workingDirectory"), CFSTR("timeout") };
-        const void *execValues[2] = { (CFStringRef)workingDirStr, (CFNumberRef)timeoutNum };
-        CFObj<CFDictionaryRef> execSettings(CFDictionaryCreate(nullptr, execKeys, execValues, 2,
-            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
-        ac->settings = ActionStep(execSettings.Get());
+        CFMutableDict execSettings;
+        execSettings.SetValue(CFSTR("workingDirectory"), CFStr(working_dir));
+        execSettings.SetValue(CFSTR("timeout"), (int64_t)timeout_sec);
+        ac->settings = ActionStep((CFDictionaryRef)execSettings);
         ExcecuteTool("/bin/sh", {"-c", command}, context, ac);
     }
     else if (tool == "search_files")

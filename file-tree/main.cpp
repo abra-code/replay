@@ -11,6 +11,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include "../common/include/CFObj.h"
 #include "../common/include/CFType.h"
+#include "../common/include/CFArr.h"
 #include "FileTree.h"
 #include "../common/include/ReplaySignpost.h"
 
@@ -97,15 +98,17 @@ LoadPathsFromPlist(const char *filePath)
 
 	if (plist != nullptr)
 	{
-		CFArrayRef array = CFType<CFArrayRef>::DynamicCast(plist.Get());
-		if (array != nullptr)
+		CFArrayRef arrayRef = CFType<CFArrayRef>::DynamicCast(plist.Get());
+		if (arrayRef != nullptr)
 		{
-			CFIndex count = CFArrayGetCount(array);
+			CFArr array(arrayRef);
+			CFIndex count = array.GetCount();
 			char buf[4096];
 			for (CFIndex i = 0; i < count; i++)
 			{
-				CFStringRef str = (CFStringRef)CFArrayGetValueAtIndex(array, i);
-				if (CFStringGetFileSystemRepresentation(str, buf, (CFIndex)sizeof(buf)))
+				CFStringRef str = nullptr;
+				if (array.GetValueAtIndex(i, str)
+					&& CFStringGetFileSystemRepresentation(str, buf, (CFIndex)sizeof(buf)))
 				{
 					paths.push_back(buf);
 				}

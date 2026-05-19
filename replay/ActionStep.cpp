@@ -1,44 +1,19 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include "CFObj.h"
 #include "CFType.h"
+#include "CFStr.h"
+#include "CFArr.h"
+#include "CFDict.h"
 #include "yyjson.hpp"
 #include "ActionStep.h"
-
-// ---------------------------------------------------------------------------
-// CF helpers
-// ---------------------------------------------------------------------------
-
-static inline CFStringRef cf_key(std::string_view sv)
-{
-    return CFStringCreateWithBytes(kCFAllocatorDefault,
-        (const UInt8*)sv.data(), (CFIndex)sv.size(),
-        kCFStringEncodingUTF8, false);
-}
-
-static std::optional<std::string> cf_string_to_std(CFTypeRef val)
-{
-    CFStringRef str = CFType<CFStringRef>::DynamicCast(val);
-    if (str == nullptr)
-        return std::nullopt;
-    if (const char* ptr = CFStringGetCStringPtr(str, kCFStringEncodingUTF8))
-        return std::string(ptr);
-    CFIndex maxSize = CFStringGetMaximumSizeForEncoding(
-        CFStringGetLength(str), kCFStringEncodingUTF8) + 1;
-    std::string result(maxSize, '\0');
-    if (CFStringGetCString(str, result.data(), maxSize, kCFStringEncodingUTF8)) {
-        result.resize(strlen(result.c_str()));
-        return result;
-    }
-    return std::nullopt;
-}
 
 // ---------------------------------------------------------------------------
 // Special member definitions (Json::Document is complete here via yyjson.hpp)
 // ---------------------------------------------------------------------------
 
 ActionStep::ActionStep(CFDictionaryRef dict) noexcept
+    : _dict(dict, kCFObjRetain)
 {
-    _dict.Adopt(dict, kCFObjRetain);
 }
 
 ActionStep::ActionStep(yyjson_val* val, std::shared_ptr<Json::Document> doc) noexcept
@@ -101,9 +76,10 @@ std::optional<std::string> ActionStep::string_value(std::string_view key) const
 
     if (_dict == nullptr)
         return std::nullopt;
-    CFObj<CFStringRef> k(cf_key(key));
-    CFTypeRef val = CFDictionaryGetValue(_dict, k);
-    return cf_string_to_std(val);
+    CFStringRef str = nullptr;
+    if (!_dict.GetValue(CFStr(key), str))
+        return std::nullopt;
+    return CFStr::ToString(str);
 }
 
 std::optional<std::vector<std::string>> ActionStep::string_array(std::string_view key) const
@@ -127,17 +103,17 @@ std::optional<std::vector<std::string>> ActionStep::string_array(std::string_vie
 
     if (_dict == nullptr)
         return std::nullopt;
-    CFObj<CFStringRef> k(cf_key(key));
-    CFArrayRef arr = CFType<CFArrayRef>::DynamicCast(CFDictionaryGetValue(_dict, k));
-    if (arr == nullptr)
+    CFArrayRef arrRef = nullptr;
+    if (!_dict.GetValue(CFStr(key), arrRef))
         return std::nullopt;
-    CFIndex count = CFArrayGetCount(arr);
+    CFArr arr(arrRef);
+    CFIndex count = arr.GetCount();
     std::vector<std::string> result;
     result.reserve(count);
     for (CFIndex i = 0; i < count; i++) {
-        auto s = cf_string_to_std(CFArrayGetValueAtIndex(arr, i));
-        if (s.has_value())
-            result.emplace_back(std::move(*s));
+        CFStringRef s = nullptr;
+        if (arr.GetValueAtIndex(i, s))
+            result.emplace_back(CFStr::ToString(s));
     }
     return result;
 }
@@ -164,19 +140,13 @@ bool ActionStep::bool_value(std::string_view key, bool fallback) const
 
     if (_dict == nullptr)
         return fallback;
-    CFObj<CFStringRef> k(cf_key(key));
-    CFTypeRef val = CFDictionaryGetValue(_dict, k);
-    if (val == nullptr)
-        return fallback;
-    CFBooleanRef b = CFType<CFBooleanRef>::DynamicCast(val);
-    if (b != nullptr)
-        return CFBooleanGetValue(b);
-    CFNumberRef num = CFType<CFNumberRef>::DynamicCast(val);
-    if (num != nullptr) {
-        int n = 0;
-        CFNumberGetValue(num, kCFNumberIntType, &n);
+    bool b = fallback;
+    if (_dict.GetValue(CFStr(key), b))
+        return b;
+    // Fall back to numeric → bool conversion
+    int64_t n = 0;
+    if (_dict.GetValue(CFStr(key), n))
         return n != 0;
-    }
     return fallback;
 }
 
@@ -201,12 +171,8 @@ int64_t ActionStep::int_value(std::string_view key, int64_t fallback) const
 
     if (_dict == nullptr)
         return fallback;
-    CFObj<CFStringRef> k(cf_key(key));
-    CFNumberRef num = CFType<CFNumberRef>::DynamicCast(CFDictionaryGetValue(_dict, k));
-    if (num == nullptr)
-        return fallback;
     int64_t n = fallback;
-    CFNumberGetValue(num, kCFNumberSInt64Type, &n);
+    _dict.GetValue(CFStr(key), n);
     return n;
 }
 
@@ -230,16 +196,16 @@ std::optional<std::vector<ActionStep>> ActionStep::step_array(std::string_view k
 
     if (_dict == nullptr)
         return std::nullopt;
-    CFObj<CFStringRef> k(cf_key(key));
-    CFArrayRef arr = CFType<CFArrayRef>::DynamicCast(CFDictionaryGetValue(_dict, k));
-    if (arr == nullptr)
+    CFArrayRef arrRef = nullptr;
+    if (!_dict.GetValue(CFStr(key), arrRef))
         return std::nullopt;
-    CFIndex count = CFArrayGetCount(arr);
+    CFArr arr(arrRef);
+    CFIndex count = arr.GetCount();
     std::vector<ActionStep> result;
     result.reserve(count);
     for (CFIndex i = 0; i < count; i++) {
-        CFDictionaryRef dict = CFType<CFDictionaryRef>::DynamicCast(CFArrayGetValueAtIndex(arr, i));
-        if (dict != nullptr)
+        CFDictionaryRef dict = nullptr;
+        if (arr.GetValueAtIndex(i, dict))
             result.emplace_back(dict);
     }
     return result;
@@ -257,9 +223,8 @@ std::optional<ActionStep> ActionStep::step_value(std::string_view key) const
 
     if (_dict == nullptr)
         return std::nullopt;
-    CFObj<CFStringRef> k(cf_key(key));
-    CFDictionaryRef dict = CFType<CFDictionaryRef>::DynamicCast(CFDictionaryGetValue(_dict, k));
-    if (dict == nullptr)
+    CFDictionaryRef dict = nullptr;
+    if (!_dict.GetValue(CFStr(key), dict))
         return std::nullopt;
     return ActionStep(dict);
 }

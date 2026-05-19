@@ -5,23 +5,25 @@
 //  Copyright © 2020 Tomasz Kukielka. All rights reserved.
 //
 
-#import "replay_server.h"
+#include "replay_server.h"
 #include "ReplayServer.h"
 #include "ConcurrentDispatchWithNoDependency.h"
 #include "SerialDispatch.h"
 #include "ActionStream.h"
 #include "CFObj.h"
 #include "CFType.h"
+#include "CFStr.h"
+#include "CFDict.h"
 
 CFMessagePortRef
 CreateCallbackPort(const std::string &batchName)
 {
-	CFObj<CFStringRef> batchStr(CFStringCreateWithCString(kCFAllocatorDefault, batchName.c_str(), kCFStringEncodingUTF8));
-	CFObj<CFStringRef> portName(CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kDispatchListenerPortFormat, CFSTR(REPLAY_GROUP_ID), (CFStringRef)batchStr));
-	if(portName == NULL)
+	CFStr batchStr(batchName);
+	CFStr portName = CFStr::Format(kDispatchListenerPortFormat, CFSTR(REPLAY_GROUP_ID), (CFStringRef)batchStr);
+	if (portName == nullptr)
 	{
 		LogError("error: could not create port name %s\n", batchName.c_str());
-		return NULL;
+		return nullptr;
 	}
 	return CFMessagePortCreateRemote(kCFAllocatorDefault, portName);
 }
@@ -29,24 +31,21 @@ CreateCallbackPort(const std::string &batchName)
 void
 SendCallbackMessage(ReplayContext *context, SInt32 messageID)
 {
-	if(context->callbackPort == NULL)
+	if (context->callbackPort == nullptr)
 		return;
 
-	if(messageID != kCallbackMessageHeartbeat && messageID != kCallbackMessageExiting)
+	if ((messageID != kCallbackMessageHeartbeat) && (messageID != kCallbackMessageExiting))
 		return;
 
-	CFObj<CFMutableDictionaryRef> callbackInfo(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+	CFMutableDict callbackInfo;
 
-	if(context->lastError.hasError())
-	{
-		CFObj<CFStringRef> errStr(CFStringCreateWithCString(kCFAllocatorDefault, context->lastError.description().c_str(), kCFStringEncodingUTF8));
-		CFDictionarySetValue(callbackInfo, CFSTR("lastError"), errStr);
-	}
+	if (context->lastError.hasError())
+		callbackInfo.SetValue(CFSTR("lastError"), CFStr(context->lastError.description()));
 
-	CFObj<CFDataRef> plistData(CFPropertyListCreateData(kCFAllocatorDefault, callbackInfo, kCFPropertyListBinaryFormat_v1_0, 0, NULL));
-	if(plistData != NULL)
+	CFObj<CFDataRef> plistData(CFPropertyListCreateData(kCFAllocatorDefault, callbackInfo, kCFPropertyListBinaryFormat_v1_0, 0, nullptr));
+	if (plistData != nullptr)
 	{
-		/*int result =*/ CFMessagePortSendRequest(context->callbackPort, messageID, plistData, 5/*send timeout*/, 0/*rcv timeout*/, NULL, NULL);
+		/*int result =*/ CFMessagePortSendRequest(context->callbackPort, messageID, plistData, 5/*send timeout*/, 0/*rcv timeout*/, nullptr, nullptr);
 	}
 }
 
@@ -163,17 +162,13 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 	}
 
 	pid_t myPid = getpid();
-	CFObj<CFMutableDictionaryRef> replayReply(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
-	CFObj<CFNumberRef> pidNum(CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &myPid));
-	CFDictionarySetValue(replayReply, CFSTR("pid"), pidNum);
+	CFMutableDict replayReply;
+	replayReply.SetValue(CFSTR("pid"), (int64_t)myPid);
 
-	if(context->lastError.hasError())
-	{
-		CFObj<CFStringRef> errStr(CFStringCreateWithCString(kCFAllocatorDefault, context->lastError.description().c_str(), kCFStringEncodingUTF8));
-		CFDictionarySetValue(replayReply, CFSTR("lastError"), errStr);
-	}
+	if (context->lastError.hasError())
+		replayReply.SetValue(CFSTR("lastError"), CFStr(context->lastError.description()));
 
-	return CFPropertyListCreateData(kCFAllocatorDefault, replayReply, kCFPropertyListBinaryFormat_v1_0, 0, NULL);
+	return CFPropertyListCreateData(kCFAllocatorDefault, replayReply, kCFPropertyListBinaryFormat_v1_0, 0, nullptr);
 }
 
 
@@ -182,9 +177,9 @@ StartServerAndRunLoop(ReplayContext *context)
 {
 	CFObj<CFMessagePortRef> localPort;
 	assert(!context->batchName.empty());
-	CFObj<CFStringRef> batchStr(CFStringCreateWithCString(kCFAllocatorDefault, context->batchName.c_str(), kCFStringEncodingUTF8));
-	CFObj<CFStringRef> portName(CFStringCreateWithFormat(kCFAllocatorDefault, NULL, kReplayServerPortFormat, CFSTR(REPLAY_GROUP_ID), (CFStringRef)batchStr));
-	if(portName == NULL)
+	CFStr batchStr(context->batchName);
+	CFStr portName = CFStr::Format(kReplayServerPortFormat, CFSTR(REPLAY_GROUP_ID), (CFStringRef)batchStr);
+	if (portName == nullptr)
 	{
 		LogError("error: could not create port name %s\n", context->batchName.c_str());
 		safe_exit(EXIT_FAILURE);

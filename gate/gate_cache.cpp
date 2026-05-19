@@ -19,79 +19,55 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include "json_serialization.h"
 #include "CFObj.h"
+#include "CFStr.h"
+#include "CFArr.h"
+#include "CFDict.h"
 #include "FileHelpers.h"
 
 #include "blake3.h"
 
 extern bool g_verbose;
 
-// Helper to create CFString from std::string
-static CFStringRef create_cfstring(const std::string& s)
+// Build a CFMutableArr of CFStrings from a vector
+static CFMutableArr cfarray_from_vector(const std::vector<std::string>& vec)
 {
-    return CFStringCreateWithBytes(kCFAllocatorDefault,
-                                  (const UInt8*)s.data(), s.size(),
-                                  kCFStringEncodingUTF8, false);
-}
-
-// Helper to extract std::string from CFString
-static std::string cfstring_to_string(CFStringRef cf)
-{
-    if (cf == nullptr)
-        return {};
-    const char* ptr = CFStringGetCStringPtr(cf, kCFStringEncodingUTF8);
-    if (ptr != nullptr)
-        return std::string(ptr);
-
-    CFIndex len = CFStringGetLength(cf);
-    CFIndex bufSize = 0;
-    CFStringGetBytes(cf, CFRangeMake(0, len), kCFStringEncodingUTF8, 0, false, nullptr, 0, &bufSize);
-    std::string result(bufSize, '\0');
-    CFStringGetBytes(cf, CFRangeMake(0, len), kCFStringEncodingUTF8, 0, false,
-                     (UInt8*)result.data(), bufSize, nullptr);
-    return result;
-}
-
-// Helper to extract uint64 from hex CFString
-static uint64_t cfstring_to_hex64(CFStringRef cf)
-{
-    std::string s = cfstring_to_string(cf);
-    return strtoull(s.c_str(), nullptr, 16);
-}
-
-// Helper to create hex CFString from uint64
-static CFStringRef hex64_to_cfstring(uint64_t val)
-{
-    char buf[17];
-    snprintf(buf, sizeof(buf), "%016llx", (unsigned long long)val);
-    return CFStringCreateWithCString(kCFAllocatorDefault, buf, kCFStringEncodingUTF8);
-}
-
-// Helper to create CFArray of CFStrings from vector
-static CFArrayRef create_cfarray(const std::vector<std::string>& vec)
-{
-    CFMutableArrayRef arr = CFArrayCreateMutable(kCFAllocatorDefault, vec.size(), &kCFTypeArrayCallBacks);
+    CFMutableArr arr((CFIndex)vec.size());
     for (const auto& s : vec)
-    {
-        CFObj<CFStringRef> cf(create_cfstring(s));
-        CFArrayAppendValue(arr, (CFStringRef)cf);
-    }
+        arr.AppendValue(CFStr(s));
     return arr;
 }
 
-// Helper to extract vector of strings from CFArray
-static std::vector<std::string> cfarray_to_vector(CFArrayRef arr)
+// Extract vector of strings from a CFArrayRef (borrowed)
+static std::vector<std::string> cfarray_to_vector(CFArrayRef arrRef)
 {
     std::vector<std::string> result;
-    if (arr == nullptr)
+    if (arrRef == nullptr)
         return result;
-    CFIndex count = CFArrayGetCount(arr);
+    CFArr arr(arrRef);
+    CFIndex count = arr.GetCount();
     result.reserve(count);
     for (CFIndex i = 0; i < count; ++i)
     {
-        CFStringRef s = (CFStringRef)CFArrayGetValueAtIndex(arr, i);
-        result.push_back(cfstring_to_string(s));
+        CFStringRef s = nullptr;
+        if (arr.GetValueAtIndex(i, s))
+            result.push_back(CFStr::ToString(s));
     }
     return result;
+}
+
+// Extract uint64 from hex CFString
+static uint64_t cfstring_to_hex64(CFStringRef cf)
+{
+    std::string s = CFStr::ToString(cf);
+    return strtoull(s.c_str(), nullptr, 16);
+}
+
+// Build a CFStr containing a 16-char hex representation of a uint64
+static CFStr hex64_to_cfstr(uint64_t val)
+{
+    char buf[17];
+    snprintf(buf, sizeof(buf), "%016llx", (unsigned long long)val);
+    return CFStr(std::string_view(buf));
 }
 
 
@@ -167,7 +143,7 @@ std::string compute_task_signature(const std::vector<std::string>& inputs,
         blake3_hasher_update(&hasher, xcode_var, strlen(xcode_var));
         std::cerr << "\tCONFIGURATION=" << xcode_var << '\n';
     }
-    
+
     xcode_var = getenv("EFFECTIVE_PLATFORM_NAME");
     if (xcode_var != nullptr)
     {
@@ -183,7 +159,7 @@ std::string compute_task_signature(const std::vector<std::string>& inputs,
         blake3_hasher_update(&hasher, xcode_var, strlen(xcode_var));
         std::cerr << "\tARCHS=" << xcode_var << '\n';
     }
-   
+
     uint64_t key = 0;
     blake3_hasher_finalize(&hasher, (uint8_t*)&key, sizeof(key));
 
@@ -225,9 +201,7 @@ static int serialize_cache(CFDictionaryRef dict, const std::string& path, CacheF
         {
             CFObj<CFErrorRef> err_guard(error);
             CFObj<CFStringRef> desc(CFErrorCopyDescription(error));
-            char buf[256];
-            if (CFStringGetCString(desc, buf, sizeof(buf), kCFStringEncodingUTF8))
-                std::cerr << ": " << buf;
+            std::cerr << ": " << CFStr::ToString(desc);
         }
         std::cerr << '\n';
         return 1;
@@ -299,32 +273,45 @@ bool cache_lookup(const std::string& cache_dir,
 
     flock(fd, LOCK_SH);
 
-    CFMutableDictionaryRef dict = deserialize_cache(path, format);
+    CFMutableDict dict(deserialize_cache(path, format), kCFObjDontRetain);
     flock(fd, LOCK_UN);
     close(fd);
 
     if (dict == nullptr)
         return false;
-    CFObj<CFMutableDictionaryRef> dict_guard(dict);
 
     // Extract fields directly from the flat dictionary
-    CFObj<CFStringRef> k_command(create_cfstring("command"));
-    CFObj<CFStringRef> k_inputs(create_cfstring("inputs"));
-    CFObj<CFStringRef> k_outputs(create_cfstring("outputs"));
-    CFObj<CFStringRef> k_exclude_inputs(create_cfstring("exclude_inputs"));
-    CFObj<CFStringRef> k_input_fingerprint(create_cfstring("input_fingerprint"));
-    CFObj<CFStringRef> k_output_fingerprint(create_cfstring("output_fingerprint"));
-    CFObj<CFStringRef> k_hash_algo(create_cfstring("hash_algorithm"));
-    CFObj<CFStringRef> k_timestamp(create_cfstring("timestamp"));
+    CFStringRef command_str = nullptr;
+    if (dict.GetValue(CFSTR("command"), command_str))
+        out_entry.command = CFStr::ToString(command_str);
 
-    out_entry.command = cfstring_to_string((CFStringRef)CFDictionaryGetValue(dict, k_command.Get()));
-    out_entry.inputs = cfarray_to_vector((CFArrayRef)CFDictionaryGetValue(dict, k_inputs.Get()));
-    out_entry.outputs = cfarray_to_vector((CFArrayRef)CFDictionaryGetValue(dict, k_outputs.Get()));
-    out_entry.exclude_inputs = cfarray_to_vector((CFArrayRef)CFDictionaryGetValue(dict, k_exclude_inputs.Get()));
-    out_entry.input_fingerprint = cfstring_to_hex64((CFStringRef)CFDictionaryGetValue(dict, k_input_fingerprint.Get()));
-    out_entry.output_fingerprint = cfstring_to_hex64((CFStringRef)CFDictionaryGetValue(dict, k_output_fingerprint.Get()));
-    out_entry.hash_algorithm = cfstring_to_string((CFStringRef)CFDictionaryGetValue(dict, k_hash_algo.Get()));
-    out_entry.timestamp = cfstring_to_string((CFStringRef)CFDictionaryGetValue(dict, k_timestamp.Get()));
+    CFArrayRef inputs_arr = nullptr;
+    if (dict.GetValue(CFSTR("inputs"), inputs_arr))
+        out_entry.inputs = cfarray_to_vector(inputs_arr);
+
+    CFArrayRef outputs_arr = nullptr;
+    if (dict.GetValue(CFSTR("outputs"), outputs_arr))
+        out_entry.outputs = cfarray_to_vector(outputs_arr);
+
+    CFArrayRef excludes_arr = nullptr;
+    if (dict.GetValue(CFSTR("exclude_inputs"), excludes_arr))
+        out_entry.exclude_inputs = cfarray_to_vector(excludes_arr);
+
+    CFStringRef input_fp = nullptr;
+    if (dict.GetValue(CFSTR("input_fingerprint"), input_fp))
+        out_entry.input_fingerprint = cfstring_to_hex64(input_fp);
+
+    CFStringRef output_fp = nullptr;
+    if (dict.GetValue(CFSTR("output_fingerprint"), output_fp))
+        out_entry.output_fingerprint = cfstring_to_hex64(output_fp);
+
+    CFStringRef hash_algo = nullptr;
+    if (dict.GetValue(CFSTR("hash_algorithm"), hash_algo))
+        out_entry.hash_algorithm = CFStr::ToString(hash_algo);
+
+    CFStringRef timestamp = nullptr;
+    if (dict.GetValue(CFSTR("timestamp"), timestamp))
+        out_entry.timestamp = CFStr::ToString(timestamp);
 
     return true;
 }
@@ -350,48 +337,16 @@ bool cache_store(const std::string& cache_dir,
     flock(fd, LOCK_EX);
 
     // Build the flat entry dictionary
-    CFMutableDictionaryRef dict = CFDictionaryCreateMutable(
-        kCFAllocatorDefault, 8,
-        &kCFTypeDictionaryKeyCallBacks,
-        &kCFTypeDictionaryValueCallBacks);
-    CFObj<CFMutableDictionaryRef> dict_guard(dict);
-
-    int version_val = 1;
-    CFObj<CFNumberRef> version(CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &version_val));
-    CFObj<CFStringRef> k_version(create_cfstring("version"));
-    CFDictionarySetValue(dict, k_version.Get(), version.Get());
-
-    CFObj<CFStringRef> k_command(create_cfstring("command"));
-    CFObj<CFStringRef> v_command(create_cfstring(entry.command));
-    CFDictionarySetValue(dict, k_command.Get(), v_command.Get());
-
-    CFObj<CFStringRef> k_inputs(create_cfstring("inputs"));
-    CFObj<CFArrayRef> v_inputs(create_cfarray(entry.inputs));
-    CFDictionarySetValue(dict, k_inputs.Get(), v_inputs.Get());
-
-    CFObj<CFStringRef> k_outputs(create_cfstring("outputs"));
-    CFObj<CFArrayRef> v_outputs(create_cfarray(entry.outputs));
-    CFDictionarySetValue(dict, k_outputs.Get(), v_outputs.Get());
-
-    CFObj<CFStringRef> k_exclude_inputs(create_cfstring("exclude_inputs"));
-    CFObj<CFArrayRef> v_exclude_inputs(create_cfarray(entry.exclude_inputs));
-    CFDictionarySetValue(dict, k_exclude_inputs.Get(), v_exclude_inputs.Get());
-
-    CFObj<CFStringRef> k_input_fingerprint(create_cfstring("input_fingerprint"));
-    CFObj<CFStringRef> v_input_fingerprint(hex64_to_cfstring(entry.input_fingerprint));
-    CFDictionarySetValue(dict, k_input_fingerprint.Get(), v_input_fingerprint.Get());
-
-    CFObj<CFStringRef> k_output_fingerprint(create_cfstring("output_fingerprint"));
-    CFObj<CFStringRef> v_output_fingerprint(hex64_to_cfstring(entry.output_fingerprint));
-    CFDictionarySetValue(dict, k_output_fingerprint.Get(), v_output_fingerprint.Get());
-
-    CFObj<CFStringRef> k_hash_algo(create_cfstring("hash_algorithm"));
-    CFObj<CFStringRef> v_hash_algo(create_cfstring(entry.hash_algorithm));
-    CFDictionarySetValue(dict, k_hash_algo.Get(), v_hash_algo.Get());
-
-    CFObj<CFStringRef> k_timestamp(create_cfstring("timestamp"));
-    CFObj<CFStringRef> v_timestamp(create_cfstring(entry.timestamp));
-    CFDictionarySetValue(dict, k_timestamp.Get(), v_timestamp.Get());
+    CFMutableDict dict;
+    dict.SetValue(CFSTR("version"), (int64_t)1);
+    dict.SetValue(CFSTR("command"), CFStr(entry.command));
+    dict.SetValue(CFSTR("inputs"), cfarray_from_vector(entry.inputs));
+    dict.SetValue(CFSTR("outputs"), cfarray_from_vector(entry.outputs));
+    dict.SetValue(CFSTR("exclude_inputs"), cfarray_from_vector(entry.exclude_inputs));
+    dict.SetValue(CFSTR("input_fingerprint"), hex64_to_cfstr(entry.input_fingerprint));
+    dict.SetValue(CFSTR("output_fingerprint"), hex64_to_cfstr(entry.output_fingerprint));
+    dict.SetValue(CFSTR("hash_algorithm"), CFStr(entry.hash_algorithm));
+    dict.SetValue(CFSTR("timestamp"), CFStr(entry.timestamp));
 
     // Atomic write: serialize to temp file, then rename
     std::string tmp_path = path + ".tmp";

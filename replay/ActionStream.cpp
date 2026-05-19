@@ -12,6 +12,9 @@
 #include "SerialDispatch.h"
 #include "ActionFromName.h"
 #include "CFObj.h"
+#include "CFStr.h"
+#include "CFArr.h"
+#include "CFDict.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <cstring>
 #include <string_view>
@@ -21,7 +24,7 @@
 void
 StartReceivingActions(ReplayContext *context)
 {
-	if(context->concurrent)
+	if (context->concurrent)
 	{
 		context->actionCounter = -1;
 		context->analyzeDependencies = false; // building dependency graph is not supported when tasks are streamed
@@ -38,7 +41,7 @@ StartReceivingActions(ReplayContext *context)
 void
 FinishReceivingActionsAndWait(ReplayContext *context)
 {
-	if(context->concurrent)
+	if (context->concurrent)
 		FinishConcurrentDispatchWithNoDependencyAndWait(context);
 	else
 		FinishSerialDispatchAndWait(context);
@@ -50,13 +53,6 @@ FinishReceivingActionsAndWait(ReplayContext *context)
 // Line-parsing helpers
 // ---------------------------------------------------------------------------
 
-static inline CFObj<CFStringRef>
-MakeCFStr(std::string_view sv)
-{
-	return CFObj<CFStringRef>(CFStringCreateWithBytes(kCFAllocatorDefault,
-		(const UInt8*)sv.data(), (CFIndex)sv.size(), kCFStringEncodingUTF8, false));
-}
-
 // Split str by sep into a vector of string_view substrings.
 // Each element references memory inside str — no copies.
 static std::vector<std::string_view>
@@ -64,9 +60,9 @@ SplitSV(std::string_view str, char sep)
 {
 	std::vector<std::string_view> result;
 	size_t start = 0;
-	for(size_t i = 0; i <= str.size(); i++)
+	for (size_t i = 0; i <= str.size(); i++)
 	{
-		if(i == str.size() || str[i] == (unsigned char)sep)
+		if ((i == str.size()) || (str[i] == (unsigned char)sep))
 		{
 			result.push_back(str.substr(start, i - start));
 			start = i + 1;
@@ -75,48 +71,45 @@ SplitSV(std::string_view str, char sep)
 	return result;
 }
 
-// Build a CFMutableArrayRef of CFStringRef values from a span of string_views.
-static CFObj<CFMutableArrayRef>
+// Build a CFMutableArr of CFStringRef values from a span of string_views.
+static CFMutableArr
 CFArrayFromSVs(const std::vector<std::string_view>& items, size_t startIdx = 0)
 {
 	CFIndex count = (CFIndex)(items.size() > startIdx ? items.size() - startIdx : 0);
-	CFObj<CFMutableArrayRef> arr(CFArrayCreateMutable(kCFAllocatorDefault, count, &kCFTypeArrayCallBacks));
-	for(size_t i = startIdx; i < items.size(); i++)
-	{
-		CFObj<CFStringRef> s = MakeCFStr(items[i]);
-		CFArrayAppendValue(arr, s);
-	}
+	CFMutableArr arr(count);
+	for (size_t i = startIdx; i < items.size(); i++)
+		arr.AppendValue(CFStr(items[i]));
 	return arr;
 }
 
 // Parse key=value option tokens (starting at index 1) into the dict.
 // Boolean true/false (case-insensitive), integers, and string values are supported.
 static void
-AddOptionsToActionDescription(CFMutableDictionaryRef dict, const std::vector<std::string_view>& aoTokens)
+AddOptionsToActionDescription(CFMutableDict& dict, const std::vector<std::string_view>& aoTokens)
 {
-	for(size_t i = 1; i < aoTokens.size(); i++)
+	for (size_t i = 1; i < aoTokens.size(); i++)
 	{
 		std::string_view opt = aoTokens[i];
 		auto eq = opt.find('=');
-		if(eq == std::string_view::npos)
+		if (eq == std::string_view::npos)
 			continue;
 
 		std::string_view key = opt.substr(0, eq);
 		std::string_view val = opt.substr(eq + 1);
-		if(key.empty())
+		if (key.empty())
 			continue;
 
-		CFObj<CFStringRef> cfKey = MakeCFStr(key);
-		if(cfKey == NULL)
+		CFStr cfKey(key);
+		if (cfKey == nullptr)
 			continue;
 
-		if(strncasecmp(val.data(), "true", val.size()) == 0 && val.size() == 4)
+		if ((strncasecmp(val.data(), "true", val.size()) == 0) && (val.size() == 4))
 		{
-			CFDictionarySetValue(dict, cfKey, kCFBooleanTrue);
+			dict.SetValue(cfKey, true);
 		}
-		else if(strncasecmp(val.data(), "false", val.size()) == 0 && val.size() == 5)
+		else if ((strncasecmp(val.data(), "false", val.size()) == 0) && (val.size() == 5))
 		{
-			CFDictionarySetValue(dict, cfKey, kCFBooleanFalse);
+			dict.SetValue(cfKey, false);
 		}
 		else
 		{
@@ -124,25 +117,19 @@ AddOptionsToActionDescription(CFMutableDictionaryRef dict, const std::vector<std
 			char numBuf[32];
 			bool isInt = false;
 			int64_t numVal = 0;
-			if(val.size() > 0 && val.size() < sizeof(numBuf))
+			if ((val.size() > 0) && (val.size() < sizeof(numBuf)))
 			{
 				memcpy(numBuf, val.data(), val.size());
 				numBuf[val.size()] = '\0';
 				char *end = nullptr;
 				numVal = strtoll(numBuf, &end, 10);
-				isInt = (end == numBuf + val.size());
+				isInt = (end == (numBuf + val.size()));
 			}
 
-			if(isInt)
-			{
-				CFObj<CFNumberRef> cfNum(CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt64Type, &numVal));
-				CFDictionarySetValue(dict, cfKey, cfNum);
-			}
+			if (isInt)
+				dict.SetValue(cfKey, numVal);
 			else
-			{
-				CFObj<CFStringRef> cfVal = MakeCFStr(val);
-				CFDictionarySetValue(dict, cfKey, cfVal);
-			}
+				dict.SetValue(cfKey, CFStr(val));
 		}
 	}
 }
@@ -158,30 +145,31 @@ ActionStep
 ActionDescriptionFromLine(const char *line, ssize_t linelen)
 {
 	// skip leading whitespace / control chars
-	while(linelen > 0 && (unsigned char)*line <= 0x20) { line++; linelen--; }
+	while ((linelen > 0) && ((unsigned char)*line <= 0x20)) { line++; linelen--; }
 	// strip trailing newline
-	if(linelen > 0 && line[linelen-1] == '\n') linelen--;
+	if ((linelen > 0) && (line[linelen-1] == '\n'))
+		linelen--;
 
-	if(linelen <= 0 || *line != '[')
+	if ((linelen <= 0) || (*line != '['))
 		return ActionStep{};
 	line++; linelen--; // skip '['
 
 	// scan to closing ']'
 	const char *aoPtr = line;
 	ssize_t aoLen = 0;
-	while(linelen > 0 && *line != ']') { line++; linelen--; aoLen++; }
-	if(linelen <= 0)
+	while ((linelen > 0) && (*line != ']')) { line++; linelen--; aoLen++; }
+	if (linelen <= 0)
 		return ActionStep{}; // no ']' found
 
 	line++; linelen--; // skip ']'
 
 	// first char after ']' is the field separator
-	if(linelen <= 0)
+	if (linelen <= 0)
 		return ActionStep{};
 	char sep = *line;
 	line++; linelen--;
 
-	if(linelen <= 0)
+	if (linelen <= 0)
 		return ActionStep{};
 
 	std::string_view aoSV(aoPtr, (size_t)aoLen);
@@ -189,7 +177,7 @@ ActionDescriptionFromLine(const char *line, ssize_t linelen)
 
 	// split action+options by space; first token is the action name
 	auto aoTokens = SplitSV(aoSV, ' ');
-	if(aoTokens.empty() || aoTokens[0].empty())
+	if (aoTokens.empty() || aoTokens[0].empty())
 		return ActionStep{};
 	std::string_view actionName = aoTokens[0];
 
@@ -197,84 +185,76 @@ ActionDescriptionFromLine(const char *line, ssize_t linelen)
 	auto params = SplitSV(paramsSV, sep);
 	size_t paramCount = params.size();
 
-	CFObj<CFMutableDictionaryRef> dict(CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
-		&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
-
-	CFObj<CFStringRef> cfAction = MakeCFStr(actionName);
-	CFDictionarySetValue(dict, CFSTR("action"), cfAction);
+	CFMutableDict dict;
+	dict.SetValue(CFSTR("action"), CFStr(actionName));
 
 	bool isSourceDestAction = false;
 	Action action = ActionFromName(actionName, isSourceDestAction);
 
-	if(action == kActionInvalid)
+	if (action == kActionInvalid)
 	{
 		// defer the error to the parsing/dispatch code
 		return ActionStep((CFDictionaryRef)dict);
 	}
 
-	if(isSourceDestAction)
+	if (isSourceDestAction)
 	{
-		if(paramCount > 0) { CFObj<CFStringRef> s = MakeCFStr(params[0]); CFDictionarySetValue(dict, CFSTR("from"), s); }
-		if(paramCount > 1) { CFObj<CFStringRef> s = MakeCFStr(params[1]); CFDictionarySetValue(dict, CFSTR("to"),   s); }
+		if (paramCount > 0) dict.SetValue(CFSTR("from"), CFStr(params[0]));
+		if (paramCount > 1) dict.SetValue(CFSTR("to"),   CFStr(params[1]));
 	}
 	else
 	{
-		switch(action)
+		switch (action)
 		{
 			case kFileActionDelete:
 			case kFileActionRead:
 			{ // all params are item paths
-				CFDictionarySetValue(dict, CFSTR("items"), CFArrayFromSVs(params));
+				dict.SetValue(CFSTR("items"), CFArrayFromSVs(params));
 			}
 			break;
 
 			case kFileActionList:
 			case kFileActionTree:
 			{ // first param is directory path; depth modifier handled via AddOptionsToActionDescription
-				if(paramCount > 0) { CFObj<CFStringRef> s = MakeCFStr(params[0]); CFDictionarySetValue(dict, CFSTR("directory"), s); }
+				if (paramCount > 0) dict.SetValue(CFSTR("directory"), CFStr(params[0]));
 			}
 			break;
 
 			case kFileActionInfo:
 			{
-				if(paramCount > 0) { CFObj<CFStringRef> s = MakeCFStr(params[0]); CFDictionarySetValue(dict, CFSTR("path"), s); }
+				if (paramCount > 0) dict.SetValue(CFSTR("path"), CFStr(params[0]));
 			}
 			break;
 
 			case kFileActionEdit:
 			{ // path  oldText  newText  — modifiers from options
-				if(paramCount > 0)
+				if (paramCount > 0)
 				{
-					CFObj<CFMutableArrayRef> items(CFArrayCreateMutable(kCFAllocatorDefault, 1, &kCFTypeArrayCallBacks));
-					CFObj<CFStringRef> p0 = MakeCFStr(params[0]);
-					CFArrayAppendValue(items, p0);
-					CFDictionarySetValue(dict, CFSTR("items"), items);
+					CFMutableArr items(1);
+					items.AppendValue(CFStr(params[0]));
+					dict.SetValue(CFSTR("items"), items);
 				}
-				if(paramCount > 1) { CFObj<CFStringRef> s = MakeCFStr(params[1]); CFDictionarySetValue(dict, CFSTR("oldText"), s); }
-				if(paramCount > 2) { CFObj<CFStringRef> s = MakeCFStr(params[2]); CFDictionarySetValue(dict, CFSTR("newText"), s); }
+				if (paramCount > 1) dict.SetValue(CFSTR("oldText"), CFStr(params[1]));
+				if (paramCount > 2) dict.SetValue(CFSTR("newText"), CFStr(params[2]));
 			}
 			break;
 
 			case kFileActionGlob:
 			{ // root  pattern1  pattern2  …  (prefix '!' = exclude)
-				if(paramCount > 0) { CFObj<CFStringRef> s = MakeCFStr(params[0]); CFDictionarySetValue(dict, CFSTR("root"), s); }
-				CFObj<CFMutableArrayRef> globs(CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks));
-				CFObj<CFMutableArrayRef> excludes(CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks));
-				for(size_t i = 1; i < paramCount; i++)
+				if (paramCount > 0) dict.SetValue(CFSTR("root"), CFStr(params[0]));
+				CFMutableArr globs;
+				CFMutableArr excludes;
+				for (size_t i = 1; i < paramCount; i++)
 				{
-					if(!params[i].empty() && params[i][0] == '!')
-					{
-						CFObj<CFStringRef> s = MakeCFStr(params[i].substr(1));
-						CFArrayAppendValue(excludes, s);
-					}
+					if (!params[i].empty() && (params[i][0] == '!'))
+						excludes.AppendValue(CFStr(params[i].substr(1)));
 					else
-					{
-						CFObj<CFStringRef> s = MakeCFStr(params[i]);
-						CFArrayAppendValue(globs, s);
-					}
+						globs.AppendValue(CFStr(params[i]));
 				}
-				if(CFArrayGetCount(globs) > 0)   CFDictionarySetValue(dict, CFSTR("glob"),    globs);
-				if(CFArrayGetCount(excludes) > 0) CFDictionarySetValue(dict, CFSTR("exclude"), excludes);
+				if (globs.GetCount() > 0)
+					dict.SetValue(CFSTR("glob"), globs);
+				if (excludes.GetCount() > 0)
+					dict.SetValue(CFSTR("exclude"), excludes);
 			}
 			break;
 
@@ -282,29 +262,29 @@ ActionDescriptionFromLine(const char *line, ssize_t linelen)
 			{
 				bool isDir = std::any_of(aoTokens.begin(), aoTokens.end(),
 					[](std::string_view sv){ return sv == "directory"; });
-				if(isDir)
+				if (isDir)
 				{
-					if(paramCount > 0) { CFObj<CFStringRef> s = MakeCFStr(params[0]); CFDictionarySetValue(dict, CFSTR("directory"), s); }
+					if (paramCount > 0) dict.SetValue(CFSTR("directory"), CFStr(params[0]));
 				}
 				else
 				{
-					if(paramCount > 0) { CFObj<CFStringRef> s = MakeCFStr(params[0]); CFDictionarySetValue(dict, CFSTR("file"), s); }
-					if(paramCount > 1) { CFObj<CFStringRef> s = MakeCFStr(params[1]); CFDictionarySetValue(dict, CFSTR("content"), s); }
+					if (paramCount > 0) dict.SetValue(CFSTR("file"), CFStr(params[0]));
+					if (paramCount > 1) dict.SetValue(CFSTR("content"), CFStr(params[1]));
 				}
 			}
 			break;
 
 			case kActionExecuteTool:
 			{
-				if(paramCount > 0) { CFObj<CFStringRef> s = MakeCFStr(params[0]); CFDictionarySetValue(dict, CFSTR("tool"), s); }
-				if(paramCount > 1)
-					CFDictionarySetValue(dict, CFSTR("arguments"), CFArrayFromSVs(params, 1));
+				if (paramCount > 0) dict.SetValue(CFSTR("tool"), CFStr(params[0]));
+				if (paramCount > 1)
+					dict.SetValue(CFSTR("arguments"), CFArrayFromSVs(params, 1));
 			}
 			break;
 
 			case kActionEcho:
 			{
-				if(paramCount > 0) { CFObj<CFStringRef> s = MakeCFStr(params[0]); CFDictionarySetValue(dict, CFSTR("text"), s); }
+				if (paramCount > 0) dict.SetValue(CFSTR("text"), CFStr(params[0]));
 			}
 			break;
 
@@ -315,7 +295,7 @@ ActionDescriptionFromLine(const char *line, ssize_t linelen)
 
 	AddOptionsToActionDescription(dict, aoTokens);
 
-	// ActionStep ctor retains dict; local CFObj releases on return → net retain=1 in ActionStep.
+	// ActionStep ctor retains dict; local CFMutableDict releases on return → net retain=1 in ActionStep.
 	return ActionStep((CFDictionaryRef)dict);
 }
 
@@ -325,22 +305,22 @@ StreamActionsFromStdIn(ReplayContext *context)
 {
 	StartReceivingActions(context);
 
-	char *line = NULL;
+	char *line = nullptr;
 	size_t linecap = 0;
 	ssize_t linelen;
-	while((linelen = getline(&line, &linecap, stdin)) > 0)
+	while ((linelen = getline(&line, &linecap, stdin)) > 0)
 	{
 		ActionStep step = ActionDescriptionFromLine(line, linelen);
-		if(!step.empty())
+		if (!step.empty())
 		{
-			if(context->concurrent)
+			if (context->concurrent)
 				DispatchTaskConcurrentlyWithNoDependency(std::move(step), context);
 			else
 				DispatchTaskSerially(std::move(step), context);
 		}
 		else
 		{
-			if(context->stopOnError)
+			if (context->stopOnError)
 			{
 				LogError("error: malformed action description on stdin: %s\n", line);
 				context->lastError.set("error: malformed action description on stdin", 1);
