@@ -15,7 +15,7 @@ A macOS tool to execute a list of declared actions.
 
 Key features:
 - declared actions (aka playlist) with automatic dependnecy detection
-- stdio MCP server mode with optional sandbox
+- stdio [MCP server](mcp_tool_schemas.md) mode with optional sandbox
 - hard sandboxing via macOS Seatbelt (kernel-enforced filesystem and network restrictions) - shared by `replay` and `gate` - [readme](sandbox/README.md)
 - concurrent operations for fastest execution
 - serial operations if sequence is required
