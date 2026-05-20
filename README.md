@@ -1,6 +1,6 @@
 # replay tools
 'replay' repository contains 4 tools:
-- replay: execute a list of declared actions or run as stdio mcp server with hard sandbox
+- replay: execute a list of declared actions or run as stdio [mcp server](mcp_tool_schemas.md) with hard [sandbox](sandbox/README.md)
 - dispatch: companion tool for 'replay'
 - fingerprint: calculate deep directory hash - [readme](fingerprint/README.md)
 - gate: cached task execution tool - [readme](gate/README.md)
@@ -14,7 +14,7 @@ source <(/usr/bin/curl -fsSL 'https://raw.githubusercontent.com/abra-code/replay
 A macOS tool to execute a list of declared actions.  
 
 Key features:
-- declared actions (aka playlist) with automatic dependnecy detection
+- declared actions (aka playlist) with automatic dependency detection
 - stdio [MCP server](mcp_tool_schemas.md) mode with optional sandbox
 - hard sandboxing via macOS Seatbelt (kernel-enforced filesystem and network restrictions) - shared by `replay` and `gate` - [readme](sandbox/README.md)
 - concurrent operations for fastest execution
