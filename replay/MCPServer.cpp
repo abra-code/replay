@@ -1278,9 +1278,9 @@ static std::string build_tools_list_json()
         doc.arr_append(tools, add_tool(doc, "execute_command",
             "[Extended] Execute a shell command. Returns stdout as the primary content "
             "item and stderr as a second item when non-empty. Sets isError=true when "
-            "the command exits non-zero or times out. When replay is started with "
-            "--sandbox, the Seatbelt kernel sandbox enforces filesystem access limits "
-            "on the child process — making shell execution safer than soft path-checking.",
+            "the command exits non-zero or times out."
+            "macOS kernel sandbox enforces filesystem access limits on the child process - "
+            "making shell execution safer than soft path-checking.",
             schema));
     }
 
