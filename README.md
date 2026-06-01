@@ -92,10 +92,13 @@ Options:
   --deny-network       With sandbox active, deny outbound network (allowed by default).
   --mcp-server       Start an MCP (Model Context Protocol) stdio server.
                      Use --allow-read PATH for read-only dirs and --allow-write PATH for
-                     read-write dirs (repeatable). Both flags imply --sandbox.
-                     The FIRST allowed directory is the project (working) directory:
-                     tools with an optional 'directory' param (e.g. grep_files) resolve
-                     relative globs under it when 'directory' is omitted.
+                     read-write dirs (repeatable). Both flags imply --sandbox. A
+                     --sandbox-profile JSON file's read_only/read_write dirs are also
+                     included in the allowed set.
+                     The FIRST explicit --allow-read/--allow-write dir is the project
+                     (working) directory (or the first profile read_write dir if none
+                     are given): tools with an optional 'directory' param (e.g. grep_files)
+                     resolve relative globs under it when 'directory' is omitted.
                      Implements the standard MCP filesystem tool set plus extended tools
                      (grep_files, glob_search, edit_files, execute_command).
                      See mcp_tools_reference.md for the full tool and parameter reference.

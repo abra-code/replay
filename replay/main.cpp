@@ -124,10 +124,13 @@ DisplayHelp(void)
 		"  --deny-network       With sandbox active, deny outbound network (allowed by default).\n"
 		"  --mcp-server       Start an MCP (Model Context Protocol) stdio server.\n"
 		"                     Use --allow-read PATH for read-only dirs and --allow-write PATH for\n"
-		"                     read-write dirs (repeatable). Both flags imply --sandbox.\n"
-		"                     The FIRST allowed directory is the project (working) directory:\n"
-		"                     tools with an optional 'directory' param (e.g. grep_files) resolve\n"
-		"                     relative globs under it when 'directory' is omitted.\n"
+		"                     read-write dirs (repeatable). Both flags imply --sandbox. A\n"
+		"                     --sandbox-profile JSON file's read_only/read_write dirs are also\n"
+		"                     included in the allowed set.\n"
+		"                     The FIRST explicit --allow-read/--allow-write dir is the project\n"
+		"                     (working) directory (or the first profile read_write dir if none\n"
+		"                     are given): tools with an optional 'directory' param (e.g. grep_files)\n"
+		"                     resolve relative globs under it when 'directory' is omitted.\n"
 		"                     Implements the standard MCP filesystem tool set plus extended tools\n"
 		"                     (grep_files, glob_search, edit_files, execute_command).\n"
 		"                     See mcp_tools_reference.md for the full tool and parameter reference.\n"
@@ -531,6 +534,10 @@ int main(int argc, const char * argv[])
 	std::vector<std::string> sandboxAllowRead;
 	std::vector<std::string> sandboxAllowWrite;
 	bool sandboxDenyNetwork = false;
+	// Explicit --allow-read/--allow-write dirs recorded in command-line order.
+	// In MCP mode the first of these is the project (working) directory.
+	struct CliAllowedDir { std::string path; bool writable; };
+	std::vector<CliAllowedDir> cliAllowedDirs;
 	bool mcpServerMode = false;
 
 	while(true)
@@ -613,11 +620,13 @@ int main(int argc, const char * argv[])
 			case kOptAllowRead:
 				sandboxRequested = true;
 				sandboxAllowRead.emplace_back(optarg);
+				cliAllowedDirs.push_back({optarg, false});
 			break;
 
 			case kOptAllowWrite:
 				sandboxRequested = true;
 				sandboxAllowWrite.emplace_back(optarg);
+				cliAllowedDirs.push_back({optarg, true});
 			break;
 
 			case kOptSandboxProfile:
@@ -689,6 +698,14 @@ int main(int argc, const char * argv[])
 		}
 	}
 
+	// In MCP mode, capture the sandbox-profile's read/write dirs BEFORE the sandbox
+	// is applied — afterwards the profile file itself may be unreadable. These seed
+	// the MCP allowed-dir list so list_allowed_directories and validate_path stay in
+	// sync with the kernel sandbox (which already honors the profile dirs).
+	sandbox::Config mcpProfileConfig;
+	if (mcpServerMode && !sandboxProfilePath.empty())
+		sandbox::LoadConfigFromJsonFile(sandboxProfilePath, mcpProfileConfig);
+
 	// Apply sandbox before any real work. Once applied, the policy is
 	// kernel-enforced on this process and every child it spawns.
 	if(sandboxRequested)
@@ -698,23 +715,37 @@ int main(int argc, const char * argv[])
 	}
 
 	// --mcp-server: start MCP stdio server.
-	// Allowed dirs come exclusively from --allow-read / --allow-write (both imply --sandbox).
 	if(mcpServerMode)
 	{
 		MCPServerOptions mcpOpts;
 
-		for (const auto &p : sandboxAllowRead)
-        {
-            std::string resolved_path = file_helpers::resolve_literal_path(p);
-			mcpOpts.allowedDirs.push_back({resolved_path, false});
-        }
-        
-        for (const auto &p : sandboxAllowWrite)
-        {
-            std::string resolved_path = file_helpers::resolve_literal_path(p);
-			mcpOpts.allowedDirs.push_back({resolved_path, true});
-        }
-        
+		// Build the allowed-dir list so its FRONT is the project (working) directory:
+		//   1. explicit CLI --allow-read/--allow-write dirs, in command-line order
+		//   2. sandbox-profile read_write dirs (writable)
+		//   3. sandbox-profile read_only dirs
+		// De-duplicated by canonical path; a read-write grant supersedes read-only.
+		auto add_allowed_dir = [&mcpOpts](const std::string &raw_path, bool writable)
+		{
+			std::string canonical_path = file_helpers::resolve_literal_path(raw_path);
+			for (auto &existing_dir : mcpOpts.allowedDirs)
+			{
+				if (existing_dir.path == canonical_path)
+				{
+					if (writable)
+						existing_dir.writable = true; // read-write supersedes read-only
+					return;
+				}
+			}
+			mcpOpts.allowedDirs.push_back({canonical_path, writable});
+		};
+
+		for (const auto &cli_dir : cliAllowedDirs)
+			add_allowed_dir(cli_dir.path, cli_dir.writable);
+		for (const auto &profile_dir : mcpProfileConfig.read_write)
+			add_allowed_dir(profile_dir, true);
+		for (const auto &profile_dir : mcpProfileConfig.read_only)
+			add_allowed_dir(profile_dir, false);
+
 		context.mcpServer = true;
 		int ret = RunMCPServer(&context, mcpOpts);
 		safe_exit(ret);

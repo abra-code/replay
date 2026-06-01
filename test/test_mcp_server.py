@@ -1108,6 +1108,75 @@ def test_list_allowed_directories(tmpdir: str) -> None:
           tmpdir.split("/")[-1] in text or "read-write" in text, text)
 
 
+def test_sandbox_profile_allowed_dirs(tmpdir: str) -> None:
+    """--sandbox-profile read/write dirs are seeded into the MCP allowed-dir list:
+    reported by list_allowed_directories AND accepted by validate_path (previously
+    the kernel sandbox honored them but the MCP soft-check did not)."""
+    print("=== MCP: --sandbox-profile dirs seed the allowed list ===")
+
+    prof_dir = f"{tmpdir}/sp_prof"
+    cli_dir = f"{tmpdir}/sp_cli"
+    os.makedirs(prof_dir, exist_ok=True)
+    os.makedirs(cli_dir, exist_ok=True)
+
+    profile_path = f"{tmpdir}/sandbox_profile.json"
+    with open(profile_path, "w") as f:
+        json.dump({"import_baseline": True, "read_write": [prof_dir]}, f)
+
+    # Scenario A: profile only, no CLI --allow-* dirs. The profile dir must be both
+    # listed and writable through the MCP tools.
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "list_allowed_directories", "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{prof_dir}/hello.txt", "content": "hi"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": f"{prof_dir}/hello.txt"}}},
+    ], extra_args=["--sandbox-profile", profile_path], sequential=True)
+
+    listing = text_of(by_id[1])
+    check("sandbox-profile: read_write dir listed", "sp_prof" in listing, listing)
+    check("sandbox-profile: profile dir is writable (not -32001)",
+          not is_error(by_id[2], -32001), str(by_id[2]))
+    check("sandbox-profile: read back from profile dir", "hi" in text_of(by_id[3]),
+          text_of(by_id[3]))
+
+    # Scenario B: an explicit --allow-write CLI dir is the project dir, so it appears
+    # FIRST in the listing, ahead of the profile dir.
+    by_id2 = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "list_allowed_directories", "arguments": {}}},
+    ], [cli_dir], extra_args=["--sandbox-profile", profile_path], sequential=True)
+
+    lines = [l for l in text_of(by_id2[1]).splitlines() if l.strip()]
+    cli_index = next((i for i, l in enumerate(lines) if "sp_cli" in l), -1)
+    prof_index = next((i for i, l in enumerate(lines) if "sp_prof" in l), -1)
+    check("sandbox-profile: CLI dir present in listing", cli_index >= 0, str(lines))
+    check("sandbox-profile: profile dir present alongside CLI dir", prof_index >= 0, str(lines))
+    check("sandbox-profile: CLI dir is first (project directory)",
+          0 <= cli_index < prof_index, str(lines))
+
+    # Scenario C: the same dir granted read-only on the CLI and read_write in the
+    # profile is de-duplicated to a single entry, and read-write wins.
+    dup_dir = f"{tmpdir}/sp_dup"
+    os.makedirs(dup_dir, exist_ok=True)
+    profile_dup_path = f"{tmpdir}/sandbox_profile_dup.json"
+    with open(profile_dup_path, "w") as f:
+        json.dump({"import_baseline": True, "read_write": [dup_dir]}, f)
+
+    by_id3 = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "list_allowed_directories", "arguments": {}}},
+    ], extra_args=["--allow-read", dup_dir, "--sandbox-profile", profile_dup_path],
+       sequential=True)
+
+    dup_lines = [l for l in text_of(by_id3[1]).splitlines() if "sp_dup" in l]
+    check("sandbox-profile: duplicate dir listed exactly once", len(dup_lines) == 1, str(dup_lines))
+    check("sandbox-profile: read-write supersedes read-only on dedup",
+          len(dup_lines) == 1 and "read-write" in dup_lines[0], str(dup_lines))
+
+
 def test_path_validation(tmpdir: str) -> None:
     print("=== MCP: path validation ===")
 
@@ -2011,6 +2080,7 @@ def main() -> int:
         test_glob_search_brace(tmpdir)
         test_glob_search_missing_globs(tmpdir)
         test_list_allowed_directories(tmpdir)
+        test_sandbox_profile_allowed_dirs(tmpdir)
         test_path_validation(tmpdir)
         test_missing_required_params(tmpdir)
         test_readonly_dir(tmpdir)

@@ -183,8 +183,10 @@ The MCP server runs on a GCD concurrent queue (`DISPATCH_QUEUE_CONCURRENT`). Eac
 
 ## Access control
 
-Configured via `--allow-write <dir>` (read+write) and `--allow-read <dir>` (read-only) flags at server startup. Every path in every tool call is validated against these lists. `/` is not a valid allowed directory.
+Configured via `--allow-write <dir>` (read+write) and `--allow-read <dir>` (read-only) flags at server startup. The `read_only`/`read_write` directories of a `--sandbox-profile <file>` JSON are **also** included, so the MCP soft path-check stays in sync with the kernel sandbox (which already honors the profile). The combined list is de-duplicated by canonical path, with a read-write grant superseding a read-only one for the same path. Every path in every tool call is validated against this list. `/` is not a valid allowed directory.
+
+> Paths granted via a profile's raw `extra_rules` (SBPL) cannot be statically extracted and are **not** added to the MCP allowed list — express such dirs with `read_only`/`read_write` if MCP tools need to reach them.
 
 ### Project (working) directory
 
-The **first** allowed directory — whichever `--allow-read`/`--allow-write` path appears first on the command line — is treated as the **project (working) directory** for the session. It is the conceptual root of the workspace the server is operating on. Tools that accept an optional `directory` use it as the default base: `grep_files`, given relative `globs` and no `directory`, resolves those globs under the project directory. Relative globs are **never** resolved against the process's actual working directory (`getcwd`), which is unspecified for a server launched by an MCP client.
+The **first explicit** `--allow-read`/`--allow-write` directory (in command-line order) is treated as the **project (working) directory** for the session; if no CLI dirs are given, the first `read_write` directory from the `--sandbox-profile` is used. It is the conceptual root of the workspace the server is operating on. Tools that accept an optional `directory` use it as the default base: `grep_files`, given relative `globs` and no `directory`, resolves those globs under the project directory. Relative globs are **never** resolved against the process's actual working directory (`getcwd`), which is unspecified for a server launched by an MCP client.
