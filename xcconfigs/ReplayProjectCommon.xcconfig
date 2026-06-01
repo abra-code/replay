@@ -8,8 +8,8 @@ PRODUCT_NAME = $(TARGET_NAME)
 // Optional xcconfig with code signing settings for distribution by Abracode
 #include? "ReplayDistribution.xcconfig"
 
-CURRENT_PROJECT_VERSION = 2.0
-MARKETING_VERSION = 2.0
+CURRENT_PROJECT_VERSION = 2.1
+MARKETING_VERSION = 2.1
 
 MACOSX_DEPLOYMENT_TARGET = 10.15
 SDKROOT = macosx
