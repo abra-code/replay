@@ -679,45 +679,56 @@ static void dispatch_mcp_tool(const std::string &tool,
     else if (tool == "search_files")
     {
         // Standard MCP: case-insensitive basename substring match (files and directories).
-        auto path_sv = args.obj_get("path").get_str();
-        if (!path_sv)
+        // Canonical params: directory / nameContains / excludeGlobs.
+        // The MCP-spec names path / pattern / excludePatterns are accepted as silent
+        // aliases (not advertised in the schema) because agents may construct them from
+        // pre-training. Canonical names win when both are present.
+        auto directory_string = args.obj_get("directory").get_str();
+        if (!directory_string)
+            directory_string = args.obj_get("path").get_str(); // legacy alias
+        if (!directory_string)
         {
-            PrintMCPError(context, ac, -32602, "Missing required param: path");
-            return;
-        }
-        auto pat_sv = args.obj_get("pattern").get_str();
-        if (!pat_sv)
-        {
-            PrintMCPError(context, ac, -32602, "Missing required param: pattern");
-            return;
-        }
-
-        auto vr = validate_path(std::string(*path_sv), *opts, false);
-        if (!vr.ok)
-        {
-            PrintMCPError(context, ac, -32001, vr.error);
+            PrintMCPError(context, ac, -32602, "Missing required param: directory");
             return;
         }
 
-        std::vector<std::string> exclude_strs;
+        auto name_substring = args.obj_get("nameContains").get_str();
+        if (!name_substring)
+            name_substring = args.obj_get("pattern").get_str(); // legacy alias
+        if (!name_substring)
         {
-            auto excl_val = args.obj_get("excludePatterns");
-            if (excl_val.is_arr())
+            PrintMCPError(context, ac, -32602, "Missing required param: nameContains");
+            return;
+        }
+
+        auto directory_validation = validate_path(std::string(*directory_string), *opts, false);
+        if (!directory_validation.ok)
+        {
+            PrintMCPError(context, ac, -32001, directory_validation.error);
+            return;
+        }
+
+        std::vector<std::string> exclude_globs;
+        {
+            auto exclude_value = args.obj_get("excludeGlobs");
+            if (!exclude_value.is_arr())
+                exclude_value = args.obj_get("excludePatterns"); // legacy alias
+            if (exclude_value.is_arr())
             {
-                Json::ArrIter it(excl_val);
-                while (it.has_next())
+                Json::ArrIter exclude_iterator(exclude_value);
+                while (exclude_iterator.has_next())
                 {
-                    auto ev = it.next();
-                    if (auto s = ev.get_str(); s)
-                        exclude_strs.push_back(std::string(*s));
+                    auto exclude_entry = exclude_iterator.next();
+                    if (auto exclude_string = exclude_entry.get_str(); exclude_string)
+                        exclude_globs.push_back(std::string(*exclude_string));
                 }
             }
         }
 
-        auto matches = find_entries_by_name(vr.canonical, std::string(*pat_sv),
-                                             exclude_strs, 0);
+        auto matches = find_entries_by_name(directory_validation.canonical,
+                                            std::string(*name_substring), exclude_globs, 0);
         std::string text;
-        for (const auto &p : matches) { text += p; text += '\n'; }
+        for (const auto &match_path : matches) { text += match_path; text += '\n'; }
         PrintMCPTextResult(context, ac, text.empty() ? "(no matches found)" : std::move(text));
     }
     else if (tool == "grep_files")
@@ -1344,28 +1355,29 @@ static std::string build_tools_list_json()
 
     // search_files — standard MCP: case-insensitive filename substring match
     {
-        auto excl_prop = doc.new_obj();
-        doc.obj_add(excl_prop, "type", doc.new_str("array"));
         auto excl_items = doc.new_obj();
         doc.obj_add(excl_items, "type", doc.new_str("string"));
+        auto excl_prop = doc.new_obj();
+        doc.obj_add(excl_prop, "type", doc.new_str("array"));
         doc.obj_add(excl_prop, "items", excl_items);
         doc.obj_add(excl_prop, "description",
             doc.new_str("Glob patterns to exclude from the search"));
         auto props = doc.new_obj();
-        add_str_prop(doc, props, "path",
+        add_str_prop(doc, props, "directory",
             "Absolute root directory to search recursively (required)");
-        add_str_prop(doc, props, "pattern",
-            "Literal string to match against file and directory names (case-insensitive "
-            "substring match; not a glob or regex). Required.");
-        doc.obj_add(props, "excludePatterns", excl_prop);
+        add_str_prop(doc, props, "nameContains",
+            "Literal substring to match against file and directory names (case-insensitive; "
+            "NOT a glob or regex). Required. For glob matching use glob_search.");
+        doc.obj_add(props, "excludeGlobs", excl_prop);
         auto schema = doc.new_obj();
         doc.obj_add(schema, "type", doc.new_str("object"));
         doc.obj_add(schema, "properties", props);
-        doc.obj_add(schema, "required", make_req(doc, {"path", "pattern"}));
+        doc.obj_add(schema, "required", make_req(doc, {"directory", "nameContains"}));
         doc.arr_append(tools, add_tool(doc, "search_files",
-            "Search for files and directories whose name contains pattern "
-            "(case-insensitive literal substring match — not a glob or regex). "
-            "Returns one absolute path per line. Searches recursively under path.", schema));
+            "Find files and directories whose NAME contains a literal substring "
+            "(case-insensitive; not a glob or regex). Returns one absolute path per line, "
+            "searching recursively under 'directory'. To match by glob use glob_search; "
+            "to search file contents use grep_files.", schema));
     }
 
     // grep_files — [ext] content search (grep-style)

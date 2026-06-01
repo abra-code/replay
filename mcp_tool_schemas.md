@@ -214,19 +214,21 @@ Standard MCP tool: case-insensitive filename/dirname substring match.
 
 ```json
 {
-  "path":            "<string>",    // [std] Root directory to search recursively (required)
-  "pattern":         "<string>",    // [std] Literal substring to match against basenames (required)
-  "excludePatterns": ["<string>", ...] // [std+] Glob exclusions
+  "directory":    "<string>",        // [ext] Root directory to search recursively (required)
+  "nameContains": "<string>",        // [ext] Literal substring to match against basenames (required)
+  "excludeGlobs": ["<string>", ...]  // [ext] Glob exclusions
 }
 ```
 
-`pattern` is a **plain literal string** — not a glob, not a regex. It is matched as a case-insensitive substring against each entry's basename (`strcasestr` semantics). To search by glob pattern, use `glob_search`. To search file contents, use `grep_files`.
+`nameContains` is a **plain literal string** — not a glob, not a regex. It is matched as a case-insensitive substring against each entry's basename (`strcasestr` semantics). To search by glob pattern, use `glob_search`. To search file contents, use `grep_files`.
 
-Walks `path` recursively. Returns the absolute path of every file or directory whose basename contains `pattern`. No result cap — all matches are returned.
+Walks `directory` recursively. Returns the absolute path of every file or directory whose basename contains `nameContains`. No result cap — all matches are returned.
+
+**Legacy aliases:** the MCP-spec names `path` / `pattern` / `excludePatterns` are accepted silently (not advertised in the schema) so agents that construct them from pre-training still work. Canonical names win when both are supplied.
 
 **Output:** one absolute path per line, or `(no matches found)`.
 
-**Errors:** `-32001` · `-32602` missing `path` or `pattern`
+**Errors:** `-32001` · `-32602` missing `directory` or `nameContains`
 
 ---
 

@@ -204,7 +204,7 @@ def run_mcp_stress_test(allow_write: list[str] = (), *,
         elif tool_choice == 5:
             msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
                    "params": {"name": "search_files",
-                              "arguments": {"path": allow_write[0], "pattern": "stress"}}}
+                              "arguments": {"directory": allow_write[0], "nameContains": "stress"}}}
         elif tool_choice == 6:
             msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
                    "params": {"name": "execute_command",
@@ -556,7 +556,7 @@ def test_search_files(tmpdir: str) -> None:
         # Case-insensitive: "ALPHA" should match alpha.txt and alphabet_soup.conf
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
          "params": {"name": "search_files",
-                    "arguments": {"path": d, "pattern": "ALPHA"}}},
+                    "arguments": {"directory": d, "nameContains": "ALPHA"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[4])
@@ -575,7 +575,7 @@ def test_search_files_no_match(tmpdir: str) -> None:
                     "arguments": {"path": f"{d}/readme.txt", "content": "x"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "search_files",
-                    "arguments": {"path": d, "pattern": "xyzzy_no_such_file"}}},
+                    "arguments": {"directory": d, "nameContains": "xyzzy_no_such_file"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[2])
@@ -583,8 +583,8 @@ def test_search_files_no_match(tmpdir: str) -> None:
           "no match" in text.lower(), text)
 
 
-def test_search_files_exclude_patterns(tmpdir: str) -> None:
-    print("=== MCP: search_files (excludePatterns) ===")
+def test_search_files_exclude_globs(tmpdir: str) -> None:
+    print("=== MCP: search_files (excludeGlobs) ===")
 
     d = f"{tmpdir}/sf_excl"
     by_id = run_mcp([
@@ -596,34 +596,59 @@ def test_search_files_exclude_patterns(tmpdir: str) -> None:
                     "arguments": {"path": f"{d}/vendor/helper.c", "content": "x"}}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "search_files",
-                    "arguments": {"path": d, "pattern": "helper",
+                    "arguments": {"directory": d, "nameContains": "helper",
+                                  "excludeGlobs": ["vendor/**"]}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[3])
+    check("search_files excludeGlobs: src/helper.c matched", "src" in text, text)
+    check("search_files excludeGlobs: vendor/helper.c excluded", "vendor" not in text, text)
+
+
+def test_search_files_legacy_aliases(tmpdir: str) -> None:
+    """The MCP-spec names path/pattern/excludePatterns are accepted as silent aliases."""
+    print("=== MCP: search_files (legacy path/pattern/excludePatterns aliases) ===")
+
+    d = f"{tmpdir}/sf_alias"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/src/widget.c", "content": "x"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{d}/vendor/widget.c", "content": "x"}}},
+        # All three legacy aliases at once.
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "search_files",
+                    "arguments": {"path": d, "pattern": "widget",
                                   "excludePatterns": ["vendor/**"]}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[3])
-    check("search_files excludePatterns: src/helper.c matched", "src" in text, text)
-    check("search_files excludePatterns: vendor/helper.c excluded", "vendor" not in text, text)
+    check("search_files legacy aliases: src/widget.c matched", "src" in text, text)
+    check("search_files legacy aliases: vendor excluded via excludePatterns",
+          "vendor" not in text, text)
 
 
 def test_search_files_missing_params(tmpdir: str) -> None:
     print("=== MCP: search_files (missing required params -> -32602) ===")
 
-    # Missing pattern
+    # Missing nameContains
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "search_files",
-                    "arguments": {"path": tmpdir}}},
+                    "arguments": {"directory": tmpdir}}},
     ], [tmpdir])
-    check("search_files missing pattern -> -32602",
+    check("search_files missing nameContains -> -32602",
           is_error(by_id[1], -32602), str(by_id[1]))
 
-    # Missing path
+    # Missing directory
     by_id2 = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "search_files",
-                    "arguments": {"pattern": "foo"}}},
+                    "arguments": {"nameContains": "foo"}}},
     ], [tmpdir])
-    check("search_files missing path -> -32602",
+    check("search_files missing directory -> -32602",
           is_error(by_id2[1], -32602), str(by_id2[1]))
 
 
@@ -644,7 +669,7 @@ def test_search_files_literal_pattern(tmpdir: str) -> None:
         # must NOT be treated as a glob where '.' is any char (which would also match "fooXstar").
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "search_files",
-                    "arguments": {"path": d, "pattern": "foo.s"}}},
+                    "arguments": {"directory": d, "nameContains": "foo.s"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[3])
@@ -670,7 +695,7 @@ def test_search_files_matches_directories(tmpdir: str) -> None:
         # "get" matches both the directory "widgets" and the file "gadgets.txt"
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "search_files",
-                    "arguments": {"path": d, "pattern": "get"}}},
+                    "arguments": {"directory": d, "nameContains": "get"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[3])
@@ -1959,7 +1984,8 @@ def main() -> int:
         test_delete_directory(tmpdir)
         test_search_files(tmpdir)
         test_search_files_no_match(tmpdir)
-        test_search_files_exclude_patterns(tmpdir)
+        test_search_files_exclude_globs(tmpdir)
+        test_search_files_legacy_aliases(tmpdir)
         test_search_files_missing_params(tmpdir)
         test_search_files_literal_pattern(tmpdir)
         test_search_files_matches_directories(tmpdir)

@@ -18,7 +18,7 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 | `delete_file` | `path` | | Recursive for directories. |
 | `get_file_info` | `path` | | type, size, modified timestamp, permissions. |
 | `list_allowed_directories` | — | | Lists configured dirs with access mode. |
-| `search_files` | `path`, `pattern` | | Standard MCP: case-insensitive literal substring match against basenames. No result cap. `pattern` is not a glob or regex. |
+| `search_files` | `directory`, `nameContains` | | Case-insensitive literal substring match against basenames. No result cap. `nameContains` is not a glob or regex. Legacy `path`/`pattern`/`excludePatterns` accepted as silent aliases. |
 | `edit_file` | `path`, `edits` | ✓ | Structured edits: literal/regex, backrefs, limit, caseInsensitive. |
 | `edit_files` | `paths`, `edits` | ✓ | Multi-file edit with glob expansion. |
 | `glob_search` | `directory`, `globs` | ✓ | Filename-glob search; `globs` array, brace alternation `{a,b}`, `excludeGlobs`. Returns files only (not directories). |
@@ -33,7 +33,7 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 
 - **`edit_file`**: the MCP spec takes `oldText`/`newText` structured edits (same as replay). replay adds `regex`, `caseInsensitive`, `limit`, and back-references on top. `dryRun` returns a unified diff (standard behavior). Whitespace-normalized matching (standard MCP behavior) is used as a fallback for literal edits when exact match fails.
 - **`read_file`**: binary files are returned as a `blob` content item (base64 + mimeType) rather than an error or escaped text, which is an extension beyond the spec.
-- **`search_files`**: standard MCP defines filename pattern matching (case-insensitive substring match against basenames). replay implements this correctly. The content-search capability is provided as the separate `grep_files` extension tool.
+- **`search_files`**: standard MCP defines filename pattern matching (case-insensitive substring match against basenames). replay implements this, but renames the params to `directory`/`nameContains`/`excludeGlobs` for clarity (the spec names `path`/`pattern`/`excludePatterns` are still accepted as silent aliases). The content-search capability is provided as the separate `grep_files` extension tool.
 
 ---
 
