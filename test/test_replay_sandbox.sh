@@ -337,6 +337,32 @@ verify_succeeded "$?" "execute write denied: destination file not created in den
 
 # ===========================================================================
 echo "------------------------------"
+echo "--allow-read /private/etc/ssl: curl HTTPS succeeds (requires network)"
+echo ""
+# curl/LibreSSL reads /private/etc/ssl/openssl.cnf during TLS initialisation.
+# Without this path in the sandbox it fails with "Operation not permitted"
+# before the first byte is sent. Verifies the fix is in place.
+
+cat > "$WORK_DIR/curl_https.json" << EOF
+[{
+  "action": "execute",
+  "tool": "/usr/bin/curl",
+  "arguments": ["--silent", "--max-time", "5",
+                 "--write-out", "http_code=%{http_code}",
+                 "--output", "/dev/null",
+                 "https://example.com"]
+}]
+EOF
+output=$("$REPLAY_TOOL" \
+	--allow-write "$WORK_DIR" \
+	--allow-read /private/etc/ssl \
+	"$WORK_DIR/curl_https.json" 2>/dev/null)
+echo "$output" | /usr/bin/grep -qF "http_code=200"
+verify_succeeded "$?" "curl HTTPS: /private/etc/ssl allows TLS init (got: $output)"
+
+
+# ===========================================================================
+echo "------------------------------"
 echo "--deny-network: curl reports http_code=000 (no connection)"
 echo ""
 # Uses --write-out to capture the result via stdout (bypasses execute action's
