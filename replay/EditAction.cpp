@@ -1,6 +1,6 @@
 #include "ReplayAction.h"
 #include "ReplayActionPrivate.h"
-#include <regex.h>
+#include <regex>
 #include <unistd.h>
 #include <cerrno>
 #include <fstream>
@@ -8,7 +8,7 @@
 #include <vector>
 
 // ============================================================================
-// EditFile — search-replace with literal or POSIX ERE regex (inspired by filt)
+// EditFile — search-replace with literal or ECMAScript regex (inspired by filt)
 // ============================================================================
 
 // ---------------------------------------------------------------------------
@@ -355,8 +355,8 @@ static std::vector<ReplaceChunk> parse_replacement(const std::string &repl)
 	return chunks;
 }
 
-static std::string apply_chunks(const char *base, const std::vector<ReplaceChunk> &chunks,
-                                const regmatch_t *matches, size_t nmatch)
+static std::string apply_chunks(const std::vector<ReplaceChunk> &chunks,
+                                const std::smatch &match)
 {
 	std::string result;
 	for (const auto &chunk : chunks)
@@ -365,10 +365,9 @@ static std::string apply_chunks(const char *base, const std::vector<ReplaceChunk
 		{
 			result += chunk.literal;
 		}
-		else if ((size_t)chunk.sub_index < nmatch && matches[chunk.sub_index].rm_so >= 0)
+		else if ((size_t)chunk.sub_index < match.size() && match[chunk.sub_index].matched)
 		{
-			result.append(base + matches[chunk.sub_index].rm_so,
-			              (size_t)(matches[chunk.sub_index].rm_eo - matches[chunk.sub_index].rm_so));
+			result += match[chunk.sub_index].str();
 		}
 	}
 	return result;
@@ -395,69 +394,48 @@ static bool apply_one_edit(std::string &content,
 {
 	if (use_regex)
 	{
-		regex_t re;
-		int flags = REG_EXTENDED;
-		if (case_insensitive)
-			flags |= REG_ICASE;
-		int comp_err = regcomp(&re, old_text.c_str(), flags);
-		if (comp_err != 0)
+		std::regex compiled_regex;
+		try
 		{
-			char buf[512];
-			regerror(comp_err, &re, buf, sizeof(buf));
-			outError = std::string("regex compile error: ") + buf;
-			regfree(&re);
+			auto syntax = std::regex::ECMAScript;
+			if (case_insensitive)
+				syntax |= std::regex::icase;
+			compiled_regex.assign(old_text, syntax);
+		}
+		catch (const std::regex_error &regex_error)
+		{
+			outError = std::string("regex compile error: ") + regex_error.what();
 			return false;
 		}
 
-		size_t nmatch = re.re_nsub + 1;
-		std::vector<regmatch_t> matches(nmatch);
 		auto chunks = parse_replacement(new_text);
 
 		std::string result;
-		size_t pos = 0;
+		size_t copied = 0;   // bytes of content already copied into result
 		int count = 0;
 
-		while (pos <= content.size())
+		// std::sregex_iterator walks the non-overlapping matches left to right and
+		// handles zero-length matches (it advances past them so the scan terminates).
+		// We rebuild the output by copying the gap before each match, then the
+		// replacement; the verbatim text between matches is carried by `copied`.
+		auto match_iter = std::sregex_iterator(content.begin(), content.end(), compiled_regex);
+		auto match_end  = std::sregex_iterator();
+		for (; match_iter != match_end; ++match_iter)
 		{
 			if (limit > 0 && count >= limit)
 				break;
 
-			matches[0].rm_so = (regoff_t)pos;
-			matches[0].rm_eo = (regoff_t)content.size();
-			int merr = regexec(&re, content.c_str(), nmatch, matches.data(), REG_STARTEND);
-			if (merr == REG_NOMATCH)
-				break;
-			if (merr != 0)
-			{
-				char buf[512];
-				regerror(merr, &re, buf, sizeof(buf));
-				outError = std::string("regex match error: ") + buf;
-				regfree(&re);
-				return false;
-			}
+			const std::smatch &match = *match_iter;
+			size_t match_start  = (size_t)match.position(0);
+			size_t match_length = (size_t)match.length(0);
 
-			regoff_t m_start = matches[0].rm_so;
-			regoff_t m_end   = matches[0].rm_eo;
-
-			result.append(content.data() + pos, (size_t)(m_start - pos));
-			result += apply_chunks(content.c_str(), chunks, matches.data(), nmatch);
+			result.append(content, copied, match_start - copied);
+			result += apply_chunks(chunks, match);
+			copied = match_start + match_length;
 			count++;
-
-			if (m_end > m_start)
-			{
-				pos = (size_t)m_end;
-			}
-			else
-			{
-				// Zero-length match: copy one char verbatim and advance to avoid infinite loop
-				if (pos < content.size())
-					result += content[pos];
-				pos++;
-			}
 		}
 
-		result.append(content.data() + pos, content.size() - pos);
-		regfree(&re);
+		result.append(content, copied, content.size() - copied);
 
 		if (limit > 0 && count == 0)
 		{
@@ -654,24 +632,22 @@ GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
         }
     }
 
-    // Compile regex (REG_NOSUB: we only need match/no-match, not sub-expressions)
-    regex_t re;
-    bool re_compiled = false;
+    // Compile the regex once (ECMAScript). We only need match/no-match per line.
+    std::regex compiled_regex;
     if (use_regex)
     {
-        int flags = REG_EXTENDED | REG_NOSUB;
-        if (case_insensitive)
-            flags |= REG_ICASE;
-        int err = regcomp(&re, pattern.c_str(), flags);
-        if (err != 0)
+        try
         {
-            char buf[512];
-            regerror(err, &re, buf, sizeof(buf));
-            regfree(&re);
-            result.error = std::string("regex error: ") + buf;
+            auto syntax = std::regex::ECMAScript;
+            if (case_insensitive)
+                syntax |= std::regex::icase;
+            compiled_regex.assign(pattern, syntax);
+        }
+        catch (const std::regex_error &regex_error)
+        {
+            result.error = std::string("regex error: ") + regex_error.what();
             return result;
         }
-        re_compiled = true;
     }
 
     // Find matching line indices (stop counting at max_matches)
@@ -680,12 +656,11 @@ GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
     for (int i = 0; i < n_lines && result.match_count < max_matches; ++i)
     {
         auto [s, e] = line_ranges[i];
-        // Build null-terminated line string; the regexec/find operates on it
         std::string line(content.data() + s, e - s);
         bool matched = false;
         if (use_regex)
         {
-            matched = (regexec(&re, line.c_str(), 0, nullptr, 0) == 0);
+            matched = std::regex_search(line, compiled_regex);
         }
         else if (case_insensitive)
         {
@@ -701,9 +676,6 @@ GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
             ++result.match_count;
         }
     }
-
-    if (re_compiled)
-        regfree(&re);
 
     if (match_indices.empty())
         return result; // text stays empty

@@ -157,7 +157,7 @@ Each parameter is marked with one of:
       "oldText":        "<string>",    // [std] Text to find (required)
       "newText":        "<string>",    // [std] Replacement text (default: "")
       "limit":          <integer>,     // [ext] Max replacements (default 1; 0 = unlimited)
-      "isRegex":        <boolean>,     // [ext] Treat oldText as POSIX ERE (default false)
+      "isRegex":        <boolean>,     // [ext] Treat oldText as ECMAScript (JS) regex (default false)
       "caseInsensitive": <boolean>     // [ext] Case-insensitive match (default false)
     }
   ],
@@ -170,7 +170,7 @@ Each parameter is marked with one of:
    - Try exact substring match first.
    - If not found: try **whitespace-normalized** line match — strips the common leading indent from both `oldText` and the candidate content block, then compares line-by-line. This lets `oldText` be copied from a differently-indented context.
    - On replacement: the original indentation of the matched block is preserved and applied to `newText`.
-2. **Extended — regex** (`isRegex: true`): match with POSIX ERE. `newText` may use `\1`–`\9` back-references. No whitespace-normalized fallback.
+2. **Extended — regex** (`isRegex: true`): match with an ECMAScript (JavaScript) regex. `newText` may use `\1`–`\9` back-references. No whitespace-normalized fallback.
 3. **Extended — case-insensitive** (`caseInsensitive: true`): case-insensitive literal or (combined with `isRegex`) regex match. No whitespace-normalized fallback.
 4. **Extended — limit** (`limit: 0` = unlimited, `limit: N > 1`): replace up to N occurrences. Whitespace-normalized fallback only applies when `limit: 1`.
 
@@ -235,11 +235,11 @@ Walks `directory` recursively. Returns the absolute path of every file or direct
 ## `grep_files` [ext]
 
 Extended tool: content search (grep-style) inside files. **Always regex** — the
-query is a POSIX ERE matched against file contents.
+query is an ECMAScript (JavaScript) regex matched against file contents.
 
 ```json
 {
-  "regex":           "<string>",    // [ext] POSIX ERE searched in file CONTENTS (required)
+  "regex":           "<string>",    // [ext] ECMAScript (JS) regex searched in file CONTENTS (required)
   "directory":       "<string>",    // [ext] Root directory, walked recursively
   "globs":           ["<string>", ...], // [ext] File globs; relative -> under directory, absolute -> as-is
   "excludeGlobs":    ["<string>", ...], // [ext] Glob exclusions (honored in every mode)
@@ -259,7 +259,7 @@ query is a POSIX ERE matched against file contents.
   resolve under the **project directory** (the first allowed directory).
   **Relative globs are never resolved against the process working directory.**
 
-For a literal-substring content search, escape ERE metacharacters in `regex`
+For a literal-substring content search, escape regex metacharacters in `regex`
 (e.g. `\*`, `\.`). To search by **filename** instead of contents, use
 `glob_search` (by glob) or `search_files` (by name substring).
 

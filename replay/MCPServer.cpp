@@ -40,7 +40,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <limits.h>
-#include <regex.h>
+#include <regex>
 
 static constexpr const char *kProtocolVersion = "2024-11-05";
 static constexpr const char *kServerName      = "replay-mcp";
@@ -734,7 +734,7 @@ static void dispatch_mcp_tool(const std::string &tool,
     else if (tool == "grep_files")
     {
         // [ext] Content search (grep-style). Vocabulary (2.1):
-        //   regex        — POSIX ERE searched in file CONTENTS (required, always regex)
+        //   regex        — ECMAScript regex searched in file CONTENTS (required, always regex)
         //   directory    — root dir, walked recursively (optional if every glob is absolute)
         //   globs        — file globs; relative globs resolve UNDER directory, absolute
         //                  globs (starting with '/') are honored as-is. Omit to search
@@ -755,10 +755,10 @@ static void dispatch_mcp_tool(const std::string &tool,
             if (regex_value.get_bool().has_value())
                 PrintMCPError(context, ac, -32602,
                     "regex is now the search pattern string, not a boolean flag — "
-                    "pass the POSIX ERE pattern as a string");
+                    "pass the ECMAScript (JavaScript) regex pattern as a string");
             else
                 PrintMCPError(context, ac, -32602,
-                    "Missing required param: regex (the POSIX ERE search pattern)");
+                    "Missing required param: regex (the ECMAScript regex search pattern)");
             return;
         }
         std::string pattern(*regex_string);
@@ -783,24 +783,23 @@ static void dispatch_mcp_tool(const std::string &tool,
         else if (auto unsigned_max = args.obj_get("maxResults").get_uint(); unsigned_max)
             max_results = (int)std::min((uint64_t)10000, *unsigned_max);
 
-        // --- Validate the regex once, up front. Since grep_files is always-regex now,
-        //     an invalid pattern must be a hard error — not a silent per-file skip.
+        // --- Validate the regex once, up front (ECMAScript / std::regex). Since
+        //     grep_files is always-regex now, an invalid pattern must be a hard
+        //     error — not a silent per-file skip.
         {
-            regex_t compiled_regex;
-            int compile_flags = REG_EXTENDED | REG_NOSUB;
-            if (case_insensitive)
-                compile_flags |= REG_ICASE;
-            int compile_error = regcomp(&compiled_regex, pattern.c_str(), compile_flags);
-            if (compile_error != 0)
+            try
             {
-                char error_buffer[512];
-                regerror(compile_error, &compiled_regex, error_buffer, sizeof(error_buffer));
-                regfree(&compiled_regex);
+                auto syntax = std::regex::ECMAScript;
+                if (case_insensitive)
+                    syntax |= std::regex::icase;
+                std::regex compiled_regex(pattern, syntax);
+            }
+            catch (const std::regex_error &regex_error)
+            {
                 PrintMCPError(context, ac, -32603,
-                              std::string("Invalid regex: ") + error_buffer);
+                              std::string("Invalid regex: ") + regex_error.what());
                 return;
             }
-            regfree(&compiled_regex);
         }
 
         // --- excludeGlobs
@@ -1181,13 +1180,13 @@ static std::string build_tools_list_json()
     {
         auto edit_item_props = doc.new_obj();
         add_str_prop(doc, edit_item_props, "oldText",
-            "Literal text to find — or a POSIX ERE regex when isRegex=true (required)");
+            "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required)");
         add_str_prop(doc, edit_item_props, "newText",
             "Replacement text. Use \\1..\\9 for regex back-references. Default: empty string.");
         add_int_prop(doc, edit_item_props, "limit",
             "Maximum replacements (default 1; 0 = unlimited)");
         add_bool_prop(doc, edit_item_props, "isRegex",
-            "Treat oldText as a POSIX ERE regex pattern (default false)");
+            "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false)");
         add_bool_prop(doc, edit_item_props, "caseInsensitive",
             "Case-insensitive matching (default false)");
         auto edit_item_schema = doc.new_obj();
@@ -1207,7 +1206,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "properties", props);
         doc.obj_add(schema, "required", make_req(doc, {"path", "edits"}));
         doc.arr_append(tools, add_tool(doc, "edit_file",
-            "Apply text edits to a file. Supports literal and POSIX ERE regex matching, "
+            "Apply text edits to a file. Supports literal and ECMAScript (JavaScript) regex matching, "
             "back-references, case-insensitive mode, and configurable replacement limits. "
             "Writes atomically. Extended beyond standard MCP edit_file.", schema));
     }
@@ -1216,13 +1215,13 @@ static std::string build_tools_list_json()
     {
         auto edit_item_props = doc.new_obj();
         add_str_prop(doc, edit_item_props, "oldText",
-            "Literal text to find — or a POSIX ERE regex when isRegex=true (required)");
+            "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required)");
         add_str_prop(doc, edit_item_props, "newText",
             "Replacement text. Use \\1..\\9 for regex back-references. Default: empty string.");
         add_int_prop(doc, edit_item_props, "limit",
             "Maximum replacements per file (default 1; 0 = unlimited)");
         add_bool_prop(doc, edit_item_props, "isRegex",
-            "Treat oldText as a POSIX ERE regex pattern (default false)");
+            "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false)");
         add_bool_prop(doc, edit_item_props, "caseInsensitive",
             "Case-insensitive matching (default false)");
         auto edit_item_schema = doc.new_obj();
@@ -1402,8 +1401,8 @@ static std::string build_tools_list_json()
                         "Omit to search every file under 'directory'."));
         auto props = doc.new_obj();
         add_str_prop(doc, props, "regex",
-            "POSIX ERE regex searched in file CONTENTS (required). For a literal "
-            "substring, escape regex metacharacters (e.g. \\* \\. \\+).");
+            "ECMAScript (JavaScript) regex searched in file CONTENTS (required). Supports "
+            "\\d \\w \\s, etc. For a literal substring, escape regex metacharacters (e.g. \\* \\. \\+).");
         add_str_prop(doc, props, "directory",
             "Absolute root directory, searched recursively. When omitted, relative globs "
             "resolve under the project directory (the first allowed directory). Required "
@@ -1421,7 +1420,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "properties", props);
         doc.obj_add(schema, "required", make_req(doc, {"regex"}));
         doc.arr_append(tools, add_tool(doc, "grep_files",
-            "[Extended] Search file CONTENTS for a POSIX ERE regex (grep-style). "
+            "[Extended] Search file CONTENTS for an ECMAScript (JavaScript) regex (grep-style). "
             "Returns file:line:content matches. Scope the search with 'directory' "
             "(walk a tree) and/or 'globs' (e.g. **/*.swift); narrow with 'excludeGlobs'. "
             "To find files by NAME use glob_search (by glob) or search_files (by name "

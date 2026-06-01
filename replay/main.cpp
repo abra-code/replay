@@ -267,7 +267,7 @@ DisplayHelp(void)
 		"      oldText   Text or pattern to search for (required).\n"
 		"      newText   Replacement text. In regex mode \\\\1..\\\\9 are back-references. Default \"\" (delete).\n"
 		"      limit     Max replacements per operation. Default 1. Set to 0 for unlimited.\n"
-		"      regex     Bool. Treat oldText as a POSIX ERE regex pattern. Default false.\n"
+		"      regex     Bool. Treat oldText as an ECMAScript (JavaScript) regex pattern. Default false.\n"
 		"      case-insensitive   Bool. Case-insensitive matching for literal and regex modes. Default false.\n"
 		"    dry-run   Bool. Show the edit plan without writing the file. Default false.\n"
 		"              In dry-run mode output is: [edit-dry-run:path]<newline> followed by one line per\n"

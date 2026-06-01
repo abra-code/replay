@@ -22,7 +22,7 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 | `edit_file` | `path`, `edits` | ✓ | Structured edits: literal/regex, backrefs, limit, caseInsensitive. |
 | `edit_files` | `paths`, `edits` | ✓ | Multi-file edit with glob expansion. |
 | `glob_search` | `directory`, `globs` | ✓ | Filename-glob search; `globs` array, brace alternation `{a,b}`, `excludeGlobs`. Returns files only (not directories). |
-| `grep_files` | `regex` | ✓ | Content search (grep), always POSIX ERE. Requires `directory` and/or `globs`. Case-insensitive, context lines. |
+| `grep_files` | `regex` | ✓ | Content search (grep), always ECMAScript regex. Requires `directory` and/or `globs`. Case-insensitive, context lines. |
 | `execute_command` | `command` | ✓ | Shell execution, hard-sandboxed via Seatbelt when `--sandbox` is active. |
 
 ---
@@ -41,10 +41,10 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 
 ### `grep_files` — content search (grep-style)
 
-Required: `regex` (the POSIX ERE search pattern). Also required: at least one of `directory` / `globs`.  
+Required: `regex` (the ECMAScript / JavaScript search pattern). Also required: at least one of `directory` / `globs`.  
 Optional: `caseInsensitive`, `contextLines` (default 0, max 50), `maxResults` (default 500, max 10000), `excludeGlobs`.
 
-**The query is always a regex.** There is no boolean flag — `grep_files` is named after grep and behaves like it. For a literal-substring search, escape ERE metacharacters in `regex` (e.g. `\*`, `\.`).
+**The query is always a regex.** There is no boolean flag — `grep_files` is named after grep and behaves like it. The pattern is ECMAScript (JavaScript) syntax, so `\d`, `\w`, `\s`, `\b` and non-greedy quantifiers all work. For a literal-substring search, escape regex metacharacters in `regex` (e.g. `\*`, `\.`).
 
 File selection:
 - **`directory`** (string) — root directory; searched recursively.
@@ -67,10 +67,10 @@ Required: `path`, `edits` (array).
 Optional: `dryRun` (default false).
 
 Each edit item has:
-- `oldText` (required) — text to find. **Standard mode** (no extended flags): tries exact match first, then falls back to whitespace-normalized line matching (strips common leading indent per block, then compares). **Extended mode** (`isRegex: true`): POSIX ERE pattern.
+- `oldText` (required) — text to find. **Standard mode** (no extended flags): tries exact match first, then falls back to whitespace-normalized line matching (strips common leading indent per block, then compares). **Extended mode** (`isRegex: true`): ECMAScript (JavaScript) regex pattern.
 - `newText` — replacement (default empty). In standard mode, indentation of the matched block is preserved. In regex mode, supports `\1`–`\9` back-references.
 - `limit` — max replacements (default 1; 0 = unlimited). Extended: limit ≠ 1 disables whitespace-normalized fallback.
-- `isRegex` — treat `oldText` as ERE pattern (default false). Extended.
+- `isRegex` — treat `oldText` as an ECMAScript regex pattern (default false). Extended.
 - `caseInsensitive` — case-insensitive match (default false). Extended. Disables whitespace-normalized fallback.
 
 `dryRun: true` reads the file, applies all edits to an in-memory copy, and returns a unified diff (`--- / +++ / @@ ... @@`) without writing. Returns `(no changes)` if the edits produce no difference. If the file does not exist, falls back to listing intended edits.

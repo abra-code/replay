@@ -146,7 +146,7 @@ MCPEditResult EditFileMCPCore(const std::string &filePath, const std::vector<Fil
 // timeoutSeconds: SIGTERM at deadline, SIGKILL after 3s grace.
 MCPExecuteResult ExcecuteToolMCPCore(const std::string &toolPath, const std::vector<std::string> &arguments,
                                       const std::string &workingDir, int timeoutSeconds);
-// pattern: literal or POSIX ERE string. max_matches: stops counting (not formatting) at this limit.
+// pattern: literal or ECMAScript regex string. max_matches: stops counting (not formatting) at this limit.
 MCPGrepResult GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
                                bool use_regex, bool case_insensitive,
                                int context_lines, int max_matches);
