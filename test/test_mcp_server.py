@@ -196,7 +196,7 @@ def run_mcp_stress_test(allow_write: list[str] = (), *,
         elif tool_choice == 3:
             msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
                    "params": {"name": "glob_search",
-                              "arguments": {"path": allow_write[0], "pattern": "*.txt"}}}
+                              "arguments": {"directory": allow_write[0], "globs": ["*.txt"]}}}
         elif tool_choice == 4:
             msg = {"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
                    "params": {"name": "get_file_info",
@@ -695,7 +695,7 @@ def test_glob_search_files_only(tmpdir: str) -> None:
         # glob_search must return only files.
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "glob_search",
-                    "arguments": {"path": d, "pattern": "src*"}}},
+                    "arguments": {"directory": d, "globs": ["src*"]}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[3])
@@ -1046,27 +1046,27 @@ def test_glob_search(tmpdir: str) -> None:
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "write_file",
                     "arguments": {"path": f"{d}/include/util.h", "content": ""}}},
-        # Multi-pattern (array)
+        # Multiple globs
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
          "params": {"name": "glob_search",
-                    "arguments": {"path": d,
-                                  "patterns": ["**/*.cpp", "**/*.h"]}}},
-        # Single pattern string
+                    "arguments": {"directory": d,
+                                  "globs": ["**/*.cpp", "**/*.h"]}}},
+        # Single-element globs array
         {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
          "params": {"name": "glob_search",
-                    "arguments": {"path": d, "pattern": "src/*.cpp"}}},
+                    "arguments": {"directory": d, "globs": ["src/*.cpp"]}}},
     ], [tmpdir], sequential=True)
 
     text4 = text_of(by_id[4])
-    check("glob_search multi-pattern: cpp files present",
+    check("glob_search multiple globs: cpp files present",
           "main.cpp" in text4 and "util.cpp" in text4, text4)
-    check("glob_search multi-pattern: header present",
+    check("glob_search multiple globs: header present",
           "util.h" in text4, text4)
 
     text5 = text_of(by_id[5])
-    check("glob_search single pattern: cpp files present",
+    check("glob_search single glob: cpp files present",
           "main.cpp" in text5 and "util.cpp" in text5, text5)
-    check("glob_search single pattern: header excluded",
+    check("glob_search single glob: header excluded",
           "util.h" not in text5, text5)
 
 
@@ -1484,8 +1484,8 @@ def test_delete_directory(tmpdir: str) -> None:
           is_error(by_id[4]), str(by_id[4]))
 
 
-def test_glob_search_exclude_patterns(tmpdir: str) -> None:
-    print("=== MCP: glob_search (excludePatterns) ===")
+def test_glob_search_exclude_globs(tmpdir: str) -> None:
+    print("=== MCP: glob_search (excludeGlobs) ===")
 
     d = f"{tmpdir}/excl"
     by_id = run_mcp([
@@ -1497,15 +1497,15 @@ def test_glob_search_exclude_patterns(tmpdir: str) -> None:
                     "arguments": {"path": f"{d}/vendor/lib.cpp", "content": ""}}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "glob_search",
-                    "arguments": {"path": d,
-                                  "patterns": ["**/*.cpp"],
-                                  "excludePatterns": ["vendor/**"]}}},
+                    "arguments": {"directory": d,
+                                  "globs": ["**/*.cpp"],
+                                  "excludeGlobs": ["vendor/**"]}}},
     ], [tmpdir], sequential=True)
 
     text3 = text_of(by_id[3])
-    check("glob_search excludePatterns: src/main.cpp included",
+    check("glob_search excludeGlobs: src/main.cpp included",
           "main.cpp" in text3, text3)
-    check("glob_search excludePatterns: vendor/lib.cpp excluded",
+    check("glob_search excludeGlobs: vendor/lib.cpp excluded",
           "lib.cpp" not in text3, text3)
 
 
@@ -1525,7 +1525,7 @@ def test_glob_search_brace(tmpdir: str) -> None:
                     "arguments": {"path": f"{d}/README.txt", "content": ""}}},
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
          "params": {"name": "glob_search",
-                    "arguments": {"path": d, "pattern": "**/*.{cpp,h}"}}},
+                    "arguments": {"directory": d, "globs": ["**/*.{cpp,h}"]}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[4])
@@ -1535,6 +1535,18 @@ def test_glob_search_brace(tmpdir: str) -> None:
           "util.h" in text, text)
     check("brace alternation: .txt file excluded",
           "README.txt" not in text, text)
+
+
+def test_glob_search_missing_globs(tmpdir: str) -> None:
+    print("=== MCP: glob_search (missing globs -> -32602) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "glob_search", "arguments": {"directory": tmpdir}}},
+    ], [tmpdir])
+
+    check("glob_search missing globs -> -32602",
+          is_error(by_id[1], -32602), str(by_id[1]))
 
 
 def test_edit_files_literal(tmpdir: str) -> None:
@@ -1969,8 +1981,9 @@ def main() -> int:
         test_read_binary_file(tmpdir)
         test_read_multiple_files(tmpdir)
         test_glob_search(tmpdir)
-        test_glob_search_exclude_patterns(tmpdir)
+        test_glob_search_exclude_globs(tmpdir)
         test_glob_search_brace(tmpdir)
+        test_glob_search_missing_globs(tmpdir)
         test_list_allowed_directories(tmpdir)
         test_path_validation(tmpdir)
         test_missing_required_params(tmpdir)

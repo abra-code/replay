@@ -280,17 +280,16 @@ Binary files (containing null bytes in the first 4 KB) are skipped silently.
 
 ```json
 {
-  "path":            "<string>",    // [ext] Root directory (required)
-  "pattern":         "<string>",    // [ext] Single glob pattern (alternative to patterns)
-  "patterns":        ["<string>", ...], // [ext] Multiple glob patterns relative to path
-  "excludePatterns": ["<string>", ...], // [ext] Exclusion globs
-  "max":             <integer>      // [ext] Result cap (default 1000; 0 = unlimited)
+  "directory":    "<string>",        // [ext] Root directory (required)
+  "globs":        ["<string>", ...], // [ext] Glob patterns relative to directory (required)
+  "excludeGlobs": ["<string>", ...], // [ext] Exclusion globs
+  "max":          <integer>          // [ext] Result cap (default 1000; 0 = unlimited)
 }
 ```
 
-Finds **files** by filename pattern (directories are not returned). Glob syntax: `**` (recursive), `?` (single char), `{a,b}` (alternation). Case-insensitive on APFS. Either `pattern` (string) or `patterns` (array) is required.
+Finds **files** by filename glob (directories are not returned). Glob syntax: `**` (recursive), `?` (single char), `{a,b}` (alternation). Case-insensitive on APFS. `globs` are relative to `directory`. To search file contents use `grep_files`; to match a literal name substring use `search_files`.
 
-**Errors:** `-32001` · `-32602` missing patterns
+**Errors:** `-32001` · `-32602` missing `directory` or `globs`
 
 ---
 

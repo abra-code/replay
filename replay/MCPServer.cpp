@@ -945,56 +945,53 @@ static void dispatch_mcp_tool(const std::string &tool,
     }
     else if (tool == "glob_search")
     {
-        auto path = validate_and_get(args, "path", *opts, false, ac, context);
-        if (path.empty())
+        auto directory = validate_and_get(args, "directory", *opts, false, ac, context);
+        if (directory.empty())
             return;
 
-        std::vector<std::string> patterns;
+        std::vector<std::string> globs;
         {
-            auto pats_val = args.obj_get("patterns");
-            if (pats_val.is_arr())
+            auto globs_value = args.obj_get("globs");
+            if (globs_value.is_arr())
             {
-                Json::ArrIter it(pats_val);
-                while (it.has_next())
+                Json::ArrIter glob_iterator(globs_value);
+                while (glob_iterator.has_next())
                 {
-                    auto pv = it.next();
-                    if (auto s = pv.get_str(); s)
-                        patterns.push_back(std::string(*s));
+                    auto glob_entry = glob_iterator.next();
+                    if (auto glob_string = glob_entry.get_str(); glob_string)
+                        globs.push_back(std::string(*glob_string));
                 }
             }
-            else if (auto s = args.obj_get("pattern").get_str(); s)
+            if (globs.empty())
             {
-                patterns.push_back(std::string(*s));
-            }
-            if (patterns.empty())
-            {
-                PrintMCPError(context, ac, -32602, "Missing required param: patterns or pattern");
+                PrintMCPError(context, ac, -32602,
+                              "Missing required param: globs (array of glob patterns)");
                 return;
             }
         }
 
-        std::vector<std::string> excludes;
+        std::vector<std::string> exclude_globs;
         {
-            auto excl_val = args.obj_get("excludePatterns");
-            if (excl_val.is_arr())
+            auto exclude_value = args.obj_get("excludeGlobs");
+            if (exclude_value.is_arr())
             {
-                Json::ArrIter it(excl_val);
-                while (it.has_next())
+                Json::ArrIter exclude_iterator(exclude_value);
+                while (exclude_iterator.has_next())
                 {
-                    auto ev = it.next();
-                    if (auto s = ev.get_str(); s)
-                        excludes.push_back(std::string(*s));
+                    auto exclude_entry = exclude_iterator.next();
+                    if (auto exclude_string = exclude_entry.get_str(); exclude_string)
+                        exclude_globs.push_back(std::string(*exclude_string));
                 }
             }
         }
 
-        intptr_t maxR = 1000;
-        if (auto mv = args.obj_get("max").get_sint(); mv && *mv > 0)
-            maxR = (intptr_t)*mv;
-        else if (auto mv2 = args.obj_get("max").get_uint(); mv2)
-            maxR = (intptr_t)*mv2;
+        intptr_t max_results = 1000;
+        if (auto signed_max = args.obj_get("max").get_sint(); signed_max && *signed_max > 0)
+            max_results = (intptr_t)*signed_max;
+        else if (auto unsigned_max = args.obj_get("max").get_uint(); unsigned_max)
+            max_results = (intptr_t)*unsigned_max;
 
-        GlobFiles(path, patterns, excludes, maxR, context, ac);
+        GlobFiles(directory, globs, exclude_globs, max_results, context, ac);
     }
     else if (tool == "read_multiple_files")
     {
@@ -1442,33 +1439,35 @@ static std::string build_tools_list_json()
 
     // glob_search (extended)
     {
-        auto pats_prop = doc.new_obj();
-        doc.obj_add(pats_prop, "type", doc.new_str("array"));
-        auto pats_items = doc.new_obj();
-        doc.obj_add(pats_items, "type", doc.new_str("string"));
-        doc.obj_add(pats_prop, "items", pats_items);
-        doc.obj_add(pats_prop, "description",
-            doc.new_str("Glob patterns relative to path (e.g. **/*.swift, src/*.{cpp,h})"));
-        auto excl_prop = doc.new_obj();
-        doc.obj_add(excl_prop, "type", doc.new_str("array"));
+        auto globs_items = doc.new_obj();
+        doc.obj_add(globs_items, "type", doc.new_str("string"));
+        auto globs_prop = doc.new_obj();
+        doc.obj_add(globs_prop, "type", doc.new_str("array"));
+        doc.obj_add(globs_prop, "items", globs_items);
+        doc.obj_add(globs_prop, "description",
+            doc.new_str("Glob patterns relative to 'directory' (e.g. **/*.swift, src/*.{cpp,h})"));
         auto excl_items = doc.new_obj();
         doc.obj_add(excl_items, "type", doc.new_str("string"));
+        auto excl_prop = doc.new_obj();
+        doc.obj_add(excl_prop, "type", doc.new_str("array"));
         doc.obj_add(excl_prop, "items", excl_items);
+        doc.obj_add(excl_prop, "description",
+            doc.new_str("Glob patterns to exclude from the results"));
         auto props = doc.new_obj();
-        add_str_prop(doc, props, "path", "Absolute root directory to search");
-        add_str_prop(doc, props, "pattern", "Single glob pattern (alternative to patterns array)");
-        doc.obj_add(props, "patterns",        pats_prop);
-        doc.obj_add(props, "excludePatterns", excl_prop);
+        add_str_prop(doc, props, "directory", "Absolute root directory to search");
+        doc.obj_add(props, "globs",        globs_prop);
+        doc.obj_add(props, "excludeGlobs", excl_prop);
         add_int_prop(doc, props, "max", "Maximum results (default 1000; 0 = unlimited)");
         auto schema = doc.new_obj();
         doc.obj_add(schema, "type", doc.new_str("object"));
         doc.obj_add(schema, "properties", props);
-        doc.obj_add(schema, "required", make_req(doc, {"path"}));
+        doc.obj_add(schema, "required", make_req(doc, {"directory", "globs"}));
         doc.arr_append(tools, add_tool(doc, "glob_search",
-            "[Extended] Search for files by filename pattern using replay's glob engine. "
+            "[Extended] Find files by filename GLOB using replay's glob engine. "
             "Returns matching files only (not directories). Supports "
             "** (recursive), ? (single char), {a,b} (alternation). "
-            "Accepts a single pattern or an array of patterns relative to path.", schema));
+            "Globs are relative to 'directory'. To search file CONTENTS use grep_files; "
+            "to match a literal name substring use search_files.", schema));
     }
 
     doc.set_root(tools);

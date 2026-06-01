@@ -21,7 +21,7 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 | `search_files` | `path`, `pattern` | | Standard MCP: case-insensitive literal substring match against basenames. No result cap. `pattern` is not a glob or regex. |
 | `edit_file` | `path`, `edits` | ✓ | Structured edits: literal/regex, backrefs, limit, caseInsensitive. |
 | `edit_files` | `paths`, `edits` | ✓ | Multi-file edit with glob expansion. |
-| `glob_search` | `path` | ✓ | Multi-pattern array, brace alternation `{a,b}`, `excludePatterns`. Returns files only (not directories). |
+| `glob_search` | `directory`, `globs` | ✓ | Filename-glob search; `globs` array, brace alternation `{a,b}`, `excludeGlobs`. Returns files only (not directories). |
 | `grep_files` | `regex` | ✓ | Content search (grep), always POSIX ERE. Requires `directory` and/or `globs`. Case-insensitive, context lines. |
 | `execute_command` | `command` | ✓ | Shell execution, hard-sandboxed via Seatbelt when `--sandbox` is active. |
 
@@ -134,16 +134,16 @@ Runs `command` via `/bin/sh -c <command>`. Captures both stdout and stderr. Supp
 
 ---
 
-### `glob_search` — multi-pattern file search
+### `glob_search` — filename-glob file search
 
-Required: `path`.  
-Optional: `patterns` (array), `pattern` (single string), `excludePatterns`, `max` (default 1000).
+Required: `directory`, `globs` (array).  
+Optional: `excludeGlobs`, `max` (default 1000).
 
-Uses replay's glob engine which supports `**`, `?`, `{a,b}` alternation. Accepts either a `patterns` array or a single `pattern` string. **Returns files only — directories are not included in results**, even when a directory's name matches the pattern.
+Uses replay's glob engine which supports `**`, `?`, `{a,b}` alternation. `globs` are relative to `directory`. **Returns files only — directories are not included in results**, even when a directory's name matches a glob.
 
-**vs. `search_files`**: `search_files` does a literal substring match against basenames (no glob syntax). `glob_search` interprets patterns as globs with wildcards and alternation.
+**vs. `search_files`**: `search_files` does a literal substring match against basenames (no glob syntax). `glob_search` interprets `globs` as glob patterns with wildcards and alternation.
 
-**vs. `grep_files`**: `grep_files` searches file *contents*. `glob_search` finds files by *filename pattern*.
+**vs. `grep_files`**: `grep_files` searches file *contents*. `glob_search` finds files by *filename glob*.
 
 ---
 
