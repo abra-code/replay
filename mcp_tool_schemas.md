@@ -88,10 +88,10 @@ Each parameter is marked with one of:
 **Response:** `result.content[0].text` is a JSON tree `{name, type, children[]}`.
 
 **`depth` semantics** (`find -maxdepth` convention):
-- Omitted → unlimited (full recursive tree, standard MCP behavior)
-- `0` → root node only, no children
-- `1` → root + immediate children
-- `N` → N levels deep
+- Omitted -> unlimited (full recursive tree, standard MCP behavior)
+- `0` -> root node only, no children
+- `1` -> root + immediate children
+- `N` -> N levels deep
 
 **[std]:** `path` only, no `depth` parameter, full recursive tree is the standard behavior.  
 **[ext]:** `depth` parameter to cap recursion.  
@@ -197,8 +197,8 @@ Each parameter is marked with one of:
 ```
 
 **`paths` entries:**
-- Literal absolute path → edits exactly that file.
-- Glob pattern (contains `*`, `?`, `{`, `}`, or `[`) → expanded at runtime. Error `-32002` if no files match. Error `-32001` if any match is outside allowed dirs.
+- Literal absolute path -> edits exactly that file.
+- Glob pattern (contains `*`, `?`, `{`, `}`, or `[`) -> expanded at runtime. Error `-32002` if no files match. Error `-32001` if any match is outside allowed dirs.
 
 **Response:** `result.content` array, one item per resolved file. Per-file edit failures appear as `path: [error CODE] message` inline; the call does not error at JSON-RPC level.
 
@@ -232,22 +232,34 @@ Walks `path` recursively. Returns the absolute path of every file or directory w
 
 ## `grep_files` [ext]
 
-Extended tool: content search (grep-style) inside files.
+Extended tool: content search (grep-style) inside files. **Always regex** — the
+query is a POSIX ERE matched against file contents.
 
 ```json
 {
-  "path":            "<string>",    // [ext] Root directory (walk recursively)
-  "paths":           ["<string>", ...], // [ext] Explicit paths/globs (overrides path)
-  "pattern":         "<string>",    // [ext] Content search pattern (required)
-  "regex":           <boolean>,     // [ext] POSIX ERE (default false)
-  "caseInsensitive": <boolean>,     // [ext] Case-insensitive (default false)
+  "regex":           "<string>",    // [ext] POSIX ERE searched in file CONTENTS (required)
+  "directory":       "<string>",    // [ext] Root directory, walked recursively
+  "globs":           ["<string>", ...], // [ext] File globs; relative -> under directory, absolute -> as-is
+  "excludeGlobs":    ["<string>", ...], // [ext] Glob exclusions (honored in every mode)
+  "caseInsensitive": <boolean>,     // [ext] Case-insensitive, grep -i (default false)
   "contextLines":    <integer>,     // [ext] Lines before/after each match, grep -C style (default 0, max 50)
-  "maxResults":      <integer>,     // [ext] Total match cap (default 500, max 10000)
-  "excludePatterns": ["<string>", ...] // [ext] Glob exclusions (applied with path root dir)
+  "maxResults":      <integer>      // [ext] Total match cap (default 500, max 10000)
 }
 ```
 
-Either `path` or `paths` is required. `paths` entries may be literal absolute paths or glob patterns that expand at runtime.
+`regex` is required, plus at least one of `directory` / `globs`.
+
+**File selection:**
+- `directory` only -> every file under it is searched recursively.
+- `globs` with a `directory` -> relative globs (e.g. `**/*.sh`) resolve **under**
+  `directory`; absolute globs (starting with `/`) are used as-is.
+- `globs` without a `directory` -> absolute globs are used as-is; relative globs
+  resolve under the **project directory** (the first allowed directory).
+  **Relative globs are never resolved against the process working directory.**
+
+For a literal-substring content search, escape ERE metacharacters in `regex`
+(e.g. `\*`, `\.`). To search by **filename** instead of contents, use
+`glob_search` (by glob) or `search_files` (by name substring).
 
 **Output format:** grep-style lines:
 ```
@@ -256,11 +268,11 @@ Either `path` or `paths` is required. `paths` entries may be literal absolute pa
 /abs/path/file-6-context line after
 --
 ```
-Match lines use `:` separators; context lines use `-`. Groups are separated by `--`. Footer: `[N matches]`. Truncated results prepend a notice.
+Match lines use `:` separators; context lines use `-`. Groups are separated by `--`. Footer: `[N matches]`. Truncated results prepend a notice. If any candidate path was outside the allowed directories it is skipped (not fatal) and a `[N path(s) skipped …]` note is appended.
 
 Binary files (containing null bytes in the first 4 KB) are skipped silently.
 
-**Errors:** `-32001` · `-32002` glob no match · `-32602` missing `pattern`
+**Errors:** `-32001` directory outside allowed dirs · `-32602` missing `regex`, or `regex` sent as the removed boolean flag, or neither `directory` nor `globs` given · `-32603` invalid regex
 
 ---
 

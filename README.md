@@ -93,11 +93,12 @@ Options:
   --mcp-server       Start an MCP (Model Context Protocol) stdio server.
                      Use --allow-read PATH for read-only dirs and --allow-write PATH for
                      read-write dirs (repeatable). Both flags imply --sandbox.
-                     Implements the standard MCP filesystem tool set plus extended tools:
-                     read_file, read_multiple_files, write_file, edit_file (with regex),
-                     create_directory, list_directory, directory_tree, move_file,
-                     delete_file, search_files, get_file_info,
-                     list_allowed_directories, glob_search.
+                     The FIRST allowed directory is the project (working) directory:
+                     tools with an optional 'directory' param (e.g. grep_files) resolve
+                     relative globs under it when 'directory' is omitted.
+                     Implements the standard MCP filesystem tool set plus extended tools
+                     (grep_files, glob_search, edit_files, execute_command).
+                     See mcp_tools_reference.md for the full tool and parameter reference.
   -V, --version      Display version.
   -h, --help         Display this help.
 

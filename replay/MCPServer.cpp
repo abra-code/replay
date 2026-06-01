@@ -28,6 +28,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <fstream>
@@ -39,6 +40,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <limits.h>
+#include <regex.h>
 
 static constexpr const char *kProtocolVersion = "2024-11-05";
 static constexpr const char *kServerName      = "replay-mcp";
@@ -126,7 +128,9 @@ static PathResult validate_path(const std::string &requested,
         if (r.canonical == dir.path || r.canonical.starts_with(dir.path + "/"))
             return {true, r.canonical, {}};
     }
-    return {false, {}, "Path not allowed: " + r.canonical};
+    return {false, {},
+            "Path not allowed: " + r.canonical +
+            " is outside the allowed directories (use list_allowed_directories to see them)"};
 }
 
 // ============================================================================
@@ -718,132 +722,190 @@ static void dispatch_mcp_tool(const std::string &tool,
     }
     else if (tool == "grep_files")
     {
-        // [ext] Content search (grep-style). Accepts:
-        //   path      — root directory, search all files recursively
-        //   paths     — array of absolute paths / glob patterns (overrides path)
-        //   pattern   — content pattern (required)
-        //   excludePatterns — file glob exclusions (applied with path root dir)
-        //   regex, caseInsensitive, contextLines, maxResults
+        // [ext] Content search (grep-style). Vocabulary (2.1):
+        //   regex        — POSIX ERE searched in file CONTENTS (required, always regex)
+        //   directory    — root dir, walked recursively (optional if every glob is absolute)
+        //   globs        — file globs; relative globs resolve UNDER directory, absolute
+        //                  globs (starting with '/') are honored as-is. Omit to search
+        //                  every file under directory.
+        //   excludeGlobs — glob exclusions, honored in every mode
+        //   caseInsensitive, contextLines, maxResults
+        //
+        // Behavior notes vs. the non-MCP replay glob engine: relative globs are NEVER
+        // resolved against the process cwd here — only against the validated directory
+        // root (or, absent a directory, each allowed directory). Out-of-bounds matches
+        // are skipped, not fatal, since this is a read-only search.
 
-        auto pat_sv = args.obj_get("pattern").get_str();
-        if (!pat_sv)
+        // --- regex (required string). Reject the removed boolean flag with a clear hint.
+        auto regex_value = args.obj_get("regex");
+        auto regex_string = regex_value.get_str();
+        if (!regex_string)
         {
-            PrintMCPError(context, ac, -32602, "Missing required param: pattern");
+            if (regex_value.get_bool().has_value())
+                PrintMCPError(context, ac, -32602,
+                    "regex is now the search pattern string, not a boolean flag — "
+                    "pass the POSIX ERE pattern as a string");
+            else
+                PrintMCPError(context, ac, -32602,
+                    "Missing required param: regex (the POSIX ERE search pattern)");
             return;
         }
-        std::string pattern(*pat_sv);
+        std::string pattern(*regex_string);
 
-        bool use_regex = false;
-        if (auto v = args.obj_get("regex").get_bool(); v)
-            use_regex = *v;
         bool case_insensitive = false;
-        if (auto v = args.obj_get("caseInsensitive").get_bool(); v)
-            case_insensitive = *v;
+        if (auto case_insensitive_value = args.obj_get("caseInsensitive").get_bool();
+            case_insensitive_value)
+            case_insensitive = *case_insensitive_value;
 
         int context_lines = 0;
-        if (auto v = args.obj_get("contextLines").get_sint(); v && *v >= 0)
-            context_lines = (int)std::min((int64_t)50, *v);
-        else if (auto v2 = args.obj_get("contextLines").get_uint(); v2)
-            context_lines = (int)std::min((uint64_t)50, *v2);
+        if (auto signed_context = args.obj_get("contextLines").get_sint();
+            signed_context && *signed_context >= 0)
+            context_lines = (int)std::min((int64_t)50, *signed_context);
+        else if (auto unsigned_context = args.obj_get("contextLines").get_uint();
+                 unsigned_context)
+            context_lines = (int)std::min((uint64_t)50, *unsigned_context);
 
         int max_results = 500;
-        if (auto v = args.obj_get("maxResults").get_sint(); v && *v > 0)
-            max_results = (int)std::min((int64_t)10000, *v);
-        else if (auto v2 = args.obj_get("maxResults").get_uint(); v2)
-            max_results = (int)std::min((uint64_t)10000, *v2);
+        if (auto signed_max = args.obj_get("maxResults").get_sint();
+            signed_max && *signed_max > 0)
+            max_results = (int)std::min((int64_t)10000, *signed_max);
+        else if (auto unsigned_max = args.obj_get("maxResults").get_uint(); unsigned_max)
+            max_results = (int)std::min((uint64_t)10000, *unsigned_max);
 
-        // Collect exclude patterns (used when walking a root directory via path)
-        std::vector<std::string> exclude_strs;
+        // --- Validate the regex once, up front. Since grep_files is always-regex now,
+        //     an invalid pattern must be a hard error — not a silent per-file skip.
         {
-            auto excl_val = args.obj_get("excludePatterns");
-            if (excl_val.is_arr())
+            regex_t compiled_regex;
+            int compile_flags = REG_EXTENDED | REG_NOSUB;
+            if (case_insensitive)
+                compile_flags |= REG_ICASE;
+            int compile_error = regcomp(&compiled_regex, pattern.c_str(), compile_flags);
+            if (compile_error != 0)
             {
-                Json::ArrIter it(excl_val);
-                while (it.has_next())
+                char error_buffer[512];
+                regerror(compile_error, &compiled_regex, error_buffer, sizeof(error_buffer));
+                regfree(&compiled_regex);
+                PrintMCPError(context, ac, -32603,
+                              std::string("Invalid regex: ") + error_buffer);
+                return;
+            }
+            regfree(&compiled_regex);
+        }
+
+        // --- excludeGlobs
+        std::vector<std::string> exclude_globs;
+        {
+            auto exclude_value = args.obj_get("excludeGlobs");
+            if (exclude_value.is_arr())
+            {
+                Json::ArrIter exclude_iterator(exclude_value);
+                while (exclude_iterator.has_next())
                 {
-                    auto ev = it.next();
-                    if (auto s = ev.get_str(); s)
-                        exclude_strs.push_back(std::string(*s));
+                    auto exclude_entry = exclude_iterator.next();
+                    if (auto exclude_string = exclude_entry.get_str(); exclude_string)
+                        exclude_globs.push_back(std::string(*exclude_string));
                 }
             }
         }
 
-        // Build the list of files to search
-        std::vector<std::string> files;
-        bool early_error = false;
-
-        auto paths_val = args.obj_get("paths");
-        if (paths_val.is_arr())
+        // --- directory (optional root, validated if present)
+        std::string root_directory;
+        bool have_directory = false;
+        if (auto directory_string = args.obj_get("directory").get_str(); directory_string)
         {
-            // Extended: explicit paths and/or globs — same expansion as edit_files
-            Json::ArrIter it(paths_val);
-            while (it.has_next() && !early_error)
+            auto directory_validation = validate_path(std::string(*directory_string), *opts, false);
+            if (!directory_validation.ok)
             {
-                auto pv = it.next();
-                auto ps = pv.get_str();
-                if (!ps)
+                PrintMCPError(context, ac, -32001, directory_validation.error);
+                return;
+            }
+            root_directory = directory_validation.canonical;
+            have_directory = true;
+        }
+
+        // --- globs: split into relative (anchored under directory) and absolute (as-is)
+        std::vector<std::string> relative_globs;
+        std::vector<std::string> absolute_globs;
+        bool have_globs = false;
+        if (auto globs_value = args.obj_get("globs"); globs_value.is_arr())
+        {
+            Json::ArrIter glob_iterator(globs_value);
+            while (glob_iterator.has_next())
+            {
+                auto glob_entry = glob_iterator.next();
+                auto glob_string = glob_entry.get_str();
+                if (!glob_string)
                     continue;
-                std::string path_str(*ps);
-
-                if (globoverlap::contains_glob_pattern_char(path_str))
-                {
-                    auto matches = expand_glob(path_str);
-                    if (matches.empty())
-                    {
-                        PrintMCPError(context, ac, -32002,
-                                      "Glob matched no files: " + path_str);
-                        early_error = true;
-                        break;
-                    }
-                    for (const auto &m : matches)
-                    {
-                        auto vr = validate_path(m, *opts, false);
-                        if (!vr.ok)
-                        {
-                            PrintMCPError(context, ac, -32001, vr.error);
-                            early_error = true;
-                            break;
-                        }
-                        files.push_back(vr.canonical);
-                    }
-                }
+                have_globs = true;
+                std::string glob_pattern(*glob_string);
+                if (!glob_pattern.empty() && glob_pattern.front() == '/')
+                    absolute_globs.push_back(std::move(glob_pattern));
                 else
-                {
-                    auto vr = validate_path(path_str, *opts, false);
-                    if (!vr.ok)
-                    {
-                        PrintMCPError(context, ac, -32001, vr.error);
-                        early_error = true;
-                        break;
-                    }
-                    files.push_back(vr.canonical);
-                }
+                    relative_globs.push_back(std::move(glob_pattern));
             }
-        }
-        else
-        {
-            auto path_sv = args.obj_get("path").get_str();
-            if (!path_sv)
-            {
-                PrintMCPError(context, ac, -32602,
-                              "Missing required param: path or paths");
-                return;
-            }
-            auto vr = validate_path(std::string(*path_sv), *opts, false);
-            if (!vr.ok)
-            {
-                PrintMCPError(context, ac, -32001, vr.error);
-                return;
-            }
-            files = glob_files_in_dir(vr.canonical, {"**/*"}, exclude_strs, 0);
         }
 
-        if (early_error)
+        if (!have_directory && !have_globs)
+        {
+            PrintMCPError(context, ac, -32602,
+                          "Provide directory and/or globs to select files to search");
             return;
+        }
+        if (!have_directory && !relative_globs.empty() && opts->allowedDirs.empty())
+        {
+            PrintMCPError(context, ac, -32001,
+                          "Relative globs require a directory: no allowed directories configured");
+            return;
+        }
+
+        // --- Collect the candidate files (deduped + sorted via set), honoring excludeGlobs.
+        std::set<std::string> candidate_files;
+
+        // Relative globs (or a directory-only walk) resolve under the directory root, or —
+        // when no directory is given — under the project directory (the first allowed
+        // directory, conceptually the working/project dir for this MCP server session).
+        // They are never resolved against the process working directory.
+        std::vector<std::string> walk_patterns = relative_globs;
+        if (!have_globs)
+            walk_patterns.push_back("**/*"); // directory-only mode: search the whole tree
+        if (!walk_patterns.empty())
+        {
+            const std::string &walk_root =
+                have_directory ? root_directory : opts->allowedDirs.front().path;
+            auto matched_files = glob_files_in_dir(walk_root, walk_patterns, exclude_globs, 0);
+            candidate_files.insert(matched_files.begin(), matched_files.end());
+        }
+
+        // Absolute globs / literal absolute paths are honored as-is, independent of directory.
+        if (!absolute_globs.empty())
+        {
+            auto matched_files = search_files(absolute_globs, exclude_globs, 0);
+            candidate_files.insert(matched_files.begin(), matched_files.end());
+        }
+
+        // Validate every candidate against the allowed dirs; skip (don't abort) any that
+        // escape — e.g. an absolute glob or a symlink pointing outside the sandbox.
+        std::vector<std::string> files;
+        int skipped_outside = 0;
+        for (const auto &candidate_path : candidate_files)
+        {
+            auto candidate_validation = validate_path(candidate_path, *opts, false);
+            if (candidate_validation.ok)
+                files.push_back(std::move(candidate_validation.canonical));
+            else
+                ++skipped_outside;
+        }
+
+        auto skipped_note = [&](const char *separator) -> std::string {
+            if (skipped_outside == 0)
+                return {};
+            return std::string(separator) + "[" + std::to_string(skipped_outside) +
+                   " path(s) skipped: outside allowed directories]";
+        };
 
         if (files.empty())
         {
-            PrintMCPTextResult(context, ac, "(no files to search)");
+            PrintMCPTextResult(context, ac, "(no files to search)" + skipped_note(" "));
             return;
         }
 
@@ -859,18 +921,18 @@ static void dispatch_mcp_tool(const std::string &tool,
                 truncated = true;
                 break;
             }
-            auto r = GrepFileMCPCore(file_path, pattern, use_regex,
-                                      case_insensitive, context_lines,
-                                      max_results - total_matches);
-            if (r.is_binary || !r.error.empty() || r.text.empty())
+            auto grep_result = GrepFileMCPCore(file_path, pattern, /*use_regex*/ true,
+                                               case_insensitive, context_lines,
+                                               max_results - total_matches);
+            if (grep_result.is_binary || !grep_result.error.empty() || grep_result.text.empty())
                 continue;
-            all_text += r.text;
-            total_matches += r.match_count;
+            all_text += grep_result.text;
+            total_matches += grep_result.match_count;
         }
 
         if (all_text.empty())
         {
-            PrintMCPTextResult(context, ac, "(no matches found)");
+            PrintMCPTextResult(context, ac, "(no matches found)" + skipped_note("\n"));
             return;
         }
 
@@ -878,6 +940,7 @@ static void dispatch_mcp_tool(const std::string &tool,
             all_text += "[truncated at " + std::to_string(max_results) + " matches]\n";
         all_text += "[" + std::to_string(total_matches) + " match"
                  + (total_matches == 1 ? "" : "es") + "]\n";
+        all_text += skipped_note("");
         PrintMCPTextResult(context, ac, std::move(all_text));
     }
     else if (tool == "glob_search")
@@ -1310,33 +1373,34 @@ static std::string build_tools_list_json()
 
     // grep_files — [ext] content search (grep-style)
     {
-        auto excl_prop = doc.new_obj();
-        doc.obj_add(excl_prop, "type", doc.new_str("array"));
         auto excl_items = doc.new_obj();
         doc.obj_add(excl_items, "type", doc.new_str("string"));
+        auto excl_prop = doc.new_obj();
+        doc.obj_add(excl_prop, "type", doc.new_str("array"));
         doc.obj_add(excl_prop, "items", excl_items);
         doc.obj_add(excl_prop, "description",
-            doc.new_str("Glob patterns to exclude from the search (applied when using path root dir)"));
-        auto paths_items = doc.new_obj();
-        doc.obj_add(paths_items, "type", doc.new_str("string"));
-        auto paths_prop = doc.new_obj();
-        doc.obj_add(paths_prop, "type", doc.new_str("array"));
-        doc.obj_add(paths_prop, "items", paths_items);
-        doc.obj_add(paths_prop, "description",
-            doc.new_str("[Extended] Absolute file paths and/or glob patterns to search. "
-                        "Overrides path. Globs expand at runtime (e.g. /src/**/*.cpp)."));
+            doc.new_str("Glob patterns to exclude from the search (honored in every mode)."));
+        auto globs_items = doc.new_obj();
+        doc.obj_add(globs_items, "type", doc.new_str("string"));
+        auto globs_prop = doc.new_obj();
+        doc.obj_add(globs_prop, "type", doc.new_str("array"));
+        doc.obj_add(globs_prop, "items", globs_items);
+        doc.obj_add(globs_prop, "description",
+            doc.new_str("File globs to search (e.g. **/*.swift). Relative globs resolve "
+                        "under 'directory'; absolute globs (starting with /) are used as-is. "
+                        "Omit to search every file under 'directory'."));
         auto props = doc.new_obj();
-        add_str_prop(doc, props, "path",
-            "Absolute root directory — all files under it are searched recursively. "
-            "Required unless paths is provided.");
-        doc.obj_add(props, "paths",           paths_prop);
-        add_str_prop(doc, props, "pattern",
-            "Text or regex pattern to search for in file contents (required)");
-        doc.obj_add(props, "excludePatterns", excl_prop);
-        add_bool_prop(doc, props, "regex",
-            "Treat pattern as a POSIX ERE regex (default false)");
+        add_str_prop(doc, props, "regex",
+            "POSIX ERE regex searched in file CONTENTS (required). For a literal "
+            "substring, escape regex metacharacters (e.g. \\* \\. \\+).");
+        add_str_prop(doc, props, "directory",
+            "Absolute root directory, searched recursively. When omitted, relative globs "
+            "resolve under the project directory (the first allowed directory). Required "
+            "unless every entry in 'globs' is an absolute path.");
+        doc.obj_add(props, "globs",        globs_prop);
+        doc.obj_add(props, "excludeGlobs", excl_prop);
         add_bool_prop(doc, props, "caseInsensitive",
-            "Case-insensitive matching (default false)");
+            "Case-insensitive matching, like grep -i (default false)");
         add_int_prop(doc, props, "contextLines",
             "Lines of context before and after each match, like grep -C (default 0, max 50)");
         add_int_prop(doc, props, "maxResults",
@@ -1344,13 +1408,13 @@ static std::string build_tools_list_json()
         auto schema = doc.new_obj();
         doc.obj_add(schema, "type", doc.new_str("object"));
         doc.obj_add(schema, "properties", props);
-        doc.obj_add(schema, "required", make_req(doc, {"pattern"}));
+        doc.obj_add(schema, "required", make_req(doc, {"regex"}));
         doc.arr_append(tools, add_tool(doc, "grep_files",
-            "[Extended] Search file contents for a text or regex pattern (grep-style). "
-            "Returns file:line:content matches. "
-            "Provide path to walk a directory recursively, or paths for explicit files/globs. "
-            "Supports regex (POSIX ERE), case-insensitive, and context lines. "
-            "Binary files are skipped.", schema));
+            "[Extended] Search file CONTENTS for a POSIX ERE regex (grep-style). "
+            "Returns file:line:content matches. Scope the search with 'directory' "
+            "(walk a tree) and/or 'globs' (e.g. **/*.swift); narrow with 'excludeGlobs'. "
+            "To find files by NAME use glob_search (by glob) or search_files (by name "
+            "substring), not this tool. Binary files are skipped.", schema));
     }
 
     // get_file_info

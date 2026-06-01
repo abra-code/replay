@@ -728,7 +728,7 @@ def test_grep_files(tmpdir: str) -> None:
                                   "content": "no match\n"}}},
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
          "params": {"name": "grep_files",
-                    "arguments": {"path": d, "pattern": "hello"}}},
+                    "arguments": {"directory": d, "regex": "hello"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[4])
@@ -752,8 +752,7 @@ def test_grep_files_regex(tmpdir: str) -> None:
                                   "content": "int foo = 1;\nfloat bar = 2.0;\nchar baz;\n"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "grep_files",
-                    "arguments": {"path": d, "pattern": "^(int|float)",
-                                  "regex": True}}},
+                    "arguments": {"directory": d, "regex": "^(int|float)"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[2])
@@ -774,7 +773,7 @@ def test_grep_files_case_insensitive(tmpdir: str) -> None:
                                   "content": "Hello World\nhello world\nHELLO WORLD\n"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "grep_files",
-                    "arguments": {"path": d, "pattern": "hello",
+                    "arguments": {"directory": d, "regex": "hello",
                                   "caseInsensitive": True}}},
     ], [tmpdir], sequential=True)
 
@@ -794,7 +793,7 @@ def test_grep_files_context_lines(tmpdir: str) -> None:
                     "arguments": {"path": f"{d}/file.txt", "content": content}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "grep_files",
-                    "arguments": {"path": d, "pattern": "line5",
+                    "arguments": {"directory": d, "regex": "line5",
                                   "contextLines": 2}}},
     ], [tmpdir], sequential=True)
 
@@ -807,8 +806,9 @@ def test_grep_files_context_lines(tmpdir: str) -> None:
     check("grep_files contextLines: match uses ':' separator", ":5:" in text, text)
 
 
-def test_grep_files_paths_glob(tmpdir: str) -> None:
-    print("=== MCP: grep_files (paths array with glob, extended) ===")
+def test_grep_files_globs_compose(tmpdir: str) -> None:
+    """grep_files: directory + relative globs compose; absolute globs work standalone."""
+    print("=== MCP: grep_files (directory + globs compose) ===")
 
     d = f"{tmpdir}/gf_glob"
     by_id = run_mcp([
@@ -817,20 +817,59 @@ def test_grep_files_paths_glob(tmpdir: str) -> None:
                     "arguments": {"path": f"{d}/a.txt", "content": "needle\n"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "write_file",
-                    "arguments": {"path": f"{d}/b.txt", "content": "needle\n"}}},
+                    "arguments": {"path": f"{d}/sub/b.txt", "content": "needle\n"}}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "write_file",
                     "arguments": {"path": f"{d}/c.log", "content": "needle\n"}}},
+        # Relative glob resolves UNDER directory (the core compose fix).
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
          "params": {"name": "grep_files",
-                    "arguments": {"paths": [f"{d}/*.txt"], "pattern": "needle"}}},
+                    "arguments": {"directory": d, "globs": ["**/*.txt"],
+                                  "regex": "needle"}}},
+        # Absolute glob works without a directory.
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"globs": [f"{d}/*.txt"], "regex": "needle"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[4])
-    check("grep_files paths glob: a.txt matched", "a.txt" in text, text)
-    check("grep_files paths glob: b.txt matched", "b.txt" in text, text)
-    check("grep_files paths glob: c.log excluded (not in glob)", "c.log" not in text, text)
-    check("grep_files paths glob: 2 matches", "2 match" in text, text)
+    check("grep_files compose: a.txt matched", "a.txt" in text, text)
+    check("grep_files compose: sub/b.txt matched (recursive under directory)",
+          "b.txt" in text, text)
+    check("grep_files compose: c.log excluded (not in glob)", "c.log" not in text, text)
+    check("grep_files compose: 2 matches", "2 match" in text, text)
+
+    abs_text = text_of(by_id[5])
+    check("grep_files absolute glob: a.txt matched", "a.txt" in abs_text, abs_text)
+    check("grep_files absolute glob: c.log excluded", "c.log" not in abs_text, abs_text)
+
+
+def test_grep_files_project_dir_default(tmpdir: str) -> None:
+    """grep_files: relative globs with no directory resolve under the project dir
+    (the first allowed directory), never the process cwd."""
+    print("=== MCP: grep_files (relative globs default to project directory) ===")
+
+    # Unique marker so the count is deterministic — tmpdir is shared and already holds
+    # many .txt files from earlier tests that the relative glob will also walk.
+    marker = "needle_projdir_marker"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{tmpdir}/proj/top.txt", "content": marker + "\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{tmpdir}/proj/deep/nested.txt", "content": marker + "\n"}}},
+        # No directory given — the relative glob must resolve under tmpdir (the project dir).
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"globs": ["**/*.txt"], "regex": marker}}},
+    ], [tmpdir], sequential=True)
+
+    text = text_of(by_id[3])
+    check("grep_files project-dir default: top.txt matched", "top.txt" in text, text)
+    check("grep_files project-dir default: nested.txt matched (recursive)",
+          "nested.txt" in text, text)
+    check("grep_files project-dir default: exactly 2 matches", "2 match" in text, text)
 
 
 def test_grep_files_no_match(tmpdir: str) -> None:
@@ -843,7 +882,7 @@ def test_grep_files_no_match(tmpdir: str) -> None:
                     "arguments": {"path": f"{d}/file.txt", "content": "some content\n"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "grep_files",
-                    "arguments": {"path": d, "pattern": "xyzzy_not_here"}}},
+                    "arguments": {"directory": d, "regex": "xyzzy_not_here"}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[2])
@@ -851,8 +890,8 @@ def test_grep_files_no_match(tmpdir: str) -> None:
           "no match" in text.lower(), text)
 
 
-def test_grep_files_exclude_patterns(tmpdir: str) -> None:
-    print("=== MCP: grep_files (excludePatterns with root dir) ===")
+def test_grep_files_exclude_globs(tmpdir: str) -> None:
+    print("=== MCP: grep_files (excludeGlobs with directory, honored) ===")
 
     d = f"{tmpdir}/gf_excl"
     by_id = run_mcp([
@@ -862,28 +901,83 @@ def test_grep_files_exclude_patterns(tmpdir: str) -> None:
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "write_file",
                     "arguments": {"path": f"{d}/vendor/lib.cpp", "content": "needle\n"}}},
+        # excludeGlobs honored in directory-walk mode.
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "grep_files",
-                    "arguments": {"path": d, "pattern": "needle",
-                                  "excludePatterns": ["vendor/**"]}}},
+                    "arguments": {"directory": d, "regex": "needle",
+                                  "excludeGlobs": ["vendor/**"]}}},
+        # excludeGlobs ALSO honored alongside an explicit glob (was a silent no-op before).
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"directory": d, "globs": ["**/*.cpp"],
+                                  "regex": "needle", "excludeGlobs": ["vendor/**"]}}},
     ], [tmpdir], sequential=True)
 
     text = text_of(by_id[3])
-    check("grep_files excludePatterns: main.cpp matched", "main.cpp" in text, text)
-    check("grep_files excludePatterns: vendor/lib.cpp excluded", "lib.cpp" not in text, text)
-    check("grep_files excludePatterns: 1 match", "1 match" in text, text)
+    check("grep_files excludeGlobs (walk): main.cpp matched", "main.cpp" in text, text)
+    check("grep_files excludeGlobs (walk): vendor/lib.cpp excluded", "lib.cpp" not in text, text)
+    check("grep_files excludeGlobs (walk): 1 match", "1 match" in text, text)
+
+    text2 = text_of(by_id[4])
+    check("grep_files excludeGlobs (with globs): main.cpp matched", "main.cpp" in text2, text2)
+    check("grep_files excludeGlobs (with globs): vendor/lib.cpp excluded",
+          "lib.cpp" not in text2, text2)
 
 
-def test_grep_files_missing_pattern(tmpdir: str) -> None:
-    print("=== MCP: grep_files (missing pattern -> -32602) ===")
+def test_grep_files_missing_regex(tmpdir: str) -> None:
+    print("=== MCP: grep_files (missing regex -> -32602) ===")
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "grep_files",
-                    "arguments": {"path": tmpdir}}},
+                    "arguments": {"directory": tmpdir}}},
     ], [tmpdir])
 
-    check("grep_files missing pattern -> -32602",
+    check("grep_files missing regex -> -32602",
+          is_error(by_id[1], -32602), str(by_id[1]))
+
+
+def test_grep_files_regex_boolean_rejected(tmpdir: str) -> None:
+    """The removed regex boolean flag must be rejected with a helpful -32602, not silently accepted."""
+    print("=== MCP: grep_files (regex as boolean -> -32602) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"directory": tmpdir, "regex": True}}},
+    ], [tmpdir])
+
+    check("grep_files regex-as-boolean -> -32602",
+          is_error(by_id[1], -32602), str(by_id[1]))
+
+
+def test_grep_files_invalid_regex(tmpdir: str) -> None:
+    """An invalid regex is a hard -32603 error, not a silent (no matches)."""
+    print("=== MCP: grep_files (invalid regex -> -32603) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": f"{tmpdir}/gf_bad/x.txt", "content": "hi\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"directory": f"{tmpdir}/gf_bad", "regex": "([unterminated"}}},
+    ], [tmpdir], sequential=True)
+
+    check("grep_files invalid regex -> -32603",
+          is_error(by_id[2], -32603), str(by_id[2]))
+
+
+def test_grep_files_missing_directory_and_globs(tmpdir: str) -> None:
+    print("=== MCP: grep_files (no directory and no globs -> -32602) ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"regex": "anything"}}},
+    ], [tmpdir])
+
+    check("grep_files missing directory+globs -> -32602",
           is_error(by_id[1], -32602), str(by_id[1]))
 
 
@@ -1862,10 +1956,14 @@ def main() -> int:
         test_grep_files_regex(tmpdir)
         test_grep_files_case_insensitive(tmpdir)
         test_grep_files_context_lines(tmpdir)
-        test_grep_files_paths_glob(tmpdir)
+        test_grep_files_globs_compose(tmpdir)
+        test_grep_files_project_dir_default(tmpdir)
         test_grep_files_no_match(tmpdir)
-        test_grep_files_exclude_patterns(tmpdir)
-        test_grep_files_missing_pattern(tmpdir)
+        test_grep_files_exclude_globs(tmpdir)
+        test_grep_files_missing_regex(tmpdir)
+        test_grep_files_regex_boolean_rejected(tmpdir)
+        test_grep_files_invalid_regex(tmpdir)
+        test_grep_files_missing_directory_and_globs(tmpdir)
         test_get_file_info(tmpdir)
         test_read_file_not_found(tmpdir)
         test_read_binary_file(tmpdir)

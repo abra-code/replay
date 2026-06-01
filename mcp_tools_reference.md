@@ -22,7 +22,7 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 | `edit_file` | `path`, `edits` | ✓ | Structured edits: literal/regex, backrefs, limit, caseInsensitive. |
 | `edit_files` | `paths`, `edits` | ✓ | Multi-file edit with glob expansion. |
 | `glob_search` | `path` | ✓ | Multi-pattern array, brace alternation `{a,b}`, `excludePatterns`. Returns files only (not directories). |
-| `grep_files` | `pattern` | ✓ | Content search (grep). Requires `path` or `paths`. Regex, case-insensitive, context lines. |
+| `grep_files` | `regex` | ✓ | Content search (grep), always POSIX ERE. Requires `directory` and/or `globs`. Case-insensitive, context lines. |
 | `execute_command` | `command` | ✓ | Shell execution, hard-sandboxed via Seatbelt when `--sandbox` is active. |
 
 ---
@@ -41,23 +41,23 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 
 ### `grep_files` — content search (grep-style)
 
-Required: `pattern` (content pattern). Either `path` or `paths` is also required.  
-Optional: `regex`, `caseInsensitive`, `contextLines` (default 0, max 50), `maxResults` (default 500, max 10000), `excludePatterns`.
+Required: `regex` (the POSIX ERE search pattern). Also required: at least one of `directory` / `globs`.  
+Optional: `caseInsensitive`, `contextLines` (default 0, max 50), `maxResults` (default 500, max 10000), `excludeGlobs`.
+
+**The query is always a regex.** There is no boolean flag — `grep_files` is named after grep and behaves like it. For a literal-substring search, escape ERE metacharacters in `regex` (e.g. `\*`, `\.`).
 
 File selection:
-- **`path`** (string) — root directory; all files under it are searched recursively (standard MCP)
-- **`paths`** (array) — explicit absolute file paths and/or glob patterns (extended); overrides `path`. Same expansion rules as `edit_files`.
+- **`directory`** (string) — root directory; searched recursively.
+- **`globs`** (array) — file globs. A **relative** glob (e.g. `**/*.sh`) resolves *under* `directory`; an **absolute** glob (starting with `/`) is used as-is. Omit `globs` to search every file under `directory`.
+- `directory` and `globs` **compose** — `directory` is the root, `globs` filter within it. (This differs from the old `path`/`paths`, where `paths` silently overrode `path`.)
+- Without a `directory`, relative globs resolve under the **project directory** (the first allowed directory; see [Access control](#access-control)) — **never** the process working directory.
+- `excludeGlobs` — exclusion globs, honored in every mode.
 
-Search:
-- `pattern` — literal text or POSIX ERE regex
-- `regex: true` — treat `pattern` as ERE
-- `caseInsensitive: true` — case-insensitive matching
+Output is grep-style `file:linenum:content`. Context lines use `-` separators (`file-linenum-context`). Groups separated by `--`. Binary files are skipped silently. A `[N matches]` footer is always appended. When results are truncated by `maxResults`, a truncation notice is prepended. Candidate paths that resolve outside the allowed directories (e.g. an absolute glob, or a symlink escaping the sandbox) are skipped — not fatal — and reported in a `[N path(s) skipped …]` note. An invalid `regex` is a hard `-32603` error.
 
-Output is grep-style `file:linenum:content`. Context lines use `-` separators (`file-linenum-context`). Groups separated by `--`. Binary files are skipped silently. A `[N matches]` footer is always appended. When results are truncated by `maxResults`, a truncation notice is prepended.
+**vs. `glob_search`**: `glob_search` finds files by *filename glob*. `grep_files` finds text *inside* files.
 
-**vs. `glob_search`**: `glob_search` finds files by *filename pattern*. `grep_files` finds text *inside* files.
-
-**vs. `search_files`**: `search_files` is the standard MCP tool — it matches file and directory *names* as a substring. `grep_files` is the extended tool that searches file *contents*.
+**vs. `search_files`**: `search_files` matches file and directory *names* as a substring. `grep_files` searches file *contents*.
 
 ---
 
@@ -94,9 +94,9 @@ Design rationale for a separate tool rather than extending `edit_file`:
 - The response shape differs: `edit_files` returns a `content` array with one item per resolved file; `edit_file` returns a single item. Keeping them separate avoids overloading the response schema.
 
 Behavior:
-- Glob that matches no files → -32002 error (whole request fails)
-- Glob-matched files outside allowed dirs → -32001 error (whole request fails)
-- Per-file edit failure → that file's content item contains `"path: [error CODE] message"` (other files still succeed; no JSON-RPC level error)
+- Glob that matches no files -> -32002 error (whole request fails)
+- Glob-matched files outside allowed dirs -> -32001 error (whole request fails)
+- Per-file edit failure -> that file's content item contains `"path: [error CODE] message"` (other files still succeed; no JSON-RPC level error)
 - Response: `result.content` is an array with one text item per resolved file
 
 ---
@@ -184,3 +184,7 @@ The MCP server runs on a GCD concurrent queue (`DISPATCH_QUEUE_CONCURRENT`). Eac
 ## Access control
 
 Configured via `--allow-write <dir>` (read+write) and `--allow-read <dir>` (read-only) flags at server startup. Every path in every tool call is validated against these lists. `/` is not a valid allowed directory.
+
+### Project (working) directory
+
+The **first** allowed directory — whichever `--allow-read`/`--allow-write` path appears first on the command line — is treated as the **project (working) directory** for the session. It is the conceptual root of the workspace the server is operating on. Tools that accept an optional `directory` use it as the default base: `grep_files`, given relative `globs` and no `directory`, resolves those globs under the project directory. Relative globs are **never** resolved against the process's actual working directory (`getcwd`), which is unspecified for a server launched by an MCP client.
