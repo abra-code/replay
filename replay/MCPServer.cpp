@@ -1182,11 +1182,16 @@ static std::string build_tools_list_json()
         add_str_prop(doc, edit_item_props, "oldText",
             "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required)");
         add_str_prop(doc, edit_item_props, "newText",
-            "Replacement text. Use \\1..\\9 for regex back-references. Default: empty string.");
+            "Replacement text (default: empty string). With isRegex=true, \\1..\\9 insert "
+            "captured groups — but ONLY when oldText has that many parenthesized groups. "
+            "Example: to wrap a whole line in quotes use oldText \"(.*)\" with newText "
+            "\"\\1\". Referencing a group the pattern lacks is an error (replay will NOT "
+            "silently insert empty text).");
         add_int_prop(doc, edit_item_props, "limit",
             "Maximum replacements (default 1; 0 = unlimited)");
         add_bool_prop(doc, edit_item_props, "isRegex",
-            "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false)");
+            "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false). "
+            "Add parentheses to oldText to capture text you want to reuse as \\1..\\9 in newText.");
         add_bool_prop(doc, edit_item_props, "caseInsensitive",
             "Case-insensitive matching (default false)");
         auto edit_item_schema = doc.new_obj();
@@ -1217,11 +1222,16 @@ static std::string build_tools_list_json()
         add_str_prop(doc, edit_item_props, "oldText",
             "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required)");
         add_str_prop(doc, edit_item_props, "newText",
-            "Replacement text. Use \\1..\\9 for regex back-references. Default: empty string.");
+            "Replacement text (default: empty string). With isRegex=true, \\1..\\9 insert "
+            "captured groups — but ONLY when oldText has that many parenthesized groups. "
+            "Example: to wrap a whole line in quotes use oldText \"(.*)\" with newText "
+            "\"\\1\". Referencing a group the pattern lacks is an error (replay will NOT "
+            "silently insert empty text).");
         add_int_prop(doc, edit_item_props, "limit",
             "Maximum replacements per file (default 1; 0 = unlimited)");
         add_bool_prop(doc, edit_item_props, "isRegex",
-            "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false)");
+            "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false). "
+            "Add parentheses to oldText to capture text you want to reuse as \\1..\\9 in newText.");
         add_bool_prop(doc, edit_item_props, "caseInsensitive",
             "Case-insensitive matching (default false)");
         auto edit_item_schema = doc.new_obj();
@@ -1396,17 +1406,21 @@ static std::string build_tools_list_json()
         doc.obj_add(globs_prop, "type", doc.new_str("array"));
         doc.obj_add(globs_prop, "items", globs_items);
         doc.obj_add(globs_prop, "description",
-            doc.new_str("File globs to search (e.g. **/*.swift). Relative globs resolve "
-                        "under 'directory'; absolute globs (starting with /) are used as-is. "
-                        "Omit to search every file under 'directory'."));
+            doc.new_str("File globs that filter which files are searched (e.g. **/*.swift). "
+                        "A relative glob is anchored to 'directory' (or, if 'directory' is "
+                        "omitted, to the project directory) — it is NOT relative to the "
+                        "process working directory. Absolute globs (starting with /) are "
+                        "used as-is. Omit to search every file under 'directory'."));
         auto props = doc.new_obj();
         add_str_prop(doc, props, "regex",
             "ECMAScript (JavaScript) regex searched in file CONTENTS (required). Supports "
             "\\d \\w \\s, etc. For a literal substring, escape regex metacharacters (e.g. \\* \\. \\+).");
         add_str_prop(doc, props, "directory",
-            "Absolute root directory, searched recursively. When omitted, relative globs "
-            "resolve under the project directory (the first allowed directory). Required "
-            "unless every entry in 'globs' is an absolute path.");
+            "Absolute path of the directory to search, walked recursively. Pass this "
+            "whenever you want to limit the search to a specific directory: if you omit it, "
+            "the search falls back to the whole project directory (the first allowed "
+            "directory) and any relative 'globs' are anchored there, not where you intended. "
+            "Required unless every entry in 'globs' is an absolute path.");
         doc.obj_add(props, "globs",        globs_prop);
         doc.obj_add(props, "excludeGlobs", excl_prop);
         add_bool_prop(doc, props, "caseInsensitive",
@@ -1421,10 +1435,14 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "required", make_req(doc, {"regex"}));
         doc.arr_append(tools, add_tool(doc, "grep_files",
             "[Extended] Search file CONTENTS for an ECMAScript (JavaScript) regex (grep-style). "
-            "Returns file:line:content matches. Scope the search with 'directory' "
-            "(walk a tree) and/or 'globs' (e.g. **/*.swift); narrow with 'excludeGlobs'. "
-            "To find files by NAME use glob_search (by glob) or search_files (by name "
-            "substring), not this tool. Binary files are skipped.", schema));
+            "Returns file:line:content matches. Scope the search with 'directory' (the directory "
+            "to walk recursively) and/or 'globs' (file filters like **/*.swift); narrow with "
+            "'excludeGlobs'. To search inside one directory, set 'directory' to it — do not rely "
+            "on a relative glob alone, since a relative glob is anchored to 'directory' (or the "
+            "project directory when 'directory' is omitted). "
+            "Example: {\"regex\": \"TODO\", \"directory\": \"/src/app\", \"globs\": [\"**/*.swift\"]}. "
+            "To find files by NAME use glob_search (by glob) or search_files (by name substring), "
+            "not this tool. Binary files are skipped.", schema));
     }
 
     // get_file_info

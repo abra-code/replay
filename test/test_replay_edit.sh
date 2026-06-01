@@ -350,6 +350,44 @@ verify_succeeded "$?" "regex invalid: file unchanged (got: $content)"
 
 # ===========================================================================
 echo "------------------------------"
+echo "regex back-reference with no capture group → error (content preserved)"
+echo ""
+
+# The exact failure an agent hit: oldText ".*" (no group) with newText "\1".
+# \1 has no group to expand, which used to silently blank the line. It must
+# now be a hard error that leaves the file untouched.
+FILE="$WORK_DIR/regex_badref.txt"
+printf 'keep me' > "$FILE"
+
+printf '[{ "action": "edit", "items": ["%s"],\n   "edits": [{"oldText": ".*", "newText": "\\\\1", "regex": true}] }]\n' \
+    "$FILE" > "$WORK_DIR/edit_badref.json"
+"$REPLAY_TOOL" --stop-on-error "$WORK_DIR/edit_badref.json" 2>/dev/null
+verify_failed "$?" "badref: expected non-zero exit when \\1 has no capture group"
+content=$(cat "$FILE")
+test "$content" = "keep me"
+verify_succeeded "$?" "badref: file unchanged, content not destroyed (got: $content)"
+
+
+# ===========================================================================
+echo "------------------------------"
+echo "regex back-reference out of range → error (content preserved)"
+echo ""
+
+# Pattern has one group; \2 is out of range and must be rejected.
+FILE="$WORK_DIR/regex_badref2.txt"
+printf 'foo' > "$FILE"
+
+printf '[{ "action": "edit", "items": ["%s"],\n   "edits": [{"oldText": "(foo)", "newText": "\\\\2", "regex": true}] }]\n' \
+    "$FILE" > "$WORK_DIR/edit_badref2.json"
+"$REPLAY_TOOL" --stop-on-error "$WORK_DIR/edit_badref2.json" 2>/dev/null
+verify_failed "$?" "badref2: expected non-zero exit when \\2 exceeds group count"
+content=$(cat "$FILE")
+test "$content" = "foo"
+verify_succeeded "$?" "badref2: file unchanged (got: $content)"
+
+
+# ===========================================================================
+echo "------------------------------"
 echo "streaming format: [edit] path oldText newText"
 echo ""
 

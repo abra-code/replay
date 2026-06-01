@@ -155,7 +155,7 @@ Each parameter is marked with one of:
   "edits":  [                  // [std] Array of edit operations applied in sequence
     {
       "oldText":        "<string>",    // [std] Text to find (required)
-      "newText":        "<string>",    // [std] Replacement text (default: "")
+      "newText":        "<string>",    // [std] Replacement text (default: ""); \1-\9 need capture groups in oldText
       "limit":          <integer>,     // [ext] Max replacements (default 1; 0 = unlimited)
       "isRegex":        <boolean>,     // [ext] Treat oldText as ECMAScript (JS) regex (default false)
       "caseInsensitive": <boolean>     // [ext] Case-insensitive match (default false)
@@ -170,7 +170,7 @@ Each parameter is marked with one of:
    - Try exact substring match first.
    - If not found: try **whitespace-normalized** line match — strips the common leading indent from both `oldText` and the candidate content block, then compares line-by-line. This lets `oldText` be copied from a differently-indented context.
    - On replacement: the original indentation of the matched block is preserved and applied to `newText`.
-2. **Extended — regex** (`isRegex: true`): match with an ECMAScript (JavaScript) regex. `newText` may use `\1`–`\9` back-references. No whitespace-normalized fallback.
+2. **Extended — regex** (`isRegex: true`): match with an ECMAScript (JavaScript) regex. `newText` may use `\1`–`\9` back-references, but **only if `oldText` has that many parenthesized capture groups** — e.g. wrap a line in quotes with `oldText: "(.*)"`, `newText: "\"\1\""`. A reference to a group the pattern does not have (e.g. `\1` against `.*`) is a hard `-32603` error and the file is left unchanged; it is **not** silently expanded to an empty string. No whitespace-normalized fallback.
 3. **Extended — case-insensitive** (`caseInsensitive: true`): case-insensitive literal or (combined with `isRegex`) regex match. No whitespace-normalized fallback.
 4. **Extended — limit** (`limit: 0` = unlimited, `limit: N > 1`): replace up to N occurrences. Whitespace-normalized fallback only applies when `limit: 1`.
 
@@ -240,8 +240,8 @@ query is an ECMAScript (JavaScript) regex matched against file contents.
 ```json
 {
   "regex":           "<string>",    // [ext] ECMAScript (JS) regex searched in file CONTENTS (required)
-  "directory":       "<string>",    // [ext] Root directory, walked recursively
-  "globs":           ["<string>", ...], // [ext] File globs; relative -> under directory, absolute -> as-is
+  "directory":       "<string>",    // [ext] Directory to walk recursively. Set this to restrict the search to one dir
+  "globs":           ["<string>", ...], // [ext] File filters; relative -> anchored to directory, absolute -> as-is
   "excludeGlobs":    ["<string>", ...], // [ext] Glob exclusions (honored in every mode)
   "caseInsensitive": <boolean>,     // [ext] Case-insensitive, grep -i (default false)
   "contextLines":    <integer>,     // [ext] Lines before/after each match, grep -C style (default 0, max 50)
@@ -250,6 +250,15 @@ query is an ECMAScript (JavaScript) regex matched against file contents.
 ```
 
 `regex` is required, plus at least one of `directory` / `globs`.
+
+> **To search inside one directory, set `directory` to it.** Do not rely on a
+> relative glob alone: a relative glob is anchored to `directory` (or, when
+> `directory` is omitted, to the **project directory**) — never to the process
+> working directory. Omitting `directory` therefore silently widens the search to
+> the whole project. Example — find `TODO` in Swift files under `/src/app`:
+> ```json
+> { "regex": "TODO", "directory": "/src/app", "globs": ["**/*.swift"] }
+> ```
 
 **File selection:**
 - `directory` only -> every file under it is searched recursively.

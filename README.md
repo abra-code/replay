@@ -221,7 +221,8 @@ Actions and parameters:
               Error if a glob pattern matches no files.
     edits     Array of edit operations applied in order, each a dict with:
       oldText   Text or pattern to search for (required).
-      newText   Replacement text. In regex mode \\1..\\9 are back-references. Default "" (delete).
+      newText   Replacement text. In regex mode \\1..\\9 are back-references (each needs a
+                matching capture group in oldText; an out-of-range \\N is an error). Default "" (delete).
       limit     Max replacements per operation. Default 1. Set to 0 for unlimited.
       regex     Bool. Treat oldText as an ECMAScript (JavaScript) regex pattern. Default false.
       case-insensitive   Bool. Case-insensitive matching for literal and regex modes. Default false.

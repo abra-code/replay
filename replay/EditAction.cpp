@@ -410,6 +410,31 @@ static bool apply_one_edit(std::string &content,
 
 		auto chunks = parse_replacement(new_text);
 
+		// Guard against out-of-range back-references in the replacement. A
+		// reference like \1 needs a matching capture group in the pattern;
+		// std::smatch has no such submatch otherwise and apply_chunks would
+		// expand it to "" — silently destroying content (e.g. oldText ".*"
+		// with newText "\1" rewrites a whole line to empty). Fail loudly.
+		int capture_group_count = (int)compiled_regex.mark_count();
+		int highest_back_reference = 0;
+		for (const auto &chunk : chunks)
+		{
+			if (chunk.sub_index > highest_back_reference)
+				highest_back_reference = chunk.sub_index;
+		}
+		if (highest_back_reference > capture_group_count)
+		{
+			if (capture_group_count == 0)
+				outError = "replacement references \\" + std::to_string(highest_back_reference) +
+				           " but the pattern has no capture groups; wrap part of oldText in "
+				           "parentheses to capture it (e.g. oldText \"(.*)\", newText \"\\1\")";
+			else
+				outError = "replacement references \\" + std::to_string(highest_back_reference) +
+				           " but the pattern has only " + std::to_string(capture_group_count) +
+				           " capture group(s)";
+			return false;
+		}
+
 		std::string result;
 		size_t copied = 0;   // bytes of content already copied into result
 		int count = 0;

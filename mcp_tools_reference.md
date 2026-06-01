@@ -47,11 +47,16 @@ Optional: `caseInsensitive`, `contextLines` (default 0, max 50), `maxResults` (d
 **The query is always a regex.** There is no boolean flag — `grep_files` is named after grep and behaves like it. The pattern is ECMAScript (JavaScript) syntax, so `\d`, `\w`, `\s`, `\b` and non-greedy quantifiers all work. For a literal-substring search, escape regex metacharacters in `regex` (e.g. `\*`, `\.`).
 
 File selection:
-- **`directory`** (string) — root directory; searched recursively.
-- **`globs`** (array) — file globs. A **relative** glob (e.g. `**/*.sh`) resolves *under* `directory`; an **absolute** glob (starting with `/`) is used as-is. Omit `globs` to search every file under `directory`.
+- **`directory`** (string) — the directory to walk recursively. **Set this whenever you want to restrict the search to a specific directory.** Omitting it silently widens the search to the whole project directory.
+- **`globs`** (array) — file filters. A **relative** glob (e.g. `**/*.sh`) is *anchored to `directory`* (or, when `directory` is omitted, to the project directory); an **absolute** glob (starting with `/`) is used as-is. Omit `globs` to search every file under `directory`. A relative glob alone does **not** scope the search the way `directory` does — it filters filenames, but the walk root is still `directory`/project directory.
 - `directory` and `globs` **compose** — `directory` is the root, `globs` filter within it. (This differs from the old `path`/`paths`, where `paths` silently overrode `path`.)
 - Without a `directory`, relative globs resolve under the **project directory** (the first allowed directory; see [Access control](#access-control)) — **never** the process working directory.
 - `excludeGlobs` — exclusion globs, honored in every mode.
+
+Example — find `TODO` in Swift files under `/src/app` (and nowhere else):
+```json
+{ "regex": "TODO", "directory": "/src/app", "globs": ["**/*.swift"] }
+```
 
 Output is grep-style `file:linenum:content`. Context lines use `-` separators (`file-linenum-context`). Groups separated by `--`. Binary files are skipped silently. A `[N matches]` footer is always appended. When results are truncated by `maxResults`, a truncation notice is prepended. Candidate paths that resolve outside the allowed directories (e.g. an absolute glob, or a symlink escaping the sandbox) are skipped — not fatal — and reported in a `[N path(s) skipped …]` note. An invalid `regex` is a hard `-32603` error.
 
@@ -68,9 +73,9 @@ Optional: `dryRun` (default false).
 
 Each edit item has:
 - `oldText` (required) — text to find. **Standard mode** (no extended flags): tries exact match first, then falls back to whitespace-normalized line matching (strips common leading indent per block, then compares). **Extended mode** (`isRegex: true`): ECMAScript (JavaScript) regex pattern.
-- `newText` — replacement (default empty). In standard mode, indentation of the matched block is preserved. In regex mode, supports `\1`–`\9` back-references.
+- `newText` — replacement (default empty). In standard mode, indentation of the matched block is preserved. In regex mode, supports `\1`–`\9` back-references — but each `\N` requires that many parenthesized capture groups in `oldText` (e.g. quote a line with `oldText: "(.*)"`, `newText: "\"\1\""`). Referencing a group that does not exist (e.g. `\1` against `.*`) is a hard error and the file is left unchanged — it is **not** silently replaced with empty text.
 - `limit` — max replacements (default 1; 0 = unlimited). Extended: limit ≠ 1 disables whitespace-normalized fallback.
-- `isRegex` — treat `oldText` as an ECMAScript regex pattern (default false). Extended.
+- `isRegex` — treat `oldText` as an ECMAScript regex pattern (default false). Extended. Add parentheses to capture text for reuse as `\1`–`\9` in `newText`.
 - `caseInsensitive` — case-insensitive match (default false). Extended. Disables whitespace-normalized fallback.
 
 `dryRun: true` reads the file, applies all edits to an in-memory copy, and returns a unified diff (`--- / +++ / @@ ... @@`) without writing. Returns `(no changes)` if the edits produce no difference. If the file does not exist, falls back to listing intended edits.
