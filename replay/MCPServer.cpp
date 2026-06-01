@@ -501,7 +501,7 @@ static void dispatch_mcp_tool(const std::string &tool,
                 fe.limit = (int)*lv;
             else if (auto lv2 = ev.obj_get("limit").get_uint(); lv2)
                 fe.limit = (int)*lv2;
-            if (auto rv = ev.obj_get("regex").get_bool(); rv)
+            if (auto rv = ev.obj_get("isRegex").get_bool(); rv)
                 fe.use_regex = *rv;
             if (auto cv = ev.obj_get("caseInsensitive").get_bool(); cv)
                 fe.case_insensitive = *cv;
@@ -549,7 +549,7 @@ static void dispatch_mcp_tool(const std::string &tool,
                     fe.limit = (int)*lv;
                 else if (auto lv2 = ev.obj_get("limit").get_uint(); lv2)
                     fe.limit = (int)*lv2;
-                if (auto rv = ev.obj_get("regex").get_bool(); rv)
+                if (auto rv = ev.obj_get("isRegex").get_bool(); rv)
                     fe.use_regex = *rv;
                 if (auto cv = ev.obj_get("caseInsensitive").get_bool(); cv)
                     fe.case_insensitive = *cv;
@@ -1148,7 +1148,9 @@ static std::string build_tools_list_json()
         auto items = doc.new_obj();
         doc.obj_add(items, "type", doc.new_str("string"));
         doc.obj_add(paths_prop, "items", items);
-        doc.obj_add(paths_prop, "description", doc.new_str("Array of absolute file paths"));
+        doc.obj_add(paths_prop, "description", doc.new_str(
+            "Array of literal absolute file paths (max 50). Globs are NOT expanded here — "
+            "use glob_search or grep_files for globs."));
         auto props = doc.new_obj();
         doc.obj_add(props, "paths", paths_prop);
         auto schema = doc.new_obj();
@@ -1164,7 +1166,7 @@ static std::string build_tools_list_json()
     // write_file
     {
         auto props = doc.new_obj();
-        add_str_prop(doc, props, "path",    "Absolute path to write");
+        add_str_prop(doc, props, "path",    "Absolute path to the file to write");
         add_str_prop(doc, props, "content", "UTF-8 text content to write");
         auto schema = doc.new_obj();
         doc.obj_add(schema, "type", doc.new_str("object"));
@@ -1179,12 +1181,12 @@ static std::string build_tools_list_json()
     {
         auto edit_item_props = doc.new_obj();
         add_str_prop(doc, edit_item_props, "oldText",
-            "Text or regex pattern to find (required)");
+            "Literal text to find — or a POSIX ERE regex when isRegex=true (required)");
         add_str_prop(doc, edit_item_props, "newText",
             "Replacement text. Use \\1..\\9 for regex back-references. Default: empty string.");
         add_int_prop(doc, edit_item_props, "limit",
             "Maximum replacements (default 1; 0 = unlimited)");
-        add_bool_prop(doc, edit_item_props, "regex",
+        add_bool_prop(doc, edit_item_props, "isRegex",
             "Treat oldText as a POSIX ERE regex pattern (default false)");
         add_bool_prop(doc, edit_item_props, "caseInsensitive",
             "Case-insensitive matching (default false)");
@@ -1214,12 +1216,12 @@ static std::string build_tools_list_json()
     {
         auto edit_item_props = doc.new_obj();
         add_str_prop(doc, edit_item_props, "oldText",
-            "Text or regex pattern to find (required)");
+            "Literal text to find — or a POSIX ERE regex when isRegex=true (required)");
         add_str_prop(doc, edit_item_props, "newText",
             "Replacement text. Use \\1..\\9 for regex back-references. Default: empty string.");
         add_int_prop(doc, edit_item_props, "limit",
             "Maximum replacements per file (default 1; 0 = unlimited)");
-        add_bool_prop(doc, edit_item_props, "regex",
+        add_bool_prop(doc, edit_item_props, "isRegex",
             "Treat oldText as a POSIX ERE regex pattern (default false)");
         add_bool_prop(doc, edit_item_props, "caseInsensitive",
             "Case-insensitive matching (default false)");
@@ -1429,7 +1431,7 @@ static std::string build_tools_list_json()
     // get_file_info
     {
         auto props = doc.new_obj();
-        add_str_prop(doc, props, "path", "Absolute path to query");
+        add_str_prop(doc, props, "path", "Absolute path to a file or directory");
         auto schema = doc.new_obj();
         doc.obj_add(schema, "type", doc.new_str("object"));
         doc.obj_add(schema, "properties", props);

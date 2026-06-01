@@ -357,7 +357,7 @@ def test_edit_regex(tmpdir: str) -> None:
                     "arguments": {"path": path,
                                   "edits": [{"oldText": "v([0-9]+)_([a-z]+)",
                                              "newText": "version-\\1(\\2)",
-                                             "regex": True, "limit": 0}]}}},
+                                             "isRegex": True, "limit": 0}]}}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
          "params": {"name": "read_file", "arguments": {"path": path}}},
     ], [tmpdir], sequential=True)
@@ -1359,7 +1359,7 @@ def test_edit_invalid_regex(tmpdir: str) -> None:
                     "arguments": {"path": path,
                                   "edits": [{"oldText": "[unclosed_bracket",
                                              "newText": "x",
-                                             "regex": True}]}}},
+                                             "isRegex": True}]}}},
     ], [tmpdir], sequential=True)
 
     check("invalid regex -> -32603",

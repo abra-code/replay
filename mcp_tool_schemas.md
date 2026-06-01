@@ -28,7 +28,7 @@ Each parameter is marked with one of:
 
 ```json
 {
-  "paths": ["<string>", ...]   // [std] Array of absolute file paths (max 50)
+  "paths": ["<string>", ...]   // [std] Array of literal absolute file paths (max 50; globs not expanded)
 }
 ```
 
@@ -41,7 +41,7 @@ Each parameter is marked with one of:
 
 ```json
 {
-  "path":    "<string>",       // [std] Absolute path to write (creates parents)
+  "path":    "<string>",       // [std] Absolute path to the file to write (creates parents)
   "content": "<string>"        // [std] UTF-8 content
 }
 ```
@@ -128,7 +128,7 @@ Each parameter is marked with one of:
 
 ```json
 {
-  "path": "<string>"           // [std] Absolute path
+  "path": "<string>"           // [std] Absolute path to a file or directory
 }
 ```
 
@@ -157,7 +157,7 @@ Each parameter is marked with one of:
       "oldText":        "<string>",    // [std] Text to find (required)
       "newText":        "<string>",    // [std] Replacement text (default: "")
       "limit":          <integer>,     // [ext] Max replacements (default 1; 0 = unlimited)
-      "regex":          <boolean>,     // [ext] Treat oldText as POSIX ERE (default false)
+      "isRegex":        <boolean>,     // [ext] Treat oldText as POSIX ERE (default false)
       "caseInsensitive": <boolean>     // [ext] Case-insensitive match (default false)
     }
   ],
@@ -166,12 +166,12 @@ Each parameter is marked with one of:
 ```
 
 **Matching strategy per edit item:**
-1. **Standard mode** (`regex: false`, `caseInsensitive: false`, `limit: 1`):
+1. **Standard mode** (`isRegex: false`, `caseInsensitive: false`, `limit: 1`):
    - Try exact substring match first.
    - If not found: try **whitespace-normalized** line match — strips the common leading indent from both `oldText` and the candidate content block, then compares line-by-line. This lets `oldText` be copied from a differently-indented context.
    - On replacement: the original indentation of the matched block is preserved and applied to `newText`.
-2. **Extended — regex** (`regex: true`): match with POSIX ERE. `newText` may use `\1`–`\9` back-references. No whitespace-normalized fallback.
-3. **Extended — case-insensitive** (`caseInsensitive: true`): case-insensitive literal or (combined with `regex`) regex match. No whitespace-normalized fallback.
+2. **Extended — regex** (`isRegex: true`): match with POSIX ERE. `newText` may use `\1`–`\9` back-references. No whitespace-normalized fallback.
+3. **Extended — case-insensitive** (`caseInsensitive: true`): case-insensitive literal or (combined with `isRegex`) regex match. No whitespace-normalized fallback.
 4. **Extended — limit** (`limit: 0` = unlimited, `limit: N > 1`): replace up to N occurrences. Whitespace-normalized fallback only applies when `limit: 1`.
 
 **`dryRun: true`:**

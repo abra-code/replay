@@ -9,7 +9,7 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 | Tool | Required params | Extended? | Notes |
 |------|----------------|:---------:|-------|
 | `read_file` | `path` | | Returns UTF-8 text or `blob` (base64) for binary. Max 10 MB. |
-| `read_multiple_files` | `paths` | | Up to 50 files. Errors inline per file. |
+| `read_multiple_files` | `paths` | | Up to 50 files; literal paths only (globs not expanded). Errors inline per file. |
 | `write_file` | `path`, `content` | | Creates parent dirs automatically. |
 | `create_directory` | `path` | | `mkdir -p` semantics. |
 | `list_directory` | `path` | | Each entry prefixed `[FILE]` or `[DIR]`. |
@@ -31,7 +31,7 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 
 ### Divergences from the MCP filesystem spec
 
-- **`edit_file`**: the MCP spec takes `oldText`/`newText` structured edits (same as replay). replay adds `regex`, `caseInsensitive`, `limit`, and back-references on top. `dryRun` returns a unified diff (standard behavior). Whitespace-normalized matching (standard MCP behavior) is used as a fallback for literal edits when exact match fails.
+- **`edit_file`**: the MCP spec takes `oldText`/`newText` structured edits (same as replay). replay adds `isRegex`, `caseInsensitive`, `limit`, and back-references on top. `dryRun` returns a unified diff (standard behavior). Whitespace-normalized matching (standard MCP behavior) is used as a fallback for literal edits when exact match fails.
 - **`read_file`**: binary files are returned as a `blob` content item (base64 + mimeType) rather than an error or escaped text, which is an extension beyond the spec.
 - **`search_files`**: standard MCP defines filename pattern matching (case-insensitive substring match against basenames). replay implements this, but renames the params to `directory`/`nameContains`/`excludeGlobs` for clarity (the spec names `path`/`pattern`/`excludePatterns` are still accepted as silent aliases). The content-search capability is provided as the separate `grep_files` extension tool.
 
@@ -67,10 +67,10 @@ Required: `path`, `edits` (array).
 Optional: `dryRun` (default false).
 
 Each edit item has:
-- `oldText` (required) — text to find. **Standard mode** (no extended flags): tries exact match first, then falls back to whitespace-normalized line matching (strips common leading indent per block, then compares). **Extended mode** (`regex: true`): POSIX ERE pattern.
+- `oldText` (required) — text to find. **Standard mode** (no extended flags): tries exact match first, then falls back to whitespace-normalized line matching (strips common leading indent per block, then compares). **Extended mode** (`isRegex: true`): POSIX ERE pattern.
 - `newText` — replacement (default empty). In standard mode, indentation of the matched block is preserved. In regex mode, supports `\1`–`\9` back-references.
 - `limit` — max replacements (default 1; 0 = unlimited). Extended: limit ≠ 1 disables whitespace-normalized fallback.
-- `regex` — treat `oldText` as ERE pattern (default false). Extended.
+- `isRegex` — treat `oldText` as ERE pattern (default false). Extended.
 - `caseInsensitive` — case-insensitive match (default false). Extended. Disables whitespace-normalized fallback.
 
 `dryRun: true` reads the file, applies all edits to an in-memory copy, and returns a unified diff (`--- / +++ / @@ ... @@`) without writing. Returns `(no changes)` if the edits produce no difference. If the file does not exist, falls back to listing intended edits.
