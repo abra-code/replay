@@ -157,13 +157,15 @@ Each parameter is marked with one of:
       "oldText":        "<string>",    // [std] Text to find (required)
       "newText":        "<string>",    // [std] Replacement text (default: ""); \1-\9 or $1-$9 need capture groups; \0/$0/$& = whole match; $$ = literal $
       "limit":          <integer>,     // [ext] Max replacements (default 1; 0 = unlimited)
-      "isRegex":        <boolean>,     // [ext] Treat oldText as ECMAScript (JS) regex (default false)
+      "isRegex":        <boolean>,     // [ext] Treat oldText as ECMAScript (JS) regex (default false). Keep false for known text (literal is safer/idempotent); use only for variable text / patterns
       "caseInsensitive": <boolean>     // [ext] Case-insensitive match (default false)
     }
   ],
   "dryRun": <boolean>          // [std] Preview as a unified diff without writing (default false); use FIRST for regex edits, then re-issue with dryRun:false
 }
 ```
+
+**Choosing a mode:** prefer **literal** (standard mode) whenever the text to change is known — it is safer and idempotent (re-running won't double-apply; a target that's no longer present errors rather than corrupting other text). Use **regex** only for variable text or patterns spanning many lines.
 
 **Matching strategy per edit item:**
 1. **Standard mode** (`isRegex: false`, `caseInsensitive: false`, `limit: 1`):

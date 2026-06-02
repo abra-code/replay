@@ -1180,28 +1180,36 @@ static std::string build_tools_list_json()
     {
         auto edit_item_props = doc.new_obj();
         add_str_prop(doc, edit_item_props, "oldText",
-            "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required). "
-            "A literal oldText must be unique at the default limit; include enough surrounding lines "
-            "that it matches exactly one place.");
+            "Text to find (required). PREFER LITERAL matching (isRegex=false, the default) whenever "
+            "you know the exact text to change — literal is safer and self-checking: if the text is "
+            "not present verbatim the edit errors instead of changing the wrong place. With "
+            "isRegex=true this is an ECMAScript (JavaScript) regex instead. A literal oldText must be "
+            "unique at the default limit; include enough surrounding lines that it matches exactly "
+            "one place.");
         add_str_prop(doc, edit_item_props, "newText",
             "Replacement text (default: empty string). With isRegex=true, \\1..\\9 OR the "
             "JavaScript-style $1..$9 insert captured groups; \\0, $0, and $& all insert the whole "
             "match (no capture group needed); $$ inserts a literal '$'. Numbered back-references "
-            "work ONLY when oldText has that many parenthesized groups. Example: to wrap a whole "
-            "line in quotes use oldText \"(.*)\" with newText \"\\1\" (or \"$1\"). Referencing a "
-            "group the pattern lacks is an error (replay will NOT silently insert empty text).");
+            "work ONLY when oldText has that many parenthesized groups. Example (variable text): to "
+            "wrap an UNKNOWN line in quotes use oldText \"(.*)\" with newText \"\\1\" (or \"$1\"); "
+            "for a KNOWN line, skip regex — use a literal edit with the already-quoted text as "
+            "newText. Referencing a group the pattern lacks is an error (replay will NOT silently "
+            "insert empty text).");
         add_int_prop(doc, edit_item_props, "limit",
             "Maximum replacements (default 1; 0 = unlimited). With the default of 1 a LITERAL "
             "oldText must match exactly once — an ambiguous oldText that occurs multiple times is "
             "an error (add surrounding context to make it unique, or set limit:0 for all / limit:N "
             "for the first N). Regex is exempt: limit:1 edits the first match.");
         add_bool_prop(doc, edit_item_props, "isRegex",
-            "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false). "
-            "Add parentheses to oldText to capture text you want to reuse as \\1..\\9 in newText. "
-            "^ and $ anchor at every line boundary (multiline), so e.g. oldText \"^(.*)$\" with "
-            "newText \"\\\"\\1\\\"\" wraps the first line in quotes (or every line with limit 0); "
-            "note that . does not cross newlines. Regex behavior is easy to misjudge — preview "
-            "with dryRun=true and check the diff before applying.");
+            "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false). Keep it "
+            "false when you know the exact text to change: a LITERAL oldText/newText is simpler, "
+            "safer, and idempotent — re-running will not double-apply, and a target that is no "
+            "longer present errors instead of mangling other text. Set isRegex=true ONLY when the "
+            "target is variable or you need a pattern across many lines (text you do not know "
+            "verbatim). In regex mode: parentheses in oldText capture text reused as \\1..\\9 (or "
+            "$1..$9) in newText; ^ and $ anchor at every line boundary (multiline) and . does not "
+            "cross newlines, so ^(.*)$ matches a whole line. Regex is easy to misjudge — ALWAYS "
+            "preview with dryRun=true and check the diff before applying.");
         add_bool_prop(doc, edit_item_props, "caseInsensitive",
             "Case-insensitive matching (default false)");
         auto edit_item_schema = doc.new_obj();
@@ -1229,6 +1237,8 @@ static std::string build_tools_list_json()
             "Apply text edits to a file. Supports literal and ECMAScript (JavaScript) regex matching, "
             "back-references, case-insensitive mode, and configurable replacement limits. "
             "Writes atomically. Extended beyond standard MCP edit_file. "
+            "Prefer literal matching (isRegex=false) for known/specific text — it is safer and "
+            "idempotent; reserve isRegex for variable text or patterns spanning many lines. "
             "IMPORTANT: when using isRegex, preview with dryRun=true and verify the returned diff "
             "before applying — a wrong regex can destroy content, and the change is not auto-undoable.",
             schema));
@@ -1238,16 +1248,21 @@ static std::string build_tools_list_json()
     {
         auto edit_item_props = doc.new_obj();
         add_str_prop(doc, edit_item_props, "oldText",
-            "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required). "
-            "A literal oldText must be unique at the default limit; include enough surrounding lines "
-            "that it matches exactly one place.");
+            "Text to find (required). PREFER LITERAL matching (isRegex=false, the default) whenever "
+            "you know the exact text to change — literal is safer and self-checking: if the text is "
+            "not present verbatim the edit errors instead of changing the wrong place. With "
+            "isRegex=true this is an ECMAScript (JavaScript) regex instead. A literal oldText must be "
+            "unique at the default limit; include enough surrounding lines that it matches exactly "
+            "one place.");
         add_str_prop(doc, edit_item_props, "newText",
             "Replacement text (default: empty string). With isRegex=true, \\1..\\9 OR the "
             "JavaScript-style $1..$9 insert captured groups; \\0, $0, and $& all insert the whole "
             "match (no capture group needed); $$ inserts a literal '$'. Numbered back-references "
-            "work ONLY when oldText has that many parenthesized groups. Example: to wrap a whole "
-            "line in quotes use oldText \"(.*)\" with newText \"\\1\" (or \"$1\"). Referencing a "
-            "group the pattern lacks is an error (replay will NOT silently insert empty text).");
+            "work ONLY when oldText has that many parenthesized groups. Example (variable text): to "
+            "wrap an UNKNOWN line in quotes use oldText \"(.*)\" with newText \"\\1\" (or \"$1\"); "
+            "for a KNOWN line, skip regex — use a literal edit with the already-quoted text as "
+            "newText. Referencing a group the pattern lacks is an error (replay will NOT silently "
+            "insert empty text).");
         add_int_prop(doc, edit_item_props, "limit",
             "Maximum replacements per file (default 1; 0 = unlimited). With the default of 1 a "
             "LITERAL oldText must match exactly once in each file — an ambiguous oldText that "
@@ -1255,12 +1270,15 @@ static std::string build_tools_list_json()
             "limit:0 for all / limit:N for the first N). Regex is exempt: limit:1 edits the first "
             "match.");
         add_bool_prop(doc, edit_item_props, "isRegex",
-            "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false). "
-            "Add parentheses to oldText to capture text you want to reuse as \\1..\\9 in newText. "
-            "^ and $ anchor at every line boundary (multiline), so e.g. oldText \"^(.*)$\" with "
-            "newText \"\\\"\\1\\\"\" wraps the first line in quotes (or every line with limit 0); "
-            "note that . does not cross newlines. Regex behavior is easy to misjudge — preview "
-            "with dryRun=true and check the diff before applying.");
+            "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false). Keep it "
+            "false when you know the exact text to change: a LITERAL oldText/newText is simpler, "
+            "safer, and idempotent — re-running will not double-apply, and a target that is no "
+            "longer present errors instead of mangling other text. Set isRegex=true ONLY when the "
+            "target is variable or you need a pattern across many lines (text you do not know "
+            "verbatim). In regex mode: parentheses in oldText capture text reused as \\1..\\9 (or "
+            "$1..$9) in newText; ^ and $ anchor at every line boundary (multiline) and . does not "
+            "cross newlines, so ^(.*)$ matches a whole line. Regex is easy to misjudge — ALWAYS "
+            "preview with dryRun=true and check the diff before applying.");
         add_bool_prop(doc, edit_item_props, "caseInsensitive",
             "Case-insensitive matching (default false)");
         auto edit_item_schema = doc.new_obj();
@@ -1297,6 +1315,8 @@ static std::string build_tools_list_json()
             "[Extended] Apply edits to one or more files specified as literal paths and/or glob patterns. "
             "Glob patterns (e.g. /src/**/*.cpp) expand to all matching files at runtime. "
             "Supports all edit_file options. Returns per-file results in a single response. "
+            "Prefer literal matching (isRegex=false) for known/specific text — it is safer and "
+            "idempotent; reserve isRegex for variable text or patterns spanning many lines. "
             "IMPORTANT: this edits MANY files at once and is destructive — for regex edits (and any "
             "limit=0 or glob edit) run with dryRun=true first and verify every per-file diff before "
             "re-issuing with dryRun=false. The change cannot be auto-undone.",
