@@ -79,7 +79,7 @@ echo ""
 
 # ===========================================================================
 echo "------------------------------"
-echo "literal replace first match (limit=1 default)"
+echo "literal ambiguous (limit=1 default) → error (uniqueness guard)"
 echo ""
 
 FILE="$WORK_DIR/literal_first.txt"
@@ -89,11 +89,11 @@ cat > "$WORK_DIR/edit_literal_first.json" << EOF
 [{ "action": "edit", "items": ["$FILE"],
    "edits": [{"oldText": "foo", "newText": "baz"}] }]
 EOF
-"$REPLAY_TOOL" "$WORK_DIR/edit_literal_first.json"
-verify_succeeded "$?" "literal first: replay exited successfully"
+"$REPLAY_TOOL" --stop-on-error "$WORK_DIR/edit_literal_first.json" 2>/dev/null
+verify_failed "$?" "literal ambiguous: expected non-zero exit (oldText not unique)"
 content=$(cat "$FILE")
-test "$content" = "baz bar foo"
-verify_succeeded "$?" "literal first: only first occurrence replaced (got: $content)"
+test "$content" = "foo bar foo"
+verify_succeeded "$?" "literal ambiguous: file unchanged (got: $content)"
 
 
 # ===========================================================================
@@ -155,7 +155,7 @@ verify_succeeded "$?" "literal not found: file unchanged (got: $content)"
 
 # ===========================================================================
 echo "------------------------------"
-echo "literal not found, limit=0 → OK (no error)"
+echo "literal not found, limit=0 → error (no match is an error at any limit)"
 echo ""
 
 FILE="$WORK_DIR/literal_notfound_limit0.txt"
@@ -166,7 +166,7 @@ cat > "$WORK_DIR/edit_notfound_limit0.json" << EOF
    "edits": [{"oldText": "NOSUCHTEXT", "newText": "X", "limit": 0}] }]
 EOF
 "$REPLAY_TOOL" --stop-on-error "$WORK_DIR/edit_notfound_limit0.json" 2>/dev/null
-verify_succeeded "$?" "literal not found limit=0: replay exited successfully"
+verify_failed "$?" "literal not found limit=0: expected non-zero exit"
 content=$(cat "$FILE")
 test "$content" = "hello world"
 verify_succeeded "$?" "literal not found limit=0: file unchanged (got: $content)"

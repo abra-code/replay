@@ -394,19 +394,21 @@ EDIT_WORK_DIR=$(/usr/bin/mktemp -d /tmp/dispatch_edit_test.XXXXXX)
 echo ""
 echo "------------------------------"
 echo ""
-echo "dispatch edit: literal replace (default limit=1)"
+echo "dispatch edit: literal replace (unique match, default limit=1)"
 echo ""
 
 EDIT_FILE="$EDIT_WORK_DIR/literal.txt"
 printf 'hello world\nhello again\n' > "$EDIT_FILE"
 
-"$DISPATCH" "dispatch-edit-literal" edit "$EDIT_FILE" "hello" "goodbye"
+# oldText is unique ("hello world") — at the default limit a literal must match
+# exactly one place (uniqueness guard), so anchor on the full first line.
+"$DISPATCH" "dispatch-edit-literal" edit "$EDIT_FILE" "hello world" "goodbye world"
 "$DISPATCH" "dispatch-edit-literal" wait
 verify_succeeded "$?" "dispatch edit literal: wait failed"
 /usr/bin/grep -qF "goodbye world" "$EDIT_FILE"
-verify_succeeded "$?" "dispatch edit literal: first occurrence replaced"
+verify_succeeded "$?" "dispatch edit literal: unique match replaced"
 /usr/bin/grep -qF "hello again" "$EDIT_FILE"
-verify_succeeded "$?" "dispatch edit literal: second occurrence unchanged (limit=1 default)"
+verify_succeeded "$?" "dispatch edit literal: other line unchanged"
 
 
 echo ""
