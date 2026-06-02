@@ -312,6 +312,14 @@ static std::vector<ReplaceChunk> parse_replacement(const std::string &repl)
 {
 	std::vector<ReplaceChunk> chunks;
 	std::string cur;
+	auto flush_literal = [&]()
+	{
+		if (!cur.empty())
+		{
+			chunks.push_back({std::move(cur), -1});
+			cur.clear();
+		}
+	};
 	for (size_t i = 0; i < repl.size(); )
 	{
 		if (repl[i] == '\\' && i + 1 < repl.size())
@@ -319,11 +327,7 @@ static std::vector<ReplaceChunk> parse_replacement(const std::string &repl)
 			char next = repl[i + 1];
 			if (next >= '0' && next <= '9')
 			{
-				if (!cur.empty())
-				{
-					chunks.push_back({std::move(cur), -1});
-					cur.clear();
-				}
+				flush_literal();
 				chunks.push_back({"", next - '0'});
 				i += 2;
 			}
@@ -345,13 +349,45 @@ static std::vector<ReplaceChunk> parse_replacement(const std::string &repl)
 				i += 2;
 			}
 		}
+		else if (repl[i] == '$' && i + 1 < repl.size())
+		{
+			// JavaScript String.replace-style tokens: $0 and $& = whole match,
+			// $1..$9 = capture groups, $$ = literal '$'. Any other $-sequence
+			// (and a trailing '$') is literal text. We advertise the pattern
+			// dialect as ECMAScript/JavaScript, so accept its replacement syntax
+			// too — alongside the sed-style \0..\9 above. $0 is the whole match
+			// here (unlike strict JS, where $0 is literal) for symmetry with \0;
+			// like \0/$&, it needs no capture group.
+			char next = repl[i + 1];
+			if (next >= '0' && next <= '9')
+			{
+				flush_literal();
+				chunks.push_back({"", next - '0'});
+				i += 2;
+			}
+			else if (next == '&')
+			{
+				flush_literal();
+				chunks.push_back({"", 0});  // whole match = submatch 0 (same as $0)
+				i += 2;
+			}
+			else if (next == '$')
+			{
+				cur += '$';
+				i += 2;
+			}
+			else
+			{
+				cur += '$';
+				i += 1;
+			}
+		}
 		else
 		{
 			cur += repl[i++];
 		}
 	}
-	if (!cur.empty())
-		chunks.push_back({std::move(cur), -1});
+	flush_literal();
 	return chunks;
 }
 
@@ -397,7 +433,15 @@ static bool apply_one_edit(std::string &content,
 		std::regex compiled_regex;
 		try
 		{
-			auto syntax = std::regex::ECMAScript;
+			// multiline: ^ and $ anchor at every line boundary, not just the
+			// start/end of the whole file. The pattern runs against the entire
+			// file content as one string (see sregex_iterator below), so without
+			// this an agent's natural ^(.*)$ matches zero times on a multi-line
+			// file (. never crosses '\n', so $ can't reach a line break). This
+			// also matches grep_files, which feeds the regex one line at a time.
+			// Note: . still does not cross newlines (std::regex ECMAScript has no
+			// DOTALL/s flag), so multi-line spans must be matched explicitly.
+			auto syntax = std::regex::ECMAScript | std::regex::multiline;
 			if (case_insensitive)
 				syntax |= std::regex::icase;
 			compiled_regex.assign(old_text, syntax);
@@ -425,13 +469,16 @@ static bool apply_one_edit(std::string &content,
 		if (highest_back_reference > capture_group_count)
 		{
 			if (capture_group_count == 0)
-				outError = "replacement references \\" + std::to_string(highest_back_reference) +
-				           " but the pattern has no capture groups; wrap part of oldText in "
-				           "parentheses to capture it (e.g. oldText \"(.*)\", newText \"\\1\")";
+				outError = "replacement references capture group " + std::to_string(highest_back_reference) +
+				           " (\\" + std::to_string(highest_back_reference) + " or $" +
+				           std::to_string(highest_back_reference) + ") but the pattern has no capture "
+				           "groups; wrap part of oldText in parentheses to capture it "
+				           "(e.g. oldText \"(.*)\", newText \"\\1\")";
 			else
-				outError = "replacement references \\" + std::to_string(highest_back_reference) +
-				           " but the pattern has only " + std::to_string(capture_group_count) +
-				           " capture group(s)";
+				outError = "replacement references capture group " + std::to_string(highest_back_reference) +
+				           " (\\" + std::to_string(highest_back_reference) + " or $" +
+				           std::to_string(highest_back_reference) + ") but the pattern has only " +
+				           std::to_string(capture_group_count) + " capture group(s)";
 			return false;
 		}
 
@@ -454,6 +501,16 @@ static bool apply_one_edit(std::string &content,
 			size_t match_start  = (size_t)match.position(0);
 			size_t match_length = (size_t)match.length(0);
 
+			// Skip the phantom empty match that multiline ^/$ produce at
+			// end-of-content right after a trailing newline — it is not a real
+			// line. Without this, e.g. ^(.*)$ with limit 0 appends a spurious
+			// empty replacement (a stray "" line) after the file's final '\n'.
+			// A genuine empty line (zero-length match not at end-of-content) is
+			// still replaced normally.
+			if (match_length == 0 && match_start == content.size() &&
+			    match_start > 0 && content[match_start - 1] == '\n')
+				continue;
+
 			result.append(content, copied, match_start - copied);
 			result += apply_chunks(chunks, match);
 			copied = match_start + match_length;
@@ -462,8 +519,10 @@ static bool apply_one_edit(std::string &content,
 
 		result.append(content, copied, content.size() - copied);
 
-		if (limit > 0 && count == 0)
+		if (count == 0)
 		{
+			// No match is an error regardless of limit — an unlimited (limit 0)
+			// replace that matches nothing must not silently report success.
 			outError = std::string("pattern not found: ") + old_text;
 			return false;
 		}
@@ -504,8 +563,10 @@ static bool apply_one_edit(std::string &content,
 
 		result.append(content.data() + pos, content.size() - pos);
 
-		if (limit > 0 && count == 0)
+		if (count == 0)
 		{
+			// No match is an error regardless of limit — an unlimited (limit 0)
+			// replace that matches nothing must not silently report success.
 			// Standard MCP fallback: whitespace-normalized line matching
 			if (limit == 1 && !case_insensitive)
 			{

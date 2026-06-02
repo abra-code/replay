@@ -155,13 +155,13 @@ Each parameter is marked with one of:
   "edits":  [                  // [std] Array of edit operations applied in sequence
     {
       "oldText":        "<string>",    // [std] Text to find (required)
-      "newText":        "<string>",    // [std] Replacement text (default: ""); \1-\9 need capture groups in oldText
+      "newText":        "<string>",    // [std] Replacement text (default: ""); \1-\9 or $1-$9 need capture groups; \0/$0/$& = whole match; $$ = literal $
       "limit":          <integer>,     // [ext] Max replacements (default 1; 0 = unlimited)
       "isRegex":        <boolean>,     // [ext] Treat oldText as ECMAScript (JS) regex (default false)
       "caseInsensitive": <boolean>     // [ext] Case-insensitive match (default false)
     }
   ],
-  "dryRun": <boolean>          // [std] Preview without writing (default false)
+  "dryRun": <boolean>          // [std] Preview as a unified diff without writing (default false); use FIRST for regex edits, then re-issue with dryRun:false
 }
 ```
 
@@ -170,7 +170,7 @@ Each parameter is marked with one of:
    - Try exact substring match first.
    - If not found: try **whitespace-normalized** line match — strips the common leading indent from both `oldText` and the candidate content block, then compares line-by-line. This lets `oldText` be copied from a differently-indented context.
    - On replacement: the original indentation of the matched block is preserved and applied to `newText`.
-2. **Extended — regex** (`isRegex: true`): match with an ECMAScript (JavaScript) regex. `newText` may use `\1`–`\9` back-references, but **only if `oldText` has that many parenthesized capture groups** — e.g. wrap a line in quotes with `oldText: "(.*)"`, `newText: "\"\1\""`. A reference to a group the pattern does not have (e.g. `\1` against `.*`) is a hard `-32603` error and the file is left unchanged; it is **not** silently expanded to an empty string. No whitespace-normalized fallback.
+2. **Extended — regex** (`isRegex: true`): match with an ECMAScript (JavaScript) regex against the whole file content, with **multiline anchoring** — `^` and `$` match at every line boundary (e.g. `^(.*)$` wraps the first line, or every line with `limit: 0`), and `.` does **not** cross newlines. `newText` may use back-references in sed-style `\1`–`\9` or JavaScript-style `$1`–`$9`; `\0`, `$0`, and `$&` all insert the whole match (no capture group required) and `$$` inserts a literal `$`. Numbered references work **only if `oldText` has that many parenthesized capture groups** — e.g. wrap a line in quotes with `oldText: "(.*)"`, `newText: "\"\1\""` (or `"\"$1\""`). A reference to a group the pattern does not have (e.g. `\1`/`$1` against `.*`) is a hard `-32603` error and the file is left unchanged; it is **not** silently expanded to an empty string. No whitespace-normalized fallback.
 3. **Extended — case-insensitive** (`caseInsensitive: true`): case-insensitive literal or (combined with `isRegex`) regex match. No whitespace-normalized fallback.
 4. **Extended — limit** (`limit: 0` = unlimited, `limit: N > 1`): replace up to N occurrences. Whitespace-normalized fallback only applies when `limit: 1`.
 
@@ -178,8 +178,11 @@ Each parameter is marked with one of:
 - Reads the file, applies all edits to an in-memory copy.
 - Returns a unified diff (`--- path / +++ path / @@ ... @@`) without writing.
 - Returns `(no changes)` if no edits produce a difference.
+- A pattern that matches nothing returns the same `pattern not found` / `oldText not found` error as a real write — so a clean diff also confirms the pattern matched.
 - Fallback to listing intended edits if the file does not exist.
 - Path validation requires read permission only when `dryRun: true`.
+
+> **Preview regex edits first.** Regex is easy to misjudge and can silently corrupt content. For any `isRegex` edit (and any `limit: 0` edit), run with `dryRun: true`, verify the diff is exactly what you intend, then re-issue the identical call with `dryRun: false`. Edits are in-place and not auto-undoable.
 
 **Response:** `result.content[0].text` = `"Successfully edited <path>"`.  
 **Errors:** `-32001` · `-32002` file not found · `-32602` missing param · `-32603` pattern not matched / invalid regex / write failed
@@ -192,7 +195,7 @@ Each parameter is marked with one of:
 {
   "paths": ["<string>", ...],  // [ext] Absolute paths and/or glob patterns
   "edits": [ ... ],            // [ext] Same schema as edit_file.edits
-  "dryRun": <boolean>          // [ext] Default false
+  "dryRun": <boolean>          // [ext] Default false; preview every per-file diff before applying — this rewrites MANY files at once
 }
 ```
 

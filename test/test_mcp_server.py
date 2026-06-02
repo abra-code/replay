@@ -369,6 +369,130 @@ def test_edit_regex(tmpdir: str) -> None:
           f"got: {text!r}")
 
 
+def test_edit_regex_multiline(tmpdir: str) -> None:
+    print("=== MCP: edit_file (regex ^/$ are line anchors) ===")
+
+    # Default limit=1: ^(.*)$ wraps ONLY the first line. Regression for the
+    # case where ^/$ anchored to the whole file and matched zero times on a
+    # multi-line file ("pattern not found").
+    path = f"{tmpdir}/edit_ml.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path,
+                                  "content": "alpha\nbeta\ngamma\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": "^(.*)$",
+                                             "newText": "\"\\1\"",
+                                             "isRegex": True}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path}}},
+    ], [tmpdir], sequential=True)
+    text = text_of(by_id[3])
+    check("first line wrapped, rest untouched",
+          text == '"alpha"\nbeta\ngamma\n', f"got: {text!r}")
+
+    # limit=0: ^(.*)$ wraps every line.
+    path2 = f"{tmpdir}/edit_ml_all.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path2,
+                                  "content": "alpha\nbeta\ngamma\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path2,
+                                  "edits": [{"oldText": "^([a-z]+)$",
+                                             "newText": "\"\\1\"",
+                                             "isRegex": True, "limit": 0}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path2}}},
+    ], [tmpdir], sequential=True)
+    text = text_of(by_id[3])
+    check("every line wrapped",
+          text == '"alpha"\n"beta"\n"gamma"\n', f"got: {text!r}")
+
+
+def test_edit_regex_dollar_refs(tmpdir: str) -> None:
+    print("=== MCP: edit_file (JavaScript-style $1/$&/$$ replacements) ===")
+
+    # $1 capture group (the exact form an agent prompted with "JavaScript regex"
+    # reaches for) must work, not be inserted literally.
+    path = f"{tmpdir}/edit_dollar.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path,
+                                  "content": "alpha\nbeta\ngamma\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": "^(.*)$",
+                                             "newText": "\"$1\"",
+                                             "isRegex": True}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path}}},
+    ], [tmpdir], sequential=True)
+    text = text_of(by_id[3])
+    check("$1 expands to capture group (not literal)",
+          text == '"alpha"\nbeta\ngamma\n', f"got: {text!r}")
+
+    # $& = whole match, $$ = literal '$'
+    path2 = f"{tmpdir}/edit_dollar2.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path2, "content": "price 42 here\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path2,
+                                  "edits": [{"oldText": "[0-9]+", "newText": "$$$&",
+                                             "isRegex": True}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path2}}},
+    ], [tmpdir], sequential=True)
+    text = text_of(by_id[3])
+    check("$$ -> literal $, $& -> whole match",
+          text == "price $42 here\n", f"got: {text!r}")
+
+    # $0 and \0 both = whole match, with no capture group in the pattern.
+    path_zero = f"{tmpdir}/edit_dollar_zero.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path_zero, "content": "a 1 b 2 c\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path_zero,
+                                  "edits": [{"oldText": "[0-9]", "newText": "<$0|\\0>",
+                                             "isRegex": True, "limit": 0}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path_zero}}},
+    ], [tmpdir], sequential=True)
+    text = text_of(by_id[3])
+    check("$0 and \\0 -> whole match (no group required)",
+          text == "a <1|1> b <2|2> c\n", f"got: {text!r}")
+
+    # Out-of-range $N is a hard error, not silent literal corruption.
+    path3 = f"{tmpdir}/edit_dollar3.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path3, "content": "hello world\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path3,
+                                  "edits": [{"oldText": "(hello)", "newText": "$2",
+                                             "isRegex": True}]}}},
+    ], [tmpdir], sequential=True)
+    err = by_id[2].get("error", {})
+    check("out-of-range $2 -> -32603 error",
+          err.get("code") == -32603 and "capture group 2" in err.get("message", ""),
+          f"got: {by_id[2]!r}")
+
+
 def test_edit_case_insensitive(tmpdir: str) -> None:
     print("=== MCP: edit_file (case-insensitive) ===")
 
@@ -1415,6 +1539,57 @@ def test_edit_no_match_error(tmpdir: str) -> None:
           is_error(by_id[2], -32603), str(by_id[2]))
 
 
+def test_edit_no_match_unlimited(tmpdir: str) -> None:
+    print("=== MCP: edit_file (no match with limit=0 -> -32603, not silent) ===")
+
+    # limit=0 (unlimited) that matches nothing must error, not report success
+    # having changed nothing. Both literal and regex paths.
+    path = f"{tmpdir}/edit_nomatch_unl.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path, "content": "hello world\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": "nope", "newText": "x",
+                                             "limit": 0}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": "z+", "newText": "x",
+                                             "isRegex": True, "limit": 0}]}}},
+    ], [tmpdir], sequential=True)
+    check("literal no-match limit=0 -> -32603",
+          is_error(by_id[2], -32603), str(by_id[2]))
+    check("regex no-match limit=0 -> -32603",
+          is_error(by_id[3], -32603), str(by_id[3]))
+
+
+def test_edit_regex_no_trailing_empty(tmpdir: str) -> None:
+    print("=== MCP: edit_file (^(.*)$ limit=0 has no phantom trailing line) ===")
+
+    # The multiline ^/$ engine produces a zero-length match after the file's
+    # final newline; it must NOT become a stray "" line. A *genuine* empty line
+    # (blank line between content) is still wrapped.
+    path = f"{tmpdir}/edit_phantom.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path, "content": "alpha\n\ngamma\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": "^(.*)$", "newText": "\"\\1\"",
+                                             "isRegex": True, "limit": 0}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path}}},
+    ], [tmpdir], sequential=True)
+    text = text_of(by_id[3])
+    check("blank line wrapped, no phantom trailing line",
+          text == '"alpha"\n""\n"gamma"\n', f"got: {text!r}")
+
+
 def test_edit_invalid_regex(tmpdir: str) -> None:
     print("=== MCP: edit_file (invalid regex -> -32603) ===")
 
@@ -1967,11 +2142,12 @@ def test_edit_dryrun_no_changes(tmpdir: str) -> None:
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "write_file",
                     "arguments": {"path": path, "content": "hello\n"}}},
-        # limit=0 on a pattern that doesn't exist -> count=0, no change
+        # An edit that matches but replaces text with itself -> count>0 but the
+        # file is byte-identical, exercising the "(no changes)" diff path.
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "edit_file",
                     "arguments": {"path": path,
-                                  "edits": [{"oldText": "xyz", "newText": "abc",
+                                  "edits": [{"oldText": "hello", "newText": "hello",
                                              "limit": 0}],
                                   "dryRun": True}}},
     ], [tmpdir], sequential=True)
@@ -2023,10 +2199,14 @@ def main() -> int:
         test_write_read(tmpdir)
         test_edit_literal(tmpdir)
         test_edit_regex(tmpdir)
+        test_edit_regex_multiline(tmpdir)
+        test_edit_regex_dollar_refs(tmpdir)
         test_edit_case_insensitive(tmpdir)
         test_edit_dryrun(tmpdir)
         test_edit_default_limit(tmpdir)
         test_edit_no_match_error(tmpdir)
+        test_edit_no_match_unlimited(tmpdir)
+        test_edit_regex_no_trailing_empty(tmpdir)
         test_edit_invalid_regex(tmpdir)
         test_edit_whitespace_normalized(tmpdir)
         test_edit_dryrun_no_changes(tmpdir)

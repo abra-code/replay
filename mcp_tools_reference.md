@@ -72,13 +72,15 @@ Required: `path`, `edits` (array).
 Optional: `dryRun` (default false).
 
 Each edit item has:
-- `oldText` (required) — text to find. **Standard mode** (no extended flags): tries exact match first, then falls back to whitespace-normalized line matching (strips common leading indent per block, then compares). **Extended mode** (`isRegex: true`): ECMAScript (JavaScript) regex pattern.
-- `newText` — replacement (default empty). In standard mode, indentation of the matched block is preserved. In regex mode, supports `\1`–`\9` back-references — but each `\N` requires that many parenthesized capture groups in `oldText` (e.g. quote a line with `oldText: "(.*)"`, `newText: "\"\1\""`). Referencing a group that does not exist (e.g. `\1` against `.*`) is a hard error and the file is left unchanged — it is **not** silently replaced with empty text.
+- `oldText` (required) — text to find. **Standard mode** (no extended flags): tries exact match first, then falls back to whitespace-normalized line matching (strips common leading indent per block, then compares). **Extended mode** (`isRegex: true`): ECMAScript (JavaScript) regex pattern. The pattern runs against the whole file content with multiline anchoring: `^` and `$` match at every line boundary (so `^(.*)$` matches the first line, or every line with `limit: 0`), and `.` does **not** cross newlines.
+- `newText` — replacement (default empty). In standard mode, indentation of the matched block is preserved. In regex mode, supports back-references in **either** sed-style `\1`–`\9` **or** JavaScript-style `$1`–`$9`; `\0`, `$0`, and `$&` all insert the whole match (no capture group required); `$$` inserts a literal `$`. Each numbered reference requires that many parenthesized capture groups in `oldText` (e.g. quote a line with `oldText: "(.*)"`, `newText: "\"\1\""` or `newText: "\"$1\""`). Referencing a group that does not exist (e.g. `\1`/`$1` against `.*`) is a hard error and the file is left unchanged — it is **not** silently replaced with empty text.
 - `limit` — max replacements (default 1; 0 = unlimited). Extended: limit ≠ 1 disables whitespace-normalized fallback.
 - `isRegex` — treat `oldText` as an ECMAScript regex pattern (default false). Extended. Add parentheses to capture text for reuse as `\1`–`\9` in `newText`.
 - `caseInsensitive` — case-insensitive match (default false). Extended. Disables whitespace-normalized fallback.
 
 `dryRun: true` reads the file, applies all edits to an in-memory copy, and returns a unified diff (`--- / +++ / @@ ... @@`) without writing. Returns `(no changes)` if the edits produce no difference. If the file does not exist, falls back to listing intended edits.
+
+**Preview regex edits before applying.** Regex is easy to get subtly wrong, and a bad pattern can silently rewrite far more than intended. The recommended flow for any `isRegex` edit (and any `limit: 0` or glob edit, which touch many places/files at once) is: issue the call with `dryRun: true`, read the diff, confirm it changes *exactly* what you intend, then re-issue the **identical** call with `dryRun: false`. Edits overwrite in place and cannot be auto-undone. (Note: a `dryRun` whose pattern matches nothing returns the same `pattern not found` / `oldText not found` error the real write would — so a clean dry-run diff also confirms the pattern actually matches.)
 
 Writes atomically (temp file + rename). Returns -32603 if any edit with `limit > 0` matched fewer than `limit` times (after exhausting both exact and normalized fallback).
 

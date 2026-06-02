@@ -1182,16 +1182,21 @@ static std::string build_tools_list_json()
         add_str_prop(doc, edit_item_props, "oldText",
             "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required)");
         add_str_prop(doc, edit_item_props, "newText",
-            "Replacement text (default: empty string). With isRegex=true, \\1..\\9 insert "
-            "captured groups — but ONLY when oldText has that many parenthesized groups. "
-            "Example: to wrap a whole line in quotes use oldText \"(.*)\" with newText "
-            "\"\\1\". Referencing a group the pattern lacks is an error (replay will NOT "
-            "silently insert empty text).");
+            "Replacement text (default: empty string). With isRegex=true, \\1..\\9 OR the "
+            "JavaScript-style $1..$9 insert captured groups; \\0, $0, and $& all insert the whole "
+            "match (no capture group needed); $$ inserts a literal '$'. Numbered back-references "
+            "work ONLY when oldText has that many parenthesized groups. Example: to wrap a whole "
+            "line in quotes use oldText \"(.*)\" with newText \"\\1\" (or \"$1\"). Referencing a "
+            "group the pattern lacks is an error (replay will NOT silently insert empty text).");
         add_int_prop(doc, edit_item_props, "limit",
             "Maximum replacements (default 1; 0 = unlimited)");
         add_bool_prop(doc, edit_item_props, "isRegex",
             "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false). "
-            "Add parentheses to oldText to capture text you want to reuse as \\1..\\9 in newText.");
+            "Add parentheses to oldText to capture text you want to reuse as \\1..\\9 in newText. "
+            "^ and $ anchor at every line boundary (multiline), so e.g. oldText \"^(.*)$\" with "
+            "newText \"\\\"\\1\\\"\" wraps the first line in quotes (or every line with limit 0); "
+            "note that . does not cross newlines. Regex behavior is easy to misjudge — preview "
+            "with dryRun=true and check the diff before applying.");
         add_bool_prop(doc, edit_item_props, "caseInsensitive",
             "Case-insensitive matching (default false)");
         auto edit_item_schema = doc.new_obj();
@@ -1205,7 +1210,12 @@ static std::string build_tools_list_json()
         auto props = doc.new_obj();
         add_str_prop(doc, props, "path", "Absolute path to the file to edit");
         doc.obj_add(props, "edits", edits_prop);
-        add_bool_prop(doc, props, "dryRun", "Show the edit plan without writing (default false)");
+        add_bool_prop(doc, props, "dryRun",
+            "Preview the result as a unified diff WITHOUT writing the file (default false). "
+            "Use this FIRST for any regex edit: regex is easy to get subtly wrong, and a bad "
+            "pattern can silently mangle the whole file. Run with dryRun=true, read the diff, "
+            "confirm it changes exactly what you intend, THEN re-issue the identical call with "
+            "dryRun=false to apply it. Edits overwrite in place and cannot be auto-undone.");
         auto schema = doc.new_obj();
         doc.obj_add(schema, "type", doc.new_str("object"));
         doc.obj_add(schema, "properties", props);
@@ -1213,7 +1223,10 @@ static std::string build_tools_list_json()
         doc.arr_append(tools, add_tool(doc, "edit_file",
             "Apply text edits to a file. Supports literal and ECMAScript (JavaScript) regex matching, "
             "back-references, case-insensitive mode, and configurable replacement limits. "
-            "Writes atomically. Extended beyond standard MCP edit_file.", schema));
+            "Writes atomically. Extended beyond standard MCP edit_file. "
+            "IMPORTANT: when using isRegex, preview with dryRun=true and verify the returned diff "
+            "before applying — a wrong regex can destroy content, and the change is not auto-undoable.",
+            schema));
     }
 
     // edit_files (extended — multi-file via literal paths and/or glob patterns)
@@ -1222,16 +1235,21 @@ static std::string build_tools_list_json()
         add_str_prop(doc, edit_item_props, "oldText",
             "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required)");
         add_str_prop(doc, edit_item_props, "newText",
-            "Replacement text (default: empty string). With isRegex=true, \\1..\\9 insert "
-            "captured groups — but ONLY when oldText has that many parenthesized groups. "
-            "Example: to wrap a whole line in quotes use oldText \"(.*)\" with newText "
-            "\"\\1\". Referencing a group the pattern lacks is an error (replay will NOT "
-            "silently insert empty text).");
+            "Replacement text (default: empty string). With isRegex=true, \\1..\\9 OR the "
+            "JavaScript-style $1..$9 insert captured groups; \\0, $0, and $& all insert the whole "
+            "match (no capture group needed); $$ inserts a literal '$'. Numbered back-references "
+            "work ONLY when oldText has that many parenthesized groups. Example: to wrap a whole "
+            "line in quotes use oldText \"(.*)\" with newText \"\\1\" (or \"$1\"). Referencing a "
+            "group the pattern lacks is an error (replay will NOT silently insert empty text).");
         add_int_prop(doc, edit_item_props, "limit",
             "Maximum replacements per file (default 1; 0 = unlimited)");
         add_bool_prop(doc, edit_item_props, "isRegex",
             "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false). "
-            "Add parentheses to oldText to capture text you want to reuse as \\1..\\9 in newText.");
+            "Add parentheses to oldText to capture text you want to reuse as \\1..\\9 in newText. "
+            "^ and $ anchor at every line boundary (multiline), so e.g. oldText \"^(.*)$\" with "
+            "newText \"\\\"\\1\\\"\" wraps the first line in quotes (or every line with limit 0); "
+            "note that . does not cross newlines. Regex behavior is easy to misjudge — preview "
+            "with dryRun=true and check the diff before applying.");
         add_bool_prop(doc, edit_item_props, "caseInsensitive",
             "Case-insensitive matching (default false)");
         auto edit_item_schema = doc.new_obj();
@@ -1254,7 +1272,12 @@ static std::string build_tools_list_json()
         auto props = doc.new_obj();
         doc.obj_add(props, "paths", paths_prop);
         doc.obj_add(props, "edits", edits_prop);
-        add_bool_prop(doc, props, "dryRun", "Show the edit plan per file without writing (default false)");
+        add_bool_prop(doc, props, "dryRun",
+            "Preview the result of every resolved file as a per-file unified diff WITHOUT writing "
+            "(default false). Strongly recommended before applying, ESPECIALLY here: this tool can "
+            "rewrite many files at once (globs, limit=0), so one wrong regex corrupts them all in a "
+            "single call. Run with dryRun=true, inspect each file's diff, confirm they are exactly "
+            "what you intend, THEN re-issue the identical call with dryRun=false. Not auto-undoable.");
         auto schema = doc.new_obj();
         doc.obj_add(schema, "type", doc.new_str("object"));
         doc.obj_add(schema, "properties", props);
@@ -1262,7 +1285,10 @@ static std::string build_tools_list_json()
         doc.arr_append(tools, add_tool(doc, "edit_files",
             "[Extended] Apply edits to one or more files specified as literal paths and/or glob patterns. "
             "Glob patterns (e.g. /src/**/*.cpp) expand to all matching files at runtime. "
-            "Supports all edit_file options. Returns per-file results in a single response.",
+            "Supports all edit_file options. Returns per-file results in a single response. "
+            "IMPORTANT: this edits MANY files at once and is destructive — for regex edits (and any "
+            "limit=0 or glob edit) run with dryRun=true first and verify every per-file diff before "
+            "re-issuing with dryRun=false. The change cannot be auto-undone.",
             schema));
     }
 
