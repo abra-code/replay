@@ -1496,9 +1496,11 @@ def test_tools_list_schema(tmpdir: str) -> None:
                   str(schema.get("required")))
 
 
-def test_edit_default_limit(tmpdir: str) -> None:
-    print("=== MCP: edit_file (default limit=1, replaces first occurrence only) ===")
+def test_edit_default_limit_unique(tmpdir: str) -> None:
+    print("=== MCP: edit_file (default limit=1 requires a unique literal match) ===")
 
+    # Ambiguous literal oldText at the default limit must error (uniqueness
+    # guard) and leave the file untouched — not silently edit the first match.
     path = f"{tmpdir}/edit_lim1.txt"
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -1512,13 +1514,47 @@ def test_edit_default_limit(tmpdir: str) -> None:
          "params": {"name": "read_file", "arguments": {"path": path}}},
     ], [tmpdir], sequential=True)
 
-    text = text_of(by_id[3])
-    check("default limit=1: edit succeeds",
-          "error" not in by_id[2], str(by_id[2]))
-    check("default limit=1: first occurrence replaced",
-          "FOO bar" in text, f"got: {text!r}")
-    check("default limit=1: second occurrence untouched",
-          "foo qux" in text, f"got: {text!r}")
+    err = by_id[2].get("error", {})
+    check("ambiguous literal -> -32603",
+          err.get("code") == -32603 and "not unique" in err.get("message", ""),
+          str(by_id[2]))
+    check("ambiguous literal: count reported",
+          "found 2" in err.get("message", ""), str(by_id[2]))
+    check("ambiguous literal: file left unchanged",
+          text_of(by_id[3]) == "foo bar\nfoo qux\n", f"got: {text_of(by_id[3])!r}")
+
+    # A unique literal (disambiguated with context) succeeds at the default limit.
+    path2 = f"{tmpdir}/edit_lim1_ok.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path2, "content": "foo bar\nfoo qux\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path2,
+                                  "edits": [{"oldText": "foo bar", "newText": "FOO bar"}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path2}}},
+    ], [tmpdir], sequential=True)
+    check("unique literal edit succeeds", "error" not in by_id[2], str(by_id[2]))
+    check("unique literal: correct line edited",
+          text_of(by_id[3]) == "FOO bar\nfoo qux\n", f"got: {text_of(by_id[3])!r}")
+
+    # limit:0 still replaces every occurrence (opts out of the guard).
+    path3 = f"{tmpdir}/edit_lim1_all.txt"
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path3, "content": "foo bar\nfoo qux\n"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path3,
+                                  "edits": [{"oldText": "foo", "newText": "FOO", "limit": 0}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path3}}},
+    ], [tmpdir], sequential=True)
+    check("limit:0 bypasses guard, replaces all",
+          text_of(by_id[3]) == "FOO bar\nFOO qux\n", f"got: {text_of(by_id[3])!r}")
 
 
 def test_edit_no_match_error(tmpdir: str) -> None:
@@ -2133,6 +2169,42 @@ def test_edit_whitespace_normalized(tmpdir: str) -> None:
           "console.log('hello')" not in text, text)
 
 
+def test_edit_whitespace_normalized_ambiguous(tmpdir: str) -> None:
+    """The whitespace-normalized fallback enforces the same uniqueness guard."""
+    print("=== MCP: edit_file (whitespace-normalized ambiguous -> -32603) ===")
+
+    path = f"{tmpdir}/edit_ws_amb.txt"
+    # Same body, two differently-named functions: the unindented oldText below
+    # has no exact match (so the fallback runs) but normalizes to BOTH blocks.
+    file_content = (
+        "def a():\n"
+        "    console.log('x');\n"
+        "    return 1;\n"
+        "def b():\n"
+        "    console.log('x');\n"
+        "    return 1;\n"
+    )
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "write_file",
+                    "arguments": {"path": path, "content": file_content}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": path,
+                                  "edits": [{"oldText": "console.log('x');\nreturn 1;",
+                                             "newText": "console.log('y');\nreturn 2;"}]}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path}}},
+    ], [tmpdir], sequential=True)
+
+    err = by_id[2].get("error", {})
+    check("ws-normalized ambiguous -> -32603 not unique",
+          err.get("code") == -32603 and "not unique" in err.get("message", ""),
+          str(by_id[2]))
+    check("ws-normalized ambiguous: file left unchanged",
+          text_of(by_id[3]) == file_content, f"got: {text_of(by_id[3])!r}")
+
+
 def test_edit_dryrun_no_changes(tmpdir: str) -> None:
     """dryRun with no-op edit returns (no changes)."""
     print("=== MCP: edit_file (dry-run, no changes) ===")
@@ -2203,12 +2275,13 @@ def main() -> int:
         test_edit_regex_dollar_refs(tmpdir)
         test_edit_case_insensitive(tmpdir)
         test_edit_dryrun(tmpdir)
-        test_edit_default_limit(tmpdir)
+        test_edit_default_limit_unique(tmpdir)
         test_edit_no_match_error(tmpdir)
         test_edit_no_match_unlimited(tmpdir)
         test_edit_regex_no_trailing_empty(tmpdir)
         test_edit_invalid_regex(tmpdir)
         test_edit_whitespace_normalized(tmpdir)
+        test_edit_whitespace_normalized_ambiguous(tmpdir)
         test_edit_dryrun_no_changes(tmpdir)
         test_edit_files_literal(tmpdir)
         test_edit_files_glob(tmpdir)

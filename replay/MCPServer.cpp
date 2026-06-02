@@ -1180,7 +1180,9 @@ static std::string build_tools_list_json()
     {
         auto edit_item_props = doc.new_obj();
         add_str_prop(doc, edit_item_props, "oldText",
-            "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required)");
+            "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required). "
+            "A literal oldText must be unique at the default limit; include enough surrounding lines "
+            "that it matches exactly one place.");
         add_str_prop(doc, edit_item_props, "newText",
             "Replacement text (default: empty string). With isRegex=true, \\1..\\9 OR the "
             "JavaScript-style $1..$9 insert captured groups; \\0, $0, and $& all insert the whole "
@@ -1189,7 +1191,10 @@ static std::string build_tools_list_json()
             "line in quotes use oldText \"(.*)\" with newText \"\\1\" (or \"$1\"). Referencing a "
             "group the pattern lacks is an error (replay will NOT silently insert empty text).");
         add_int_prop(doc, edit_item_props, "limit",
-            "Maximum replacements (default 1; 0 = unlimited)");
+            "Maximum replacements (default 1; 0 = unlimited). With the default of 1 a LITERAL "
+            "oldText must match exactly once — an ambiguous oldText that occurs multiple times is "
+            "an error (add surrounding context to make it unique, or set limit:0 for all / limit:N "
+            "for the first N). Regex is exempt: limit:1 edits the first match.");
         add_bool_prop(doc, edit_item_props, "isRegex",
             "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false). "
             "Add parentheses to oldText to capture text you want to reuse as \\1..\\9 in newText. "
@@ -1233,7 +1238,9 @@ static std::string build_tools_list_json()
     {
         auto edit_item_props = doc.new_obj();
         add_str_prop(doc, edit_item_props, "oldText",
-            "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required)");
+            "Literal text to find — or an ECMAScript (JavaScript) regex when isRegex=true (required). "
+            "A literal oldText must be unique at the default limit; include enough surrounding lines "
+            "that it matches exactly one place.");
         add_str_prop(doc, edit_item_props, "newText",
             "Replacement text (default: empty string). With isRegex=true, \\1..\\9 OR the "
             "JavaScript-style $1..$9 insert captured groups; \\0, $0, and $& all insert the whole "
@@ -1242,7 +1249,11 @@ static std::string build_tools_list_json()
             "line in quotes use oldText \"(.*)\" with newText \"\\1\" (or \"$1\"). Referencing a "
             "group the pattern lacks is an error (replay will NOT silently insert empty text).");
         add_int_prop(doc, edit_item_props, "limit",
-            "Maximum replacements per file (default 1; 0 = unlimited)");
+            "Maximum replacements per file (default 1; 0 = unlimited). With the default of 1 a "
+            "LITERAL oldText must match exactly once in each file — an ambiguous oldText that "
+            "occurs multiple times is an error (add surrounding context to make it unique, or set "
+            "limit:0 for all / limit:N for the first N). Regex is exempt: limit:1 edits the first "
+            "match.");
         add_bool_prop(doc, edit_item_props, "isRegex",
             "Treat oldText as an ECMAScript (JavaScript) regex pattern (default false). "
             "Add parentheses to oldText to capture text you want to reuse as \\1..\\9 in newText. "

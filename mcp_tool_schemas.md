@@ -168,11 +168,12 @@ Each parameter is marked with one of:
 **Matching strategy per edit item:**
 1. **Standard mode** (`isRegex: false`, `caseInsensitive: false`, `limit: 1`):
    - Try exact substring match first.
-   - If not found: try **whitespace-normalized** line match — strips the common leading indent from both `oldText` and the candidate content block, then compares line-by-line. This lets `oldText` be copied from a differently-indented context.
+   - **Uniqueness guard:** the literal `oldText` must occur **exactly once**. If it occurs 2+ times the edit is **ambiguous** and fails with `-32603` (`oldText is not unique: found N occurrences …`) without writing — add surrounding context so it matches one place, or set `limit: 0` (all) / `limit: N`. (Regex is exempt; see below.)
+   - If not found: try **whitespace-normalized** line match — strips the common leading indent from both `oldText` and the candidate content block, then compares line-by-line. This lets `oldText` be copied from a differently-indented context. The same uniqueness guard applies here: a block that normalizes to 2+ locations fails with `-32603` (`oldText is not unique: found N whitespace-normalized matches …`) rather than editing the first.
    - On replacement: the original indentation of the matched block is preserved and applied to `newText`.
 2. **Extended — regex** (`isRegex: true`): match with an ECMAScript (JavaScript) regex against the whole file content, with **multiline anchoring** — `^` and `$` match at every line boundary (e.g. `^(.*)$` wraps the first line, or every line with `limit: 0`), and `.` does **not** cross newlines. `newText` may use back-references in sed-style `\1`–`\9` or JavaScript-style `$1`–`$9`; `\0`, `$0`, and `$&` all insert the whole match (no capture group required) and `$$` inserts a literal `$`. Numbered references work **only if `oldText` has that many parenthesized capture groups** — e.g. wrap a line in quotes with `oldText: "(.*)"`, `newText: "\"\1\""` (or `"\"$1\""`). A reference to a group the pattern does not have (e.g. `\1`/`$1` against `.*`) is a hard `-32603` error and the file is left unchanged; it is **not** silently expanded to an empty string. No whitespace-normalized fallback.
 3. **Extended — case-insensitive** (`caseInsensitive: true`): case-insensitive literal or (combined with `isRegex`) regex match. No whitespace-normalized fallback.
-4. **Extended — limit** (`limit: 0` = unlimited, `limit: N > 1`): replace up to N occurrences. Whitespace-normalized fallback only applies when `limit: 1`.
+4. **Extended — limit** (`limit: 0` = unlimited, `limit: N > 1`): replace up to N occurrences; setting `limit` above 1 (or to 0) also opts out of the literal uniqueness guard. Whitespace-normalized fallback only applies when `limit: 1`.
 
 **`dryRun: true`:**
 - Reads the file, applies all edits to an in-memory copy.

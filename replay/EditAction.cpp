@@ -208,18 +208,32 @@ static bool apply_whitespace_normalized(std::string &content,
     int n = (int)content_lines.size();
 
     int match_at = -1;
+    int match_count = 0;
     for (int i = 0; i + m <= n; ++i)
     {
         if (normalized_region_matches(content_lines, i, old_norm))
         {
-            match_at = i;
-            break;
+            if (match_at < 0)
+                match_at = i;
+            match_count++;
         }
     }
 
-    if (match_at < 0)
+    if (match_count == 0)
     {
         outError = std::string("oldText not found: ") + old_str;
+        return false;
+    }
+
+    // Uniqueness guard, same contract as the exact-literal path: an ambiguous
+    // block (matching >1 location after whitespace normalization) must not be
+    // silently applied to the first. Require surrounding context to single it
+    // out. (limit:0/N do not apply here — this fallback only runs at limit 1.)
+    if (match_count > 1)
+    {
+        outError = std::string("oldText is not unique: found ") + std::to_string(match_count) +
+                   " whitespace-normalized matches for the given block. Add surrounding lines so "
+                   "it matches exactly one place.";
         return false;
     }
 
@@ -539,6 +553,43 @@ static bool apply_one_edit(std::string &content,
 			return false;
 		}
 
+		// Uniqueness guard: with the default limit (1) a literal oldText that
+		// occurs more than once is ambiguous. Silently editing the first match
+		// is a common way to corrupt the wrong location, so require exactly one
+		// match — the caller should add surrounding context to disambiguate, or
+		// opt into multiple with limit:0 (all) / limit:N (first N). Regex mode is
+		// intentionally exempt: matching many and taking the first is a normal
+		// idiom (e.g. ^(.*)$ with limit 1 to edit only the first line).
+		if (limit == 1)
+		{
+			size_t first = case_insensitive
+				? find_nocase(content, old_text, 0)
+				: content.find(old_text);
+			if (first != std::string::npos)
+			{
+				size_t scan = first + old_text.size();
+				int matches = 1;
+				while (true)
+				{
+					size_t next = case_insensitive
+						? find_nocase(content, old_text, scan)
+						: content.find(old_text, scan);
+					if (next == std::string::npos)
+						break;
+					matches++;
+					scan = next + old_text.size();
+				}
+				if (matches > 1)
+				{
+					outError = std::string("oldText is not unique: found ") +
+					           std::to_string(matches) + " occurrences of \"" + old_text +
+					           "\". Add surrounding context so it matches exactly one, or set "
+					           "limit:0 to replace all (limit:N for the first N).";
+					return false;
+				}
+			}
+		}
+
 		std::string result;
 		size_t pos = 0;
 		int count = 0;
@@ -573,6 +624,11 @@ static bool apply_one_edit(std::string &content,
 				std::string normError;
 				if (apply_whitespace_normalized(content, old_text, new_text, normError))
 					return true;
+				// Fallback ran but did not apply — normError is either the
+				// "not found" message (same as below) or the "not unique"
+				// ambiguity error; surface it rather than masking it.
+				outError = std::move(normError);
+				return false;
 			}
 			outError = std::string("oldText not found: ") + old_text;
 			return false;
