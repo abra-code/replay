@@ -29,6 +29,7 @@
 
 #include "fingerprint.h"
 #include "FileInfo.h"
+#include "FileHashing.h"
 #include "dispatch_queues_helper.h"
 #include "json_serialization.h"
 #include "yyjson.hpp"
@@ -38,19 +39,12 @@
 #include "CFArr.h"
 #include "CFDict.h"
 
-extern "C" uint32_t crc32_impl(uint32_t crc0, const char* buf, size_t len);
-
-extern FileHashAlgorithm g_hash;
+// g_hash, g_verbose and the per-file hashing/xattr helpers come from FileHashing.h
 extern XattrMode g_xattr_mode;
-
-extern bool g_verbose;
 extern double g_traversal_time;
 
 std::atomic_bool s_exiting = false;
 std::atomic_int s_result = EXIT_SUCCESS;
-
-static constexpr const char* kCrc32CXattrName = "public.fingerprint.crc32c";
-static constexpr const char* kBlake3XattrName = "public.fingerprint.blake3";
 
 // this is a shared container that must be mutated only on serial shared_container_mutation_queue
 static std::vector<std::pair<std::string, FileInfo>> s_all_matched_files;
@@ -116,198 +110,6 @@ static std::vector<std::string> split_path_components(const std::string& path) n
         components.emplace_back(path.substr(start));
     }
     return components;
-}
-
-static inline __attribute__((always_inline))
-void compute_buffer_hash(const void *buffer, size_t size, FileInfo &fileInfo)
-{
-    if (g_hash == FileHashAlgorithm::CRC32C)
-    {
-        fileInfo.hash.crc32c = crc32_impl(0, (const char*)buffer, size);
-    }
-    else
-    {
-        blake3_hasher hasher;
-        blake3_hasher_init(&hasher);
-        blake3_hasher_update(&hasher, (const void *)buffer, size);
-        blake3_hasher_finalize(&hasher, (uint8_t*)&fileInfo.hash.blake3, 8);
-    }
-}
-
-static inline __attribute__((always_inline))
-void compute_file_hash(const std::string &path, FileInfo &info)
-{
-    // Don't try to read non-existent files
-    if (info.is_nonexistent())
-    {
-        return; // Sentinel value already set
-    }
-    
-    // For symlinks, read the symlink data itself, not the target
-    if (info.is_symlink())
-    {
-        char target[PATH_MAX];
-        ssize_t len = readlink(path.c_str(), target, sizeof(target) - 1);
-        
-        if (len > 0)
-        {
-            target[len] = '\0';
-            compute_buffer_hash(target, len, info);
-        }
-        else
-        {
-            // Failed to read symlink - leave hash as 0
-            if (g_verbose)
-            {
-                std::cerr << "Warning: failed to read symlink: " << path << '\n';
-            }
-        }
-        return;
-    }
-    
-    // Regular file processing
-    int fd = open(path.c_str(), O_RDONLY);
-    if (fd < 0)
-    {
-        // TODO: log error
-        return;
-    }
-
-    // 16 MB is the mmap threshold - TODO: experiment with different thresholds
-    const size_t MMAP_THRESHOLD = 16 * 1024 * 1024;
-    
-    if ((info.size < MMAP_THRESHOLD) && (info.size > 0))
-    {
-        std::unique_ptr<char, decltype(&free)> buffer(
-            static_cast<char*>(malloc(info.size)), free);
-        if (buffer != nullptr)
-        {
-            if (read(fd, buffer.get(), info.size) == (ssize_t)info.size)
-            {
-                compute_buffer_hash(buffer.get(), info.size, info);
-            }
-        }
-    }
-    else if (info.size >= MMAP_THRESHOLD)
-    {
-        // Large files: mmap + madvise
-        void* map = mmap(nullptr, info.size, PROT_READ, MAP_PRIVATE, fd, 0);
-        if (map != MAP_FAILED)
-        {
-            madvise(map, info.size, MADV_SEQUENTIAL);
-            compute_buffer_hash(map, info.size, info);
-            munmap(map, info.size);
-        }
-    }
-    // else size == 0: hash remains 0 (correct for empty file)
-
-    close(fd);
-}
-
-// returns true if file info stored in xattr is the same as current iteration info & stores the hash in appropriate current_file_info.hash
-// returns false if file info does not match or xattr cannot be read
-static inline __attribute__((always_inline))
-bool read_xattr_fileinfo(const std::string& path, FileInfoCore& current_file_info) noexcept
-{
-    FileInfoCore cached_file_info {};
-    const char* xattr_name = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
-    ssize_t attr_size = getxattr(path.c_str(), xattr_name, &cached_file_info, sizeof(FileInfoCore), 0, XATTR_NOFOLLOW);
-
-    if (attr_size != sizeof(FileInfoCore))
-    {
-        return false; // no xattr or wrong size, we need to recompute the hash
-    }
-
-    bool is_file_info_unchanged = (cached_file_info.inode == current_file_info.inode) &&
-                                  (cached_file_info.size == current_file_info.size) &&
-                                  (cached_file_info.mtime_ns == current_file_info.mtime_ns);
-    
-    if (is_file_info_unchanged)
-    { // we read the cached hash if the file info is unchanged
-        if(g_hash == FileHashAlgorithm::CRC32C)
-        {
-            current_file_info.hash.crc32c = cached_file_info.hash.crc32c;
-        }
-        else if(g_hash == FileHashAlgorithm::BLAKE3)
-        {
-            current_file_info.hash.blake3 = cached_file_info.hash.blake3;
-        }
-    }
-    
-    return is_file_info_unchanged;
-}
-
-
-static inline __attribute__((always_inline))
-void write_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcept
-{
-    bool forced_writable = false;
-    if ((info.mode & S_IWUSR) == 0) // if the file is not user-writable
-    {
-        int mode_change_status = lchmod(path.c_str(), info.mode | S_IWUSR); // temporarily set to writable
-        //int mode_change_status = set_file_mode_flags(path, info.mode | S_IWUSR);
-        forced_writable = (mode_change_status == 0);
-    }
-    
-    errno = 0; //clear any potentially lingering errors from previous operation
-    
-    const char* xattrName = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
-    
-    int xattr_result = ::setxattr(path.c_str(),
-                       xattrName,
-                       &info,
-                       sizeof(FileInfoCore), //only the core part of the FileInfo is persisted
-                       0,              // position (ignored)
-                       XATTR_NOFOLLOW); // or 0 to not follow symlinks
-    
-    int err = errno;
-    
-    if (forced_writable)
-    {
-        lchmod(path.c_str(), info.mode); // restore original permissions
-    }
-    
-    if (xattr_result != 0)
-    {
-        // optional: log error, but ignore in release
-        std::cerr << "setxattr failed result = " << xattr_result << " errno = " << err << " for " << path << '\n';
-    }
-    else if(err != 0)
-    {
-        std::cerr << "setxattr returned 0 but failed with errno = " << err << " for " << path << '\n';
-    }
-}
-
-static inline __attribute__((always_inline))
-void clear_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcept
-{
-    bool forced_writable = false;
-    if ((info.mode & S_IWUSR) == 0) // if the file is not user-writable
-    {
-        int mode_change_status = lchmod(path.c_str(), info.mode | S_IWUSR); // temporarily set to writable
-        forced_writable = (mode_change_status == 0);
-    }
-
-    errno = 0; //clear any potentially lingering errors from previous operation
-    const char* xattr_name = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
-    int xattr_result = ::removexattr(path.c_str(), xattr_name, XATTR_NOFOLLOW);
-    
-    int err = errno;
-
-    if (forced_writable)
-    {
-        lchmod(path.c_str(), info.mode); // restore original permissions
-    }
-
-    if (xattr_result != 0)
-    {
-        // optional: log error, but ignore in release
-        std::cerr << "removexattr failed result = " << xattr_result << " errno = " << err << " for " << path << '\n';
-    }
-    else if(err != 0)
-    {
-        std::cerr << "removexattr returned 0 but failed with errno = " << err << " for " << path << '\n';
-    }
 }
 
 static inline __attribute__((always_inline))

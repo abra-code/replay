@@ -5,8 +5,11 @@
 //  Created by Tomasz Kukielka on 11/17/25.
 //
 
+#pragma once
+
 #include <fts.h>
 #include <sys/stat.h>
+#include <cstdint>
 
 // the structure persisted in xattr for "public.fingerprint.crc32c" or "public.fingerprint.blake3"
 struct FileInfoCore

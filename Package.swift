@@ -136,7 +136,7 @@ let package = Package(
 
         .executableTarget(
             name: "ReplayTool",
-            dependencies: ["Common", "Action", "ReplayServer", "FileTree", "MedusaObjc", "GlobCpp", "GlobOverlap", "Sandbox"],
+            dependencies: ["Common", "Action", "ReplayServer", "FileTree", "MedusaObjc", "GlobCpp", "GlobOverlap", "Sandbox", "FingerprintLib"],
             path: "replay",
             cxxSettings: [
                 .unsafeFlags(["-std=c++20"]),
