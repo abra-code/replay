@@ -23,6 +23,7 @@
 #include "MCPServer.h"
 #include "EnvVarExpand.h"
 #include "PlaylistDoc.h"
+#include "TaskFingerprint.h"
 
 #include <limits.h>
 
@@ -40,6 +41,13 @@ enum
 	kOptAllowWrite,
 	kOptDenyNetwork,
 	kOptMCPServer,
+	kOptCache,
+	kOptCacheDir,
+	kOptCacheFormat,
+	kOptCacheHash,
+	kOptCacheRefresh,
+	kOptCacheEnv,
+	kOptCacheXattr,
 };
 
 static struct option sLongOptions[] =
@@ -62,6 +70,13 @@ static struct option sLongOptions[] =
 	{"allow-write",			required_argument,	NULL, kOptAllowWrite},
 	{"deny-network",		no_argument,			NULL, kOptDenyNetwork},
 	{"mcp-server",			no_argument,			NULL, kOptMCPServer},
+	{"cache",				no_argument,			NULL, kOptCache},
+	{"cache-dir",			required_argument,	NULL, kOptCacheDir},
+	{"cache-format",		required_argument,	NULL, kOptCacheFormat},
+	{"cache-hash",			required_argument,	NULL, kOptCacheHash},
+	{"cache-refresh",		no_argument,			NULL, kOptCacheRefresh},
+	{"cache-env",			required_argument,	NULL, kOptCacheEnv},
+	{"cache-xattr",			required_argument,	NULL, kOptCacheXattr},
 	{"version",				no_argument,		NULL, 'V'},
 	{"help",				no_argument,		NULL, 'h'},
 	{NULL, 					0,					NULL,  0 }
@@ -108,6 +123,17 @@ DisplayHelp(void)
 		"                     but it is possible if needed.\n"
 		"  -l, --stdout PATH  log standard output to provided file path.\n"
 		"  -m, --stderr PATH  log standard error to provided file path.\n"
+		"  --cache            Enable the incremental execution cache: skip actions whose declared inputs,\n"
+		"                     owned paths and declared environment are unchanged since the last run.\n"
+		"                     Off by default. Requires a playlist file and dependency analysis.\n"
+		"  --cache-dir DIR    Directory holding the cache manifest. Default \".replay-cache\". Implies --cache.\n"
+		"  --cache-format json|plist   Manifest format. Default \"json\". Implies --cache.\n"
+		"  --cache-hash crc32c|blake3   Per-file content hash algorithm. Default \"crc32c\". Implies --cache.\n"
+		"  --cache-refresh    Execute everything, ignoring stored entries, but record fresh ones. Implies --cache.\n"
+		"  --cache-env NAME   Fold the value of this environment variable into every task's input fingerprint.\n"
+		"                     May be repeated. Implies --cache.\n"
+		"  --cache-xattr on|off|refresh   Control the per-file hash memoization stored in file xattrs.\n"
+		"                     Default \"on\". Implies --cache.\n"
 		"  --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay\n"
 		"                     auto-discovers declared paths from the playlist and adds them to the policy.\n"
 		"                     Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.\n"
@@ -527,6 +553,13 @@ int main(int argc, const char * argv[])
 	context.force = false;
 	context.orderedOutput = false;
 	context.mcpServer = false;
+	context.cacheEnabled = false;
+	context.cacheRefresh = false;
+	context.cacheDir = ".replay-cache";
+	context.cacheFormat = CacheFormat::Json;
+	context.cacheHash = FileHashAlgorithm::CRC32C;
+	context.cacheXattrMode = XattrMode::On;
+	context.cacheSession = nullptr;
 
 	std::vector<std::string> playlistKeys;
 
@@ -644,6 +677,77 @@ int main(int argc, const char * argv[])
 				mcpServerMode = true;
 			break;
 
+			// All --cache-* options imply --cache: passing one without the other is
+			// always a mistake, never a request to configure a disabled cache.
+			case kOptCache:
+				context.cacheEnabled = true;
+			break;
+
+			case kOptCacheDir:
+				context.cacheEnabled = true;
+				context.cacheDir = optarg;
+			break;
+
+			case kOptCacheFormat:
+			{
+				context.cacheEnabled = true;
+				std::string format(optarg);
+				if(format == "json")
+					context.cacheFormat = CacheFormat::Json;
+				else if(format == "plist")
+					context.cacheFormat = CacheFormat::Plist;
+				else
+				{
+					LogError("error: invalid --cache-format \"%s\". Expected \"json\" or \"plist\"\n", optarg);
+					return EXIT_FAILURE;
+				}
+			}
+			break;
+
+			case kOptCacheHash:
+			{
+				context.cacheEnabled = true;
+				std::string algorithm(optarg);
+				if(algorithm == "crc32c")
+					context.cacheHash = FileHashAlgorithm::CRC32C;
+				else if(algorithm == "blake3")
+					context.cacheHash = FileHashAlgorithm::BLAKE3;
+				else
+				{
+					LogError("error: invalid --cache-hash \"%s\". Expected \"crc32c\" or \"blake3\"\n", optarg);
+					return EXIT_FAILURE;
+				}
+			}
+			break;
+
+			case kOptCacheRefresh:
+				context.cacheEnabled = true;
+				context.cacheRefresh = true;
+			break;
+
+			case kOptCacheEnv:
+				context.cacheEnabled = true;
+				context.cacheGlobalEnvNames.emplace_back(optarg);
+			break;
+
+			case kOptCacheXattr:
+			{
+				context.cacheEnabled = true;
+				std::string mode(optarg);
+				if(mode == "on")
+					context.cacheXattrMode = XattrMode::On;
+				else if(mode == "off")
+					context.cacheXattrMode = XattrMode::Off;
+				else if(mode == "refresh")
+					context.cacheXattrMode = XattrMode::Refresh;
+				else
+				{
+					LogError("error: invalid --cache-xattr \"%s\". Expected \"on\", \"off\" or \"refresh\"\n", optarg);
+					return EXIT_FAILURE;
+				}
+			}
+			break;
+
 			case 'V':
 				printf( "replay %s\n", STRINGIFY_VALUE(REPLAY_VERSION) );
 				return EXIT_SUCCESS;
@@ -660,6 +764,43 @@ int main(int argc, const char * argv[])
 
 	// Determine playlist path (needed for both pre-sandbox extraction and execution).
 	const char* playlistPath = (optind < argc) ? argv[optind] : nullptr;
+
+	// The cache needs a complete dependency graph and a playlist file to key its
+	// manifest on. Modes that provide neither ignore --cache with a warning rather
+	// than silently pretending to cache.
+	if(context.cacheEnabled)
+	{
+		const char *unsupportedMode = nullptr;
+		if(mcpServerMode)
+			unsupportedMode = "--mcp-server";
+		else if(!context.batchName.empty())
+			unsupportedMode = "--start-server";
+		else if(playlistPath == nullptr)
+			unsupportedMode = "stdin streaming";
+		else if(!context.concurrent)
+			unsupportedMode = "--serial"; // supported later; nothing wires the cache into serial dispatch yet
+		else if(!context.analyzeDependencies)
+			unsupportedMode = "--no-dependency";
+
+		if(unsupportedMode != nullptr)
+		{
+			LogError("warning: --cache is ignored in %s mode\n", unsupportedMode);
+			context.cacheEnabled = false;
+		}
+	}
+
+	if(context.cacheEnabled)
+	{
+		// The cache directory is resolved now, while the CWD is still meaningful and
+		// before the sandbox is applied, so the manifest path cannot move under us.
+		context.cacheDir = file_helpers::resolve_literal_path(context.cacheDir);
+		context.playlistPath = file_helpers::resolve_literal_path(playlistPath);
+
+		// Configuration for the fingerprint code shared with gate/fingerprint.
+		g_hash = context.cacheHash;
+		g_xattr_mode = context.cacheXattrMode;
+		g_verbose = context.verbose;
+	}
 
 	// Load the playlist once before the sandbox is applied so we can read the file freely.
 	// The same in-memory document is reused for sandbox extraction and for execution.
@@ -781,6 +922,7 @@ int main(int argc, const char * argv[])
 					break;
 				continue;
 			}
+			context.playlistKey = key;
 			ProcessPlaylist(steps, &context);
 		}
 	}

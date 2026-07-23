@@ -1,4 +1,5 @@
 #include "ReplayTask.h"
+#include "TaskCache.h"
 #include "TaskProxy.h"
 #include "TaskScheduler.h"
 #include "SchedulerMedusa.h"
@@ -254,6 +255,24 @@ DispatchTasksConcurrentlyWithDependencyAnalysis(const std::vector<ActionStep>& p
 	DeleteFileTree(context->fileTreeRoot);
 	context->fileTreeRoot = CreateFileTreeRoot();
 
+	// The cache session owns every TaskCacheRecord and the manifest for the duration
+	// of this playlist. One session per --playlist-key: pruning is scoped to the key
+	// it processed, so entries belonging to other keys are carried through untouched.
+	// MUST be declared before ownedTasks: from stage 4 the task blocks capture record
+	// pointers, so the tasks have to be destroyed before the records they point at.
+	std::unique_ptr<CacheSession> cacheSession;
+	if(context->cacheEnabled && !context->playlistPath.empty())
+	{
+		cacheSession = std::make_unique<CacheSession>(context->playlistPath, context->playlistKey, context);
+		cacheSession->load();
+		context->cacheSession = cacheSession.get();
+		if(context->verbose)
+		{
+			LogError("cache: loaded %zu entries from %s\n",
+				cacheSession->loaded_entry_count(), cacheSession->manifest_path().c_str());
+		}
+	}
+
 	std::vector<std::unique_ptr<TaskProxy>> ownedTasks; // lifetime owner
 	std::vector<TaskProxy*> taskList;                   // non-owning view for scheduler
 
@@ -275,8 +294,33 @@ DispatchTasksConcurrentlyWithDependencyAnalysis(const std::vector<ActionStep>& p
 
 	REPLAY_SIGNPOST_END("TaskProxyBuild");
 
+	if(cacheSession != nullptr)
+	{
+		// TasksFromStep returns immediately once an error is set under --stop-on-error,
+		// including declaration-time errors such as an undefined ${VAR}, so the tail of
+		// the playlist may never have been examined. Entries for those steps must not be
+		// mistaken for entries of removed steps and pruned.
+		bool buildComplete = !(context->stopOnError && context->lastError.hasError());
+		cacheSession->set_prune_allowed(buildComplete);
+	}
+
 	ExecuteTasksWithScheduler(taskList, context);
+
+	// Note: VerifyAllTasksExecuted calls safe_exit on a dependency cycle, so finalize
+	// below does not run in that case. That is safe - every entry is simply carried
+	// forward untouched - but it does mean a cycle discards the completed prefix.
 	VerifyAllTasksExecuted(taskList);
+
+	// Finalize after the scheduler has drained, and even when lastError is set or
+	// --stop-on-error truncated the run: the completed prefix is worth caching, and
+	// short-circuited actions report failure so they can never produce a fresh entry.
+	// Never write a manifest under --dry-run - nothing actually happened.
+	if((cacheSession != nullptr) && !context->dryRun)
+	{
+		cacheSession->finalize_and_save();
+	}
+	context->cacheSession = nullptr;
+
 	REPLAY_PRINT_TIMINGS();
 
 	// ownedTasks goes out of scope here -> all TaskProxy destructors run -> free(inputs) / free(outputs) for each task.

@@ -2,6 +2,7 @@
 #include "FileTree.h"
 #include "LogStream.h"
 #include "ActionStep.h"
+#include "TaskCacheTypes.h"
 #include <CoreFoundation/CFMessagePort.h>
 #include <dispatch/dispatch.h>
 
@@ -52,6 +53,7 @@ private:
 };
 
 class OutputSerializer;
+class CacheSession;
 
 // Returned by EditFileMCPCore — decouples edit logic from MCP response emission.
 struct MCPEditResult {
@@ -105,6 +107,20 @@ typedef struct
 	bool force;
 	bool orderedOutput;
 	bool mcpServer;
+
+	// Incremental execution cache (see private/replay_caching_design.md).
+	// cacheEnabled is false unless --cache (or a --cache-* option) was passed and
+	// the execution mode supports it, so every other mode is untouched.
+	bool cacheEnabled;
+	bool cacheRefresh;              // execute everything, but still store fresh entries
+	std::string cacheDir;
+	CacheFormat cacheFormat;
+	FileHashAlgorithm cacheHash;
+	XattrMode cacheXattrMode;
+	std::vector<std::string> cacheGlobalEnvNames; // --cache-env, folded into every task
+	CacheSession *cacheSession;     // owned by the dispatch function, null when not caching
+	std::string playlistPath;       // resolved absolute playlist path; keys the manifest
+	std::string playlistKey;        // playlist key currently being executed, empty for root arrays
 } ReplayContext;
 
 typedef struct
