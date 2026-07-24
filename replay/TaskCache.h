@@ -32,6 +32,14 @@ std::string compute_task_signature(const std::string &actionName,
                                    const std::vector<std::string> &envNames,
                                    const std::string &playlistKey);
 
+// The environment text folded into world_in: one "NAME=value\n" line per declared
+// variable, global --cache-env names first and per-step names second, each group
+// sorted by name (design 4.5). Names must have been validated to exist; a missing
+// one contributes an empty value rather than failing here.
+std::string build_cache_env_text(const std::vector<std::string> &globalNames,
+                                 const std::vector<std::string> &stepNames,
+                                 const std::unordered_map<std::string, std::string> &environment);
+
 // One manifest entry as loaded from disk.
 struct StoredCacheEntry
 {
@@ -79,6 +87,15 @@ public:
 	                             std::vector<std::string> concreteOutputs,
 	                             std::string envText,
 	                             bool outputsExistenceOnly);
+
+	// Executes one cacheable task through the up-to-date check (design 4.6): when
+	// the stored entry still matches both the consumed inputs and the owned paths,
+	// the task is skipped as a hit; otherwise inner runs and its result is recorded
+	// for finalize_and_save. world_in is captured here, at check time, even for new
+	// tasks and under --cache-refresh, because it becomes the stored value.
+	// Thread-safe: called concurrently from scheduler tasks; record must have been
+	// returned by make_record on this session.
+	void run_task(TaskCacheRecord *record, const std::function<bool()> &inner);
 
 	// Call once after the scheduler has drained. Captures end-of-run world_out for
 	// every task that executed successfully, carries entries forward per the outcome

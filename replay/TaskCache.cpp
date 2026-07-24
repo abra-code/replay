@@ -1,6 +1,7 @@
 #include "TaskCache.h"
 #include "TaskFingerprint.h"
 #include "LogStream.h"
+#include "OutputSerializer.h"
 #include "PosixFileOps.h"
 
 #include <algorithm>
@@ -176,6 +177,31 @@ compute_world_out(const std::vector<std::string> &ownedPaths, bool outputsExiste
 		result |= ((uint64_t)output[i]) << (8 * i);
 	}
 	return result;
+}
+
+std::string
+build_cache_env_text(const std::vector<std::string> &globalNames,
+                     const std::vector<std::string> &stepNames,
+                     const std::unordered_map<std::string, std::string> &environment)
+{
+	std::string text;
+	auto appendGroup = [&text, &environment](const std::vector<std::string> &names)
+	{
+		std::vector<std::string> sorted = names;
+		std::sort(sorted.begin(), sorted.end());
+		for(const auto &name : sorted)
+		{
+			text += name;
+			text.push_back('=');
+			auto found = environment.find(name);
+			if(found != environment.end())
+				text += found->second;
+			text.push_back('\n');
+		}
+	};
+	appendGroup(globalNames);
+	appendGroup(stepNames);
+	return text;
 }
 
 // ============================================================================
@@ -402,6 +428,93 @@ CacheSession::make_record(std::string signature,
 	record.envText = std::move(envText);
 	record.outputsExistenceOnly = outputsExistenceOnly;
 	return &record;
+}
+
+// The first concrete output identifies the task in cache report lines; a task
+// with only glob-declared paths falls back to its first owned path.
+static const std::string &
+report_path(const TaskCacheRecord *record)
+{
+	static const std::string empty;
+	if(!record->concreteOutputs.empty())
+		return record->concreteOutputs.front();
+	if(!record->ownedPaths.empty())
+		return record->ownedPaths.front();
+	return empty;
+}
+
+void
+CacheSession::run_task(TaskCacheRecord *record, const std::function<bool()> &inner)
+{
+	// world_in is ALWAYS computed when a record exists - for new tasks and under
+	// --cache-refresh too - because it is what finalize stores if the task executes
+	// successfully. It must describe the state the task actually consumes, so it is
+	// captured here, immediately before the task runs, never at end of run (4.1).
+	std::optional<uint64_t> rollup = TaskFingerprint::fingerprint_paths(record->plainInputs, true);
+	if(rollup.has_value())
+		record->checkedWorldIn = TaskFingerprint::combine_with_env(*rollup, record->envText);
+
+	const StoredCacheEntry *entry = lookup(record->signature);
+
+	const char *missReason = nullptr;
+	if(!record->checkedWorldIn.has_value())
+		missReason = "missing input";
+	else if(mContext->cacheRefresh)
+		missReason = "refresh";
+	else if(entry == nullptr)
+		missReason = "new task";
+	else if(*record->checkedWorldIn != entry->worldIn)
+		missReason = "inputs changed";
+	else
+	{
+		// Fast explicit stat pass over the concrete declared outputs first: a deleted
+		// output is the common invalidation and needs no hashing to detect.
+		// lstat, not stat: the owned-paths rollup below records a symlink output as
+		// the link itself, so a dangling link must count as present here too or the
+		// two sides disagree and the task misses on every run.
+		for(const auto &path : record->concreteOutputs)
+		{
+			struct stat st;
+			if(lstat(path.c_str(), &st) != 0)
+			{
+				missReason = "output missing";
+				break;
+			}
+		}
+		if(missReason == nullptr)
+		{
+			uint64_t currentOut = compute_world_out(record->ownedPaths, record->outputsExistenceOnly);
+			if(currentOut != entry->worldOut)
+				missReason = "products changed";
+		}
+	}
+
+	if(missReason == nullptr)
+	{
+		record->outcome.store(CacheOutcome::Hit, std::memory_order_release);
+		// orderedOutput is forced off in the dependency-analysis engine, so the line
+		// can go through the serializer directly without slot bookkeeping.
+		if(mContext->dryRun || mContext->verbose)
+		{
+			std::string line = std::string("[cache] HIT ") + record->actionName + " " + report_path(record) + "\n";
+			mContext->outputSerializer->scheduleString(std::move(line), -1);
+		}
+		return;
+	}
+
+	if(mContext->dryRun)
+	{
+		std::string line = std::string("[cache] MISS (") + missReason + ") " + record->actionName + " " + report_path(record) + "\n";
+		mContext->outputSerializer->scheduleString(std::move(line), -1);
+		// Handlers no-op under dryRun but still print their action descriptions.
+		// The outcome is left at NotSeen: nothing executed, and finalize never runs
+		// under dryRun anyway, so no entry can be stored for this pretend run.
+		(void)inner();
+		return;
+	}
+
+	bool isOK = inner();
+	record->outcome.store(isOK ? CacheOutcome::ExecutedOK : CacheOutcome::Failed, std::memory_order_release);
 }
 
 void

@@ -791,6 +791,17 @@ int main(int argc, const char * argv[])
 
 	if(context.cacheEnabled)
 	{
+		// Same strict policy as the per-step "env" key: a declared variable that does
+		// not exist is an error, not an empty value silently folded into fingerprints.
+		for(const auto& oneName : context.cacheGlobalEnvNames)
+		{
+			if(context.environment.find(oneName) == context.environment.end())
+			{
+				LogError("error: --cache-env variable \"%s\" is not defined in the environment\n", oneName.c_str());
+				return EXIT_FAILURE;
+			}
+		}
+
 		// The cache directory is resolved now, while the CWD is still meaningful and
 		// before the sandbox is applied, so the manifest path cannot move under us.
 		context.cacheDir = file_helpers::resolve_literal_path(context.cacheDir);

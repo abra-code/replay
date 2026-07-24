@@ -72,18 +72,49 @@ static void TasksFromStep(const ActionStep& step, ReplayContext* context,
 			if(!action)
 				return;
 
-			// Stage 4 computes the task signature from cacheInfo here and installs the
-			// cache wrapper as the taskBlock; until then the bool action is adapted to
-			// the void taskBlock and its result dropped.
-			(void)cacheInfo;
-			auto oneTask = std::make_unique<TaskProxy>([inner = std::move(action)]() {
-				(void)inner();
-			});
+			std::string actionName = step.string_value("action").value_or(std::string());
+
+			std::function<void()> taskBlock;
+			CacheSession *session = context->cacheSession;
+			if((session != nullptr) && cacheInfo.cacheable)
 			{
-				auto actionName = step.string_value("action");
-				if(actionName.has_value())
-					oneTask->stepActionName = *actionName;
+				// Signature and env text come from the expanded, original-case declaration
+				// vectors, before the FileTree makes its lowercased copies below, so the
+				// cache key stays independent of dependency-analysis internals.
+				std::vector<std::string> signatureEnvNames = context->cacheGlobalEnvNames;
+				signatureEnvNames.insert(signatureEnvNames.end(), cacheInfo.envNames.begin(), cacheInfo.envNames.end());
+				std::string signature = compute_task_signature(actionName, inputs, exclusiveInputs, mutatingInputs, outputs,
+					cacheInfo.extras, signatureEnvNames, context->playlistKey);
+				std::string envText = build_cache_env_text(context->cacheGlobalEnvNames, cacheInfo.envNames, context->environment);
+
+				// Owned paths (world_out material): outputs + exclusive + mutating, glob or
+				// concrete. Concrete outputs separately for the fast existence pass.
+				std::vector<std::string> ownedPaths = outputs;
+				ownedPaths.insert(ownedPaths.end(), exclusiveInputs.begin(), exclusiveInputs.end());
+				ownedPaths.insert(ownedPaths.end(), mutatingInputs.begin(), mutatingInputs.end());
+
+				std::vector<std::string> concreteOutputs;
+				for(const auto& oneOutput : outputs)
+				{
+					if(!globoverlap::is_glob_pattern(oneOutput))
+						concreteOutputs.push_back(oneOutput);
+				}
+
+				TaskCacheRecord *record = session->make_record(std::move(signature), actionName, inputs,
+					std::move(ownedPaths), std::move(concreteOutputs), std::move(envText), cacheInfo.outputsExistenceOnly);
+				taskBlock = [session, record, inner = std::move(action)]() {
+					session->run_task(record, inner);
+				};
 			}
+			else
+			{
+				taskBlock = [inner = std::move(action)]() {
+					(void)inner();
+				};
+			}
+
+			auto oneTask = std::make_unique<TaskProxy>(std::move(taskBlock));
+			oneTask->stepActionName = actionName;
 
 			TaskProxy* taskPtr = oneTask.get();
 			rawList.push_back(taskPtr);
