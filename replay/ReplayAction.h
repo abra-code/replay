@@ -130,12 +130,18 @@ typedef struct
 	std::string mcpRequestID; // raw JSON of the JSON-RPC id field; empty when not in MCP mode
 } ActionContext;
 
+// Receives one resolved action from HandleActionStep: the bool-returning action
+// body (null when the step failed to resolve), the dependency declaration vectors
+// (inputs, mutatingInputs, exclusiveInputs, outputs), and the cache identity
+// material for the action. Consumers that do not cache simply invoke the action
+// and drop the result and the ActionCacheInfo.
 using action_handler_t = std::function<void(
-	std::function<void()>,
+	std::function<bool()>,
 	std::vector<std::string>,
 	std::vector<std::string>,
 	std::vector<std::string>,
-	std::vector<std::string>)>;
+	std::vector<std::string>,
+	ActionCacheInfo)>;
 
 void HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actionHandler);
 

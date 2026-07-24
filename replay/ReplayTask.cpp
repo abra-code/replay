@@ -62,16 +62,23 @@ static void TasksFromStep(const ActionStep& step, ReplayContext* context,
 
 	HandleActionStep(step, context,
 		[&ownedTasks, &rawList, &step, context](
-			std::function<void()> action,
+			std::function<bool()> action,
 			std::vector<std::string> inputs,
 			std::vector<std::string> mutatingInputs,
 			std::vector<std::string> exclusiveInputs,
-			std::vector<std::string> outputs)
+			std::vector<std::string> outputs,
+			ActionCacheInfo cacheInfo)
 		{
 			if(!action)
 				return;
 
-			auto oneTask = std::make_unique<TaskProxy>(std::move(action));
+			// Stage 4 computes the task signature from cacheInfo here and installs the
+			// cache wrapper as the taskBlock; until then the bool action is adapted to
+			// the void taskBlock and its result dropped.
+			(void)cacheInfo;
+			auto oneTask = std::make_unique<TaskProxy>([inner = std::move(action)]() {
+				(void)inner();
+			});
 			{
 				auto actionName = step.string_value("action");
 				if(actionName.has_value())

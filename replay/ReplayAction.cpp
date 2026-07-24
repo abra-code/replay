@@ -3,51 +3,102 @@
 #include "ActionFromName.h"
 #include "GlobOverlap.h"
 #include "FileSystemHelpers.h"
+#include "ABase64.h"
+#include "blake3.h"
+#include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 
-static inline std::function<void()>
+// Extras strings are composed of length-prefixed components (8-byte little-endian
+// length followed by the raw bytes) so no concatenation of components can collide
+// with a different split into other components. A collision here would be a wrong
+// cache skip (two different tasks sharing one signature), never just a miss.
+static inline void
+AppendExtrasComponent(std::string &extras, std::string_view component)
+{
+	uint64_t length = component.size();
+	for(int shift = 0; shift < 64; shift += 8)
+	{
+		extras.push_back((char)((length >> shift) & 0xff));
+	}
+	extras.append(component);
+}
+
+static inline std::string
+Blake3Hex(const void *bytes, size_t length)
+{
+	blake3_hasher hasher;
+	blake3_hasher_init(&hasher);
+	blake3_hasher_update(&hasher, bytes, length);
+	uint8_t digest[BLAKE3_OUT_LEN];
+	blake3_hasher_finalize(&hasher, digest, sizeof(digest));
+	static const char hexDigits[] = "0123456789abcdef";
+	std::string result;
+	result.reserve(2 * sizeof(digest));
+	for(uint8_t oneByte : digest)
+	{
+		result.push_back(hexDigits[oneByte >> 4]);
+		result.push_back(hexDigits[oneByte & 0x0f]);
+	}
+	return result;
+}
+
+// Cache identity beyond the path vectors for the source/destination action family.
+// Only symlink has one: the "validate" flag changes behavior for the same from/to.
+static inline std::string
+SourceDestinationExtras(Action replayAction, const ActionStep &step)
+{
+	std::string extras;
+	if(replayAction == kFileActionSymlink)
+	{
+		AppendExtrasComponent(extras, step.bool_value("validate", true) ? "1" : "0");
+	}
+	return extras;
+}
+
+static inline std::function<bool()>
 CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::string toPath, ReplayContext *context, ActionStep step, intptr_t actionIndex)
 {
 	if(fromPath.empty() || toPath.empty())
 		return nullptr;
 
-	std::function<void()> action;
+	std::function<bool()> action;
 	switch(replayAction)
 	{
 		case kFileActionClone:
 		{
-			action = [fromPath, toPath, context, step, actionIndex]() {
+			action = [fromPath, toPath, context, step, actionIndex]() -> bool {
 				ActionContext localContext = { .settings = step, .index = actionIndex };
-				__unused bool isOK = CloneItem(fromPath, toPath, context, &localContext);
+				return CloneItem(fromPath, toPath, context, &localContext);
 			};
 		}
 		break;
 
 		case kFileActionMove:
 		{
-			action = [fromPath, toPath, context, step, actionIndex]() {
+			action = [fromPath, toPath, context, step, actionIndex]() -> bool {
 				ActionContext localContext = { .settings = step, .index = actionIndex };
-				__unused bool isOK = MoveItem(fromPath, toPath, context, &localContext);
+				return MoveItem(fromPath, toPath, context, &localContext);
 			};
 		}
 		break;
 
 		case kFileActionHardlink:
 		{
-			action = [fromPath, toPath, context, step, actionIndex]() {
+			action = [fromPath, toPath, context, step, actionIndex]() -> bool {
 				ActionContext localContext = { .settings = step, .index = actionIndex };
-				__unused bool isOK = HardlinkItem(fromPath, toPath, context, &localContext);
+				return HardlinkItem(fromPath, toPath, context, &localContext);
 			};
 		}
 		break;
 
 		case kFileActionSymlink:
 		{
-			action = [fromPath, toPath, context, step, actionIndex]() {
+			action = [fromPath, toPath, context, step, actionIndex]() -> bool {
 				ActionContext localContext = { .settings = step, .index = actionIndex };
-				__unused bool isOK = SymlinkItem(fromPath, toPath, context, &localContext);
+				return SymlinkItem(fromPath, toPath, context, &localContext);
 			};
 		}
 		break;
@@ -89,7 +140,77 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 	if(replayAction == kActionInvalid)
 		return;
 
-	std::function<void()> action;
+	// Step-level cache identity material, shared by every action this step expands to.
+	// Declared "env" names are validated eagerly: a missing variable is an action
+	// error, the same strict policy ExpandEnvVars applies to ${VAR} references.
+	ActionCacheInfo cacheInfo;
+	if(step.string_value("env").has_value())
+	{
+		// A lone string here is a typo for the array form; silently ignoring it
+		// would mean silently not folding the variable into the fingerprint.
+		std::string errStr = "error: \"env\" is expected to be an array of environment variable names\n";
+		context->lastError.set(errStr, 1);
+		PrintToStdErr(context, std::move(errStr));
+		return;
+	}
+	auto declaredEnvOpt = step.string_array("env");
+	if(declaredEnvOpt.has_value())
+	{
+		for(const auto& oneName : *declaredEnvOpt)
+		{
+			if(context->environment.find(oneName) == context->environment.end())
+			{
+				std::string errStr = std::string("error: \"env\" array refers to environment variable \"") + oneName + "\" which is not defined\n";
+				context->lastError.set(errStr, 1);
+				PrintToStdErr(context, std::move(errStr));
+				return;
+			}
+		}
+		cacheInfo.envNames = std::move(*declaredEnvOpt);
+	}
+
+	// Optional per-step "cache" override: false opts a cacheable action out; true on
+	// a non-cacheable action is accepted and ignored, with a one-time verbose note.
+	// Presence is detected by the fallback value surviving both lookups. A string
+	// value ("cache": "false") would survive both lookups too and silently leave
+	// caching enabled, so it is rejected outright.
+	if(step.string_value("cache").has_value())
+	{
+		std::string errStr = "error: \"cache\" is expected to be a boolean value\n";
+		context->lastError.set(errStr, 1);
+		PrintToStdErr(context, std::move(errStr));
+		return;
+	}
+	bool cacheAllowed = step.bool_value("cache", true);
+	bool cacheKeyPresent = (cacheAllowed == step.bool_value("cache", false));
+	bool cacheNoteEmitted = false;
+
+	// Every actionHandler invocation goes through this adapter: it merges the
+	// per-action cache identity (cacheable, extras, existence-only outputs) with the
+	// step-level material (envNames, "cache" override) into the final ActionCacheInfo.
+	auto emitAction = [&](std::function<bool()> actionFn,
+		std::vector<std::string> actionInputs,
+		std::vector<std::string> actionMutatingInputs,
+		std::vector<std::string> actionExclusiveInputs,
+		std::vector<std::string> actionOutputs,
+		bool cacheable,
+		std::string extras = std::string(),
+		bool outputsExistenceOnly = false)
+	{
+		if(!cacheable && cacheKeyPresent && cacheAllowed && context->cacheEnabled && context->verbose && !cacheNoteEmitted)
+		{
+			cacheNoteEmitted = true;
+			std::string noteStr = std::string("note: \"cache\": true is ignored, action \"") + step.string_value("action").value_or("") + "\" is not cacheable\n";
+			PrintToStdErr(context, std::move(noteStr));
+		}
+		ActionCacheInfo oneInfo = cacheInfo;
+		oneInfo.cacheable = cacheable && cacheAllowed;
+		oneInfo.extras = std::move(extras);
+		oneInfo.outputsExistenceOnly = outputsExistenceOnly;
+		actionHandler(std::move(actionFn), std::move(actionInputs), std::move(actionMutatingInputs), std::move(actionExclusiveInputs), std::move(actionOutputs), std::move(oneInfo));
+	};
+
+	std::function<bool()> action;
 	std::vector<std::string> inputs;
 	std::vector<std::string> mutatingInputs;
 	std::vector<std::string> exclusiveInputs;
@@ -97,6 +218,12 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 
 	if(isSrcDestAction)
 	{
+		// Move becomes cacheable in stage 5 (fixed-point semantics for exclusive inputs).
+		bool srcDestCacheable = (replayAction != kFileActionMove);
+		// The glob fan-out loop below handles clone/move/hardlink only; a glob-source
+		// symlink is a silent no-op today, and a no-op must never earn a cache entry.
+		bool globSrcDestCacheable = srcDestCacheable && (replayAction != kFileActionSymlink);
+
 		auto sourcePath = step.string_value("from");
 		auto destinationPath = step.string_value("to");
 		if(sourcePath.has_value() && destinationPath.has_value())
@@ -105,7 +232,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 			auto expandedDest = ExpandEnvVars(destinationPath->c_str(), context);
 			if(!expandedSource.has_value() || !expandedDest.has_value())
 			{
-				actionHandler({}, {}, {}, {}, {});
+				emitAction({}, {}, {}, {}, {}, false);
 			}
 			else if(globoverlap::is_glob_pattern(*expandedSource))
 			{
@@ -116,30 +243,38 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				intptr_t actionIndex = ++(context->actionCounter);
 				Action capturedAction = replayAction;
 
-				action = [globPattern, capturedDestDir, capturedAction, context, step, actionIndex]() {
+				action = [globPattern, capturedDestDir, capturedAction, context, step, actionIndex]() -> bool {
 					auto matches = expand_glob(globPattern);
 					if(matches.empty())
 					{
 						std::string errStr = std::string("error: glob pattern \"") + globPattern + "\" matched no files\n";
 						context->lastError.set(errStr, 1);
 						PrintToStdErr(context, std::move(errStr));
-						return;
+						return false;
 					}
+					bool allOK = true;
 					for(const auto& match : matches)
 					{
 						if(context->stopOnError && (context->lastError.hasError()))
+						{ // remaining matches were not processed - this action did not complete
+							allOK = false;
 							break;
+						}
 						auto slash = match.rfind('/');
 						std::string fileName = (slash != std::string::npos) ? match.substr(slash + 1) : match;
 						std::string destPath = capturedDestDir + "/" + fileName;
 						ActionContext localContext = { .settings = step, .index = actionIndex };
+						bool isOK = true;
 						switch(capturedAction) {
-							case kFileActionClone:    CloneItem(match, destPath, context, &localContext); break;
-							case kFileActionMove:     MoveItem(match, destPath, context, &localContext); break;
-							case kFileActionHardlink: HardlinkItem(match, destPath, context, &localContext); break;
+							case kFileActionClone:    isOK = CloneItem(match, destPath, context, &localContext); break;
+							case kFileActionMove:     isOK = MoveItem(match, destPath, context, &localContext); break;
+							case kFileActionHardlink: isOK = HardlinkItem(match, destPath, context, &localContext); break;
 							default: break;
 						}
+						if(!isOK)
+							allOK = false;
 					}
+					return allOK;
 				};
 
 				if(context->concurrent)
@@ -151,7 +286,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						inputs = {globPattern};
 					outputs = {capturedDestDir};
 				}
-				actionHandler(std::move(action), inputs, {}, exclusiveInputs, outputs);
+				emitAction(std::move(action), inputs, {}, exclusiveInputs, outputs, globSrcDestCacheable, SourceDestinationExtras(replayAction, step));
 			}
 			else
 			{
@@ -170,7 +305,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						inputs = {fromPath};
 					outputs = {toPath};
 				}
-				actionHandler(std::move(action), inputs, {}, exclusiveInputs, outputs);
+				emitAction(std::move(action), inputs, {}, exclusiveInputs, outputs, srcDestCacheable, SourceDestinationExtras(replayAction, step));
 			}
 		}
 		else
@@ -201,30 +336,38 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						intptr_t actionIndex = ++(context->actionCounter);
 						Action capturedAction = replayAction;
 
-						action = [globPattern, capturedDestDir, capturedAction, context, step, actionIndex]() {
+						action = [globPattern, capturedDestDir, capturedAction, context, step, actionIndex]() -> bool {
 							auto matches = expand_glob(globPattern);
 							if(matches.empty())
 							{
 								std::string errStr = std::string("error: glob pattern \"") + globPattern + "\" matched no files\n";
 								context->lastError.set(errStr, 1);
 								PrintToStdErr(context, std::move(errStr));
-								return;
+								return false;
 							}
+							bool allOK = true;
 							for(const auto& match : matches)
 							{
 								if(context->stopOnError && (context->lastError.hasError()))
+								{ // remaining matches were not processed - this action did not complete
+									allOK = false;
 									break;
+								}
 								auto slash = match.rfind('/');
 								std::string fileName = (slash != std::string::npos) ? match.substr(slash + 1) : match;
 								std::string destPath = capturedDestDir + "/" + fileName;
 								ActionContext localContext = { .settings = step, .index = actionIndex };
+								bool isOK = true;
 								switch(capturedAction) {
-									case kFileActionClone:    CloneItem(match, destPath, context, &localContext); break;
-									case kFileActionMove:     MoveItem(match, destPath, context, &localContext); break;
-									case kFileActionHardlink: HardlinkItem(match, destPath, context, &localContext); break;
+									case kFileActionClone:    isOK = CloneItem(match, destPath, context, &localContext); break;
+									case kFileActionMove:     isOK = MoveItem(match, destPath, context, &localContext); break;
+									case kFileActionHardlink: isOK = HardlinkItem(match, destPath, context, &localContext); break;
 									default: break;
 								}
+								if(!isOK)
+									allOK = false;
 							}
+							return allOK;
 						};
 
 						inputs.clear(); exclusiveInputs.clear(); outputs.clear();
@@ -236,7 +379,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 								inputs = {globPattern};
 							outputs = {capturedDestDir};
 						}
-						actionHandler(std::move(action), inputs, {}, exclusiveInputs, outputs);
+						emitAction(std::move(action), inputs, {}, exclusiveInputs, outputs, globSrcDestCacheable, SourceDestinationExtras(replayAction, step));
 					}
 					else
 					{
@@ -257,7 +400,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 								inputs = {srcPath};
 							outputs = {dstPath};
 						}
-						actionHandler(std::move(action), inputs, {}, exclusiveInputs, outputs);
+						emitAction(std::move(action), inputs, {}, exclusiveInputs, outputs, srcDestCacheable, SourceDestinationExtras(replayAction, step));
 					}
 				}
 			}
@@ -281,43 +424,49 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							std::string globPattern = *expandedOpt;
 							intptr_t actionIndex = ++(context->actionCounter);
 
-							action = [globPattern, context, step, actionIndex]() {
+							action = [globPattern, context, step, actionIndex]() -> bool {
 								auto matches = expand_glob(globPattern);
 								if(matches.empty())
 								{
 									std::string errStr = std::string("error: glob pattern \"") + globPattern + "\" matched no files\n";
 									context->lastError.set(errStr, 1);
 									PrintToStdErr(context, std::move(errStr));
-									return;
+									return false;
 								}
+								bool allOK = true;
 								for(const auto& match : matches)
 								{
 									if(context->stopOnError && (context->lastError.hasError()))
+									{ // remaining matches were not processed - this action did not complete
+										allOK = false;
 										break;
+									}
 									ActionContext localContext = { .settings = step, .index = actionIndex };
-									__unused bool isOK = DeleteItem(match, context, &localContext);
+									if(!DeleteItem(match, context, &localContext))
+										allOK = false;
 								}
+								return allOK;
 							};
 
 							exclusiveInputs.clear();
 							if(context->concurrent)
 								exclusiveInputs = {globPattern};
-							actionHandler(std::move(action), {}, {}, exclusiveInputs, {});
+							emitAction(std::move(action), {}, {}, exclusiveInputs, {}, false); // cacheable in stage 5
 						}
 						else
 						{
 							// Concrete item — original behavior
 							std::string capturedPath = *expandedOpt;
 							intptr_t actionIndex = ++(context->actionCounter);
-							action = [capturedPath, context, step, actionIndex]() {
+							action = [capturedPath, context, step, actionIndex]() -> bool {
 								ActionContext actionContext = { .settings = step, .index = actionIndex };
-								__unused bool isOK = DeleteItem(capturedPath, context, &actionContext);
+								return DeleteItem(capturedPath, context, &actionContext);
 							};
 
 							exclusiveInputs.clear();
 							if(context->concurrent)
 								exclusiveInputs = {capturedPath};
-							actionHandler(std::move(action), {}, {}, exclusiveInputs, {});
+							emitAction(std::move(action), {}, {}, exclusiveInputs, {}, false); // cacheable in stage 5
 						}
 					}
 					else if(context->stopOnError)
@@ -345,9 +494,9 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					{
 						std::string capturedPath = *expandedOpt;
 						intptr_t actionIndex = ++(context->actionCounter);
-						action = [capturedPath, context, step, actionIndex]() {
+						action = [capturedPath, context, step, actionIndex]() -> bool {
 							ActionContext actionContext = { .settings = step, .index = actionIndex };
-							__unused bool isOK = ReadFile(capturedPath, context, &actionContext);
+							return ReadFile(capturedPath, context, &actionContext);
 						};
 						// ReadFile prints two strings (verbose descriptor + content), reserve second slot
 						++(context->actionCounter);
@@ -355,7 +504,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						inputs.clear();
 						if(context->concurrent)
 							inputs = {capturedPath};
-						actionHandler(std::move(action), inputs, {}, {}, {});
+						emitAction(std::move(action), inputs, {}, {}, {}, false);
 					}
 					else if(context->stopOnError)
 					{
@@ -380,15 +529,15 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				{
 					std::string capturedPath = *expandedOpt;
 					intptr_t actionIndex = ++(context->actionCounter);
-					action = [capturedPath, context, step, actionIndex]() {
+					action = [capturedPath, context, step, actionIndex]() -> bool {
 						ActionContext actionContext = { .settings = step, .index = actionIndex };
-						__unused bool isOK = ListDirectory(capturedPath, context, &actionContext);
+						return ListDirectory(capturedPath, context, &actionContext);
 					};
 					++(context->actionCounter);
 
 					if(context->concurrent)
 						inputs = {capturedPath};
-					actionHandler(std::move(action), inputs, {}, {}, {});
+					emitAction(std::move(action), inputs, {}, {}, {}, false);
 				}
 			}
 			else
@@ -409,15 +558,15 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					std::string capturedPath = *expandedOpt;
 					intptr_t capturedDepth = step.int_value("depth", 5);
 					intptr_t actionIndex = ++(context->actionCounter);
-					action = [capturedPath, capturedDepth, context, step, actionIndex]() {
+					action = [capturedPath, capturedDepth, context, step, actionIndex]() -> bool {
 						ActionContext actionContext = { .settings = step, .index = actionIndex };
-						__unused bool isOK = DirectoryTree(capturedPath, capturedDepth, context, &actionContext);
+						return DirectoryTree(capturedPath, capturedDepth, context, &actionContext);
 					};
 					++(context->actionCounter);
 
 					if(context->concurrent)
 						inputs = {capturedPath};
-					actionHandler(std::move(action), inputs, {}, {}, {});
+					emitAction(std::move(action), inputs, {}, {}, {}, false);
 				}
 			}
 			else
@@ -437,15 +586,15 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				{
 					std::string capturedPath = *expandedOpt;
 					intptr_t actionIndex = ++(context->actionCounter);
-					action = [capturedPath, context, step, actionIndex]() {
+					action = [capturedPath, context, step, actionIndex]() -> bool {
 						ActionContext actionContext = { .settings = step, .index = actionIndex };
-						__unused bool isOK = GetFileInfo(capturedPath, context, &actionContext);
+						return GetFileInfo(capturedPath, context, &actionContext);
 					};
 					++(context->actionCounter);
 
 					if(context->concurrent)
 						inputs = {capturedPath};
-					actionHandler(std::move(action), inputs, {}, {}, {});
+					emitAction(std::move(action), inputs, {}, {}, {}, false);
 				}
 			}
 			else
@@ -487,15 +636,15 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 
 				intptr_t capturedMax = step.int_value("max", 1000);
 				intptr_t actionIndex = ++(context->actionCounter);
-				action = [capturedRoot, capturedGlobs = std::move(capturedGlobs), capturedExcludes = std::move(capturedExcludes), capturedMax, context, step, actionIndex]() {
+				action = [capturedRoot, capturedGlobs = std::move(capturedGlobs), capturedExcludes = std::move(capturedExcludes), capturedMax, context, step, actionIndex]() -> bool {
 					ActionContext actionContext = { .settings = step, .index = actionIndex };
-					__unused bool isOK = GlobFiles(capturedRoot, capturedGlobs, capturedExcludes, capturedMax, context, &actionContext);
+					return GlobFiles(capturedRoot, capturedGlobs, capturedExcludes, capturedMax, context, &actionContext);
 				};
 				++(context->actionCounter);
 
 				if(context->concurrent)
 					inputs = {capturedRoot};
-				actionHandler(std::move(action), inputs, {}, {}, {});
+				emitAction(std::move(action), inputs, {}, {}, {}, false);
 			}
 			else
 			{
@@ -554,6 +703,20 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 			{
 				bool actionDryRun = step.bool_value("dry-run", false);
 
+				// Cache identity of the edit operations, shared by every item task.
+				// Each op contributes exactly five components, plus one trailing
+				// dry-run component, so the flat sequence is unambiguous.
+				std::string editExtras;
+				for(const auto& oneEdit : editsVec)
+				{
+					AppendExtrasComponent(editExtras, oneEdit.old_text);
+					AppendExtrasComponent(editExtras, oneEdit.new_text);
+					AppendExtrasComponent(editExtras, std::to_string(oneEdit.limit));
+					AppendExtrasComponent(editExtras, oneEdit.use_regex ? "1" : "0");
+					AppendExtrasComponent(editExtras, oneEdit.case_insensitive ? "1" : "0");
+				}
+				AppendExtrasComponent(editExtras, actionDryRun ? "1" : "0");
+
 				auto itemPathsOpt = step.string_array("items");
 				if(!itemPathsOpt.has_value() || itemPathsOpt->empty())
 				{
@@ -585,29 +748,35 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							std::vector<FileEdit> capturedEdits = editsVec;
 							bool capturedDryRun = actionDryRun;
 							intptr_t actionIndex = ++(context->actionCounter);
-							action = [globPattern, capturedEdits = std::move(capturedEdits), capturedDryRun, context, step, actionIndex]() {
+							action = [globPattern, capturedEdits = std::move(capturedEdits), capturedDryRun, context, step, actionIndex]() -> bool {
 								auto matches = expand_glob(globPattern);
 								if(matches.empty())
 								{
 									std::string errStr = std::string("error: glob pattern \"") + globPattern + "\" matched no files\n";
 									context->lastError.set(errStr, 1);
 									PrintToStdErr(context, std::move(errStr));
-									return;
+									return false;
 								}
+								bool allOK = true;
 								for(const auto& match : matches)
 								{
 									if(context->stopOnError && (context->lastError.hasError()))
+									{ // remaining matches were not processed - this action did not complete
+										allOK = false;
 										break;
+									}
 									ActionContext actionContext = { .settings = step, .index = actionIndex };
-									__unused bool isOK = EditFile(match, capturedEdits, capturedDryRun, context, &actionContext);
+									if(!EditFile(match, capturedEdits, capturedDryRun, context, &actionContext))
+										allOK = false;
 								}
+								return allOK;
 							};
 							++(context->actionCounter);
 
 							mutatingInputs.clear();
 							if(context->concurrent)
 								mutatingInputs = {globPattern};
-							actionHandler(std::move(action), {}, mutatingInputs, {}, {});
+							emitAction(std::move(action), {}, mutatingInputs, {}, {}, false, editExtras); // cacheable in stage 5
 						}
 						else
 						{
@@ -616,16 +785,16 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							std::vector<FileEdit> capturedEdits = editsVec;
 							bool capturedDryRun = actionDryRun;
 							intptr_t actionIndex = ++(context->actionCounter);
-							action = [capturedPath, capturedEdits = std::move(capturedEdits), capturedDryRun, context, step, actionIndex]() {
+							action = [capturedPath, capturedEdits = std::move(capturedEdits), capturedDryRun, context, step, actionIndex]() -> bool {
 								ActionContext actionContext = { .settings = step, .index = actionIndex };
-								__unused bool isOK = EditFile(capturedPath, capturedEdits, capturedDryRun, context, &actionContext);
+								return EditFile(capturedPath, capturedEdits, capturedDryRun, context, &actionContext);
 							};
 							++(context->actionCounter);
 
 							mutatingInputs.clear();
 							if(context->concurrent)
 								mutatingInputs = {capturedPath};
-							actionHandler(std::move(action), {}, mutatingInputs, {}, {});
+							emitAction(std::move(action), {}, mutatingInputs, {}, {}, false, editExtras); // cacheable in stage 5
 						}
 					}
 				}
@@ -666,13 +835,27 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						std::string capturedPath = *pathOpt;
 						std::string capturedBlob = blobContent;
 						intptr_t actionIndex = ++(context->actionCounter);
-						action = [capturedPath, capturedBlob, context, step, actionIndex]() {
+						action = [capturedPath, capturedBlob, context, step, actionIndex]() -> bool {
 							ActionContext actionContext = { .settings = step, .index = actionIndex };
-							__unused bool isOK = CreateFileFromBlob(capturedPath, capturedBlob, context, &actionContext);
+							return CreateFileFromBlob(capturedPath, capturedBlob, context, &actionContext);
 						};
+
+						// Cache identity is the hash of the DECODED bytes (what lands in the
+						// file), so a re-encoding of identical data still hits. Decode failure
+						// mirrors the action: zero bytes decoded means an empty file is written.
+						unsigned long encodedLen = (unsigned long)capturedBlob.size();
+						unsigned long maxDecoded = CalculateDecodedBufferMaxSize(encodedLen);
+						std::vector<unsigned char> decoded(maxDecoded > 0 ? maxDecoded : 1);
+						unsigned long decodedLen = encodedLen > 0
+							? DecodeBase64((const unsigned char *)capturedBlob.c_str(), encodedLen, decoded.data(), maxDecoded)
+							: 0;
+						std::string blobExtras;
+						AppendExtrasComponent(blobExtras, Blake3Hex(decoded.data(), decodedLen));
+						AppendExtrasComponent(blobExtras, "blob");
+
 						if(context->concurrent)
 							outputs = {capturedPath};
-						actionHandler(std::move(action), {}, {}, {}, outputs);
+						emitAction(std::move(action), {}, {}, {}, outputs, true, std::move(blobExtras));
 					}
 				}
 				else
@@ -702,14 +885,20 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					{
 						std::string capturedPath = *pathOpt;
 						intptr_t actionIndex = ++(context->actionCounter);
-						action = [capturedPath, capturedContent, context, step, actionIndex]() {
+						action = [capturedPath, capturedContent, context, step, actionIndex]() -> bool {
 							ActionContext actionContext = { .settings = step, .index = actionIndex };
-							__unused bool isOK = CreateFile(capturedPath, capturedContent, context, &actionContext);
+							return CreateFile(capturedPath, capturedContent, context, &actionContext);
 						};
+
+						// The captured (post-expansion) content identifies the product; the raw
+						// flag distinguishes text whose expansion happens to be the identity.
+						std::string fileExtras;
+						AppendExtrasComponent(fileExtras, Blake3Hex(capturedContent.data(), capturedContent.size()));
+						AppendExtrasComponent(fileExtras, expandContent ? "0" : "1");
 
 						if(context->concurrent)
 							outputs = {capturedPath};
-						actionHandler(std::move(action), {}, {}, {}, outputs);
+						emitAction(std::move(action), {}, {}, {}, outputs, true, std::move(fileExtras));
 					}
 				}
 			}
@@ -723,14 +912,16 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					{
 						std::string capturedPath = *pathOpt;
 						intptr_t actionIndex = ++(context->actionCounter);
-						action = [capturedPath, context, step, actionIndex]() {
+						action = [capturedPath, context, step, actionIndex]() -> bool {
 							ActionContext actionContext = { .settings = step, .index = actionIndex };
-							__unused bool isOK = CreateDirectory(capturedPath, context, &actionContext);
+							return CreateDirectory(capturedPath, context, &actionContext);
 						};
 
 						if(context->concurrent)
 							outputs = {capturedPath};
-						actionHandler(std::move(action), {}, {}, {}, outputs);
+						// Other tasks legitimately write into a created directory later, so
+						// its up-to-date check is existence + type only, never content.
+						emitAction(std::move(action), {}, {}, {}, outputs, true, std::string(), true);
 					}
 				}
 				else
@@ -773,10 +964,20 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					if(argsOK)
 					{
 						std::string capturedToolPath = *expandedToolOpt;
+
+						// The expanded command line is the action's cache identity beyond
+						// its declared paths.
+						std::string executeExtras;
+						AppendExtrasComponent(executeExtras, capturedToolPath);
+						for(const auto& oneArg : capturedArgs)
+						{
+							AppendExtrasComponent(executeExtras, oneArg);
+						}
+
 						intptr_t actionIndex = ++(context->actionCounter);
-						action = [capturedToolPath, capturedArgs = std::move(capturedArgs), context, step, actionIndex]() {
+						action = [capturedToolPath, capturedArgs = std::move(capturedArgs), context, step, actionIndex]() -> bool {
 							ActionContext actionContext = { .settings = step, .index = actionIndex };
-							__unused bool isOK = ExcecuteTool(capturedToolPath, capturedArgs, context, &actionContext);
+							return ExcecuteTool(capturedToolPath, capturedArgs, context, &actionContext);
 						};
 
 						// [execute] action is expected to print two strings:
@@ -792,7 +993,9 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							outputs = GetExpandedPathsFromVector(step.string_array("outputs"), context);
 						}
 
-						actionHandler(std::move(action), inputs, {}, exclusiveInputs, outputs);
+						// An execute without declared outputs has unknown side effects and
+						// must always run (design 4.2).
+						emitAction(std::move(action), inputs, {}, exclusiveInputs, outputs, !outputs.empty(), std::move(executeExtras));
 					}
 				}
 			}
@@ -827,9 +1030,9 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 			if(textOK)
 			{
 				intptr_t actionIndex = ++(context->actionCounter);
-				action = [capturedText, context, step, actionIndex]() {
+				action = [capturedText, context, step, actionIndex]() -> bool {
 					ActionContext actionContext = { .settings = step, .index = actionIndex };
-					__unused bool isOK = Echo(capturedText, context, &actionContext);
+					return Echo(capturedText, context, &actionContext);
 				};
 
 				// [echo] action is expected to print two strings:
@@ -838,7 +1041,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				// so we need to increase the counter second time
 				++(context->actionCounter);
 
-				actionHandler(std::move(action), {}, {}, {}, {});
+				emitAction(std::move(action), {}, {}, {}, {}, false);
 			}
 		}
 		else if((replayAction == kActionWait) || (replayAction == kActionStartServer))

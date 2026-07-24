@@ -98,7 +98,11 @@ ExcecuteTool(const std::string &toolPath, const std::vector<std::string> &argume
         }
         else
         {
-            isSuccessful = true;
+            // Success requires a clean exit, not just a successful launch: the
+            // returned bool feeds the cache outcome, and a task whose tool exited
+            // non-zero must never be recorded as executed-ok (it could be skipped
+            // forever if it left its declared outputs behind).
+            isSuccessful = (r.exit_code == EXIT_SUCCESS);
 
             if (r.exit_code != EXIT_SUCCESS)
             {
