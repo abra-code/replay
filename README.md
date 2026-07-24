@@ -76,6 +76,18 @@ Options:
                      but it is possible if needed.
   -l, --stdout PATH  log standard output to provided file path.
   -m, --stderr PATH  log standard error to provided file path.
+  --cache            Enable the incremental execution cache: skip actions whose declared inputs,
+                     owned paths and declared environment are unchanged since the last run.
+                     Off by default. Requires a playlist file; works in the default concurrent
+                     mode and in --serial mode. See "Incremental execution cache" below.
+  --cache-dir DIR    Directory holding the cache manifest. Default ".replay-cache". Implies --cache.
+  --cache-format json|plist   Manifest format. Default "json". Implies --cache.
+  --cache-hash crc32c|blake3   Per-file content hash algorithm. Default "crc32c". Implies --cache.
+  --cache-refresh    Execute everything, ignoring stored entries, but record fresh ones. Implies --cache.
+  --cache-env NAME   Fold the value of this environment variable into every task's input fingerprint.
+                     May be repeated. Implies --cache.
+  --cache-xattr on|off|refresh   Control the per-file hash memoization stored in file xattrs.
+                     Default "on". Implies --cache.
   --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay
                      auto-discovers declared paths from the playlist and adds them to the policy.
                      Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.
@@ -151,6 +163,39 @@ Dependency analysis:
      consumers of given input paths and cannot share their inputs with other actions. Producing additional items under
      such exclusive input paths is also not allowed. "replay" will report an error during dependency analysis
      and will not execute an action graph with exclusive input violations.
+
+Incremental execution cache:
+
+  With --cache, "replay" records a fingerprint of each cacheable action's declared world in a manifest
+  (one per playlist file, in --cache-dir) and skips the action on later runs while that world is unchanged.
+  The check is metadata-only: file content hashes of declared inputs, declared environment variable values,
+  and the state of the action's owned paths (outputs, moved/deleted sources, edited files). Nothing about
+  the action's stdout is stored or replayed; skipped actions print nothing.
+
+  Cacheable actions: execute with at least one declared output, clone/copy, hardlink, symlink,
+  create file, create directory (checked for existence and type only, since later actions may write into it),
+  move, delete, and edit (except with "dry-run": true). Never cached: read, list, tree, info, glob, echo,
+  and execute without declared outputs - their product is their stdout or their side effects are unknown.
+
+  Per-step playlist keys:
+    env       Array of environment variable names whose values are folded into this action's fingerprint.
+              A change in any of them re-runs the action; a missing variable is an error.
+    cache     Boolean override: false opts a cacheable action out of caching.
+
+  The owned-path snapshot is taken at the END of a run, so playlists that mutate earlier products
+  downstream (an edit of a generated file, a delete of a temporary, a move) reach a fixed point:
+  when nothing changed since the last run finished, every action skips, including the mutators.
+  The cache trusts declarations: an undeclared input does not invalidate anything, exactly as it does
+  not order execution in dependency analysis. Declare what an action reads and writes.
+  Prefer absolute or environment-anchored paths in cached playlists; relative paths resolve against
+  the current directory on every run and a directory change looks like a changed world.
+  After restructuring a playlist (especially removing a step that mutated earlier products),
+  run once with --cache-refresh to re-execute everything and rebuild the manifest.
+
+  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action without executing
+  or writing anything - a "what would rebuild" query (no summary line, since nothing runs).
+  Every run that actually executes with --cache ends with a summary line on stderr:
+  cache: N hits, M executed, K failed, manifest <path>.
 
 Actions and parameters:
 
@@ -410,7 +455,6 @@ Sandbox profile JSON schema (--sandbox-profile FILE):
 See also:
 
   dispatch --help
-
 ```
 
 # dispatch

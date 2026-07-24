@@ -596,19 +596,19 @@ def test_remaining_unsupported_modes() -> None:
 
         result = run(["-s", "--cache", "--cache-dir", cache_dir, playlist])
         check("-s --cache exits 0", result.returncode == 0, result.stderr[:300])
-        check("-s --cache warns that the cache is ignored",
-              "--cache is ignored" in result.stderr and "--serial" in result.stderr,
-              result.stderr[:300])
-        check("-s --cache writes no manifest", not manifests_in(cache_dir),
+        check("-s --cache is supported: no warning",
+              "--cache is ignored" not in result.stderr, result.stderr[:300])
+        check("-s --cache writes a manifest", len(manifests_in(cache_dir)) == 1,
               str(manifests_in(cache_dir)))
-        check("-s --cache still executes the playlist",
+        check("-s --cache executes the playlist",
               (td / "out" / "a.txt").exists(), "output missing")
 
-        # -s wins over -p in the diagnostic: serial dispatch never consults
-        # analyzeDependencies, so blaming --no-dependency would be misleading.
+        # Serial dispatch never consults analyzeDependencies, so -p must not
+        # disable the cache in serial mode.
         result = run(["-s", "-p", "--cache", "--cache-dir", cache_dir, playlist])
-        check("-s -p --cache blames --serial, not --no-dependency",
-              "--serial" in result.stderr, result.stderr[:300])
+        check("-s -p --cache caches without a warning",
+              result.returncode == 0 and "--cache is ignored" not in result.stderr,
+              result.stderr[:300])
 
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)

@@ -280,7 +280,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					return allOK;
 				};
 
-				if(context->concurrent)
+				if(context->concurrent || context->cacheEnabled)
 				{
 					// The glob pattern is the input for dependency analysis
 					if(replayAction == kFileActionMove)
@@ -300,7 +300,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				intptr_t actionIndex = ++(context->actionCounter);
 				action = CreateSourceDestinationAction(replayAction, fromPath, toPath, context, step, actionIndex);
 
-				if(context->concurrent)
+				if(context->concurrent || context->cacheEnabled)
 				{
 					if(replayAction == kFileActionMove)
 						exclusiveInputs = {fromPath};
@@ -374,7 +374,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						};
 
 						inputs.clear(); exclusiveInputs.clear(); outputs.clear();
-						if(context->concurrent)
+						if(context->concurrent || context->cacheEnabled)
 						{
 							if(replayAction == kFileActionMove)
 								exclusiveInputs = {globPattern};
@@ -395,7 +395,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						action = CreateSourceDestinationAction(replayAction, srcPath, dstPath, context, step, actionIndex);
 
 						inputs.clear(); exclusiveInputs.clear(); outputs.clear();
-						if(context->concurrent)
+						if(context->concurrent || context->cacheEnabled)
 						{
 							if(replayAction == kFileActionMove)
 								exclusiveInputs = {srcPath};
@@ -452,7 +452,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							};
 
 							exclusiveInputs.clear();
-							if(context->concurrent)
+							if(context->concurrent || context->cacheEnabled)
 								exclusiveInputs = {globPattern};
 							emitAction(std::move(action), {}, {}, exclusiveInputs, {}, true);
 						}
@@ -467,7 +467,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							};
 
 							exclusiveInputs.clear();
-							if(context->concurrent)
+							if(context->concurrent || context->cacheEnabled)
 								exclusiveInputs = {capturedPath};
 							emitAction(std::move(action), {}, {}, exclusiveInputs, {}, true);
 						}
@@ -505,7 +505,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						++(context->actionCounter);
 
 						inputs.clear();
-						if(context->concurrent)
+						if(context->concurrent || context->cacheEnabled)
 							inputs = {capturedPath};
 						emitAction(std::move(action), inputs, {}, {}, {}, false);
 					}
@@ -538,7 +538,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					};
 					++(context->actionCounter);
 
-					if(context->concurrent)
+					if(context->concurrent || context->cacheEnabled)
 						inputs = {capturedPath};
 					emitAction(std::move(action), inputs, {}, {}, {}, false);
 				}
@@ -567,7 +567,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					};
 					++(context->actionCounter);
 
-					if(context->concurrent)
+					if(context->concurrent || context->cacheEnabled)
 						inputs = {capturedPath};
 					emitAction(std::move(action), inputs, {}, {}, {}, false);
 				}
@@ -595,7 +595,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 					};
 					++(context->actionCounter);
 
-					if(context->concurrent)
+					if(context->concurrent || context->cacheEnabled)
 						inputs = {capturedPath};
 					emitAction(std::move(action), inputs, {}, {}, {}, false);
 				}
@@ -645,7 +645,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 				};
 				++(context->actionCounter);
 
-				if(context->concurrent)
+				if(context->concurrent || context->cacheEnabled)
 					inputs = {capturedRoot};
 				emitAction(std::move(action), inputs, {}, {}, {}, false);
 			}
@@ -777,7 +777,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							++(context->actionCounter);
 
 							mutatingInputs.clear();
-							if(context->concurrent)
+							if(context->concurrent || context->cacheEnabled)
 								mutatingInputs = {globPattern};
 							// An edit with "dry-run": true is a stdout action and never cacheable.
 							emitAction(std::move(action), {}, mutatingInputs, {}, {}, !actionDryRun, editExtras);
@@ -796,7 +796,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							++(context->actionCounter);
 
 							mutatingInputs.clear();
-							if(context->concurrent)
+							if(context->concurrent || context->cacheEnabled)
 								mutatingInputs = {capturedPath};
 							// An edit with "dry-run": true is a stdout action and never cacheable.
 							emitAction(std::move(action), {}, mutatingInputs, {}, {}, !actionDryRun, editExtras);
@@ -858,7 +858,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						AppendExtrasComponent(blobExtras, Blake3Hex(decoded.data(), decodedLen));
 						AppendExtrasComponent(blobExtras, "blob");
 
-						if(context->concurrent)
+						if(context->concurrent || context->cacheEnabled)
 							outputs = {capturedPath};
 						emitAction(std::move(action), {}, {}, {}, outputs, true, std::move(blobExtras));
 					}
@@ -901,7 +901,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						AppendExtrasComponent(fileExtras, Blake3Hex(capturedContent.data(), capturedContent.size()));
 						AppendExtrasComponent(fileExtras, expandContent ? "0" : "1");
 
-						if(context->concurrent)
+						if(context->concurrent || context->cacheEnabled)
 							outputs = {capturedPath};
 						emitAction(std::move(action), {}, {}, {}, outputs, true, std::move(fileExtras));
 					}
@@ -922,7 +922,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							return CreateDirectory(capturedPath, context, &actionContext);
 						};
 
-						if(context->concurrent)
+						if(context->concurrent || context->cacheEnabled)
 							outputs = {capturedPath};
 						// Other tasks legitimately write into a created directory later, so
 						// its up-to-date check is existence + type only, never content.
@@ -991,7 +991,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						// so we need to increase the counter second time
 						++(context->actionCounter);
 
-						if(context->concurrent)
+						if(context->concurrent || context->cacheEnabled)
 						{
 							inputs = GetExpandedPathsFromVector(step.string_array("inputs"), context);
 							exclusiveInputs = GetExpandedPathsFromVector(step.string_array("exclusive inputs"), context);

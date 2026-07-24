@@ -28,6 +28,9 @@ Scenarios:
       I; run 2 re-runs the execute with the post-edit I; run 3 all-hits. Fails if
       world_in is ever captured at end of run instead of check time.
   19. glob-form fixed points: glob move, glob delete, glob edit
+  20. serial mode (-s --cache): miss/hit, edit fixed point, dry-run reporting,
+      cross-engine manifest sharing with the concurrent engine
+  21. help text documents the incremental execution cache
 
 Usage: python3 test_replay_cache.py [/path/to/replay]
 Exit:  0 = all checks passed, 1 = one or more failures
@@ -774,6 +777,56 @@ def test_glob_fixed_points():
         check("edit re-applied to all matches", (edir / "e1.txt").read_text() == "new text" and (edir / "e2.txt").read_text() == "new text")
 
 
+def test_serial_mode():
+    print("\n=== Scenario 20: serial mode ===")
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        (d / "in.txt").write_text("v1 stable")
+        log = d / "log.txt"
+        cache = d / "cache"
+        playlist = d / "pl.json"
+        # The edit's oldText matches a token the input change leaves intact, so the
+        # re-run chain applies cleanly after the input flips from v1 to v2.
+        playlist.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh",
+             "arguments": ["-c", f"echo ran >> {log}; cat {d}/in.txt > {d}/out.txt"],
+             "inputs": [str(d / "in.txt")], "outputs": [str(d / "out.txt")]},
+            {"action": "edit", "items": [str(d / "out.txt")],
+             "edits": [{"oldText": "stable", "newText": "edited"}]},
+        ]))
+
+        r1 = cached(playlist, cache, "-s")
+        check("serial cold run executes both", r1.returncode == 0 and summary(r1) == (0, 2, 0), r1.stderr)
+        check("serial chain output correct", (d / "out.txt").read_text() == "v1 edited")
+
+        r2 = cached(playlist, cache, "-s")
+        check("serial warm run hits both (edit fixed point holds)", summary(r2) == (2, 0, 0), r2.stderr)
+        check("serial tool ran exactly once", log.read_text().count("ran") == 1)
+
+        r3 = cached(playlist, cache, "-s", "--dry-run")
+        check("serial dry run reports HITs", r3.stdout.count("[cache] HIT") == 2, r3.stdout)
+
+        (d / "in.txt").write_text("v2 stable")
+        r4 = cached(playlist, cache, "-s")
+        check("serial input change re-runs the chain", r4.returncode == 0 and summary(r4) == (0, 2, 0), r4.stderr)
+        check("serial rerun output correct", (d / "out.txt").read_text() == "v2 edited")
+
+        # Content-based signatures are engine-independent: a manifest warmed by the
+        # serial engine must hit in the concurrent dependency-analysis engine.
+        r5 = cached(playlist, cache)
+        check("concurrent engine hits on the serial-warmed manifest", summary(r5) == (2, 0, 0), r5.stderr)
+
+
+def test_help_documents_cache():
+    print("\n=== Scenario 21: help text ===")
+    r = run(["--help"])
+    check("help has the cache section", "Incremental execution cache:" in r.stdout, r.stdout[:200])
+    for needle in ("--cache-refresh", "[cache] HIT", "cache: N hits",
+                   "env       Array of environment variable names",
+                   "cache     Boolean override"):
+        check(f"help mentions {needle!r}", needle in r.stdout)
+
+
 if not REPLAY.exists():
     print(f"error: replay binary not found at {REPLAY}")
     sys.exit(1)
@@ -801,6 +854,8 @@ test_edit_fixed_point()
 test_chain_fixed_point()
 test_wrong_skip_regression()
 test_glob_fixed_points()
+test_serial_mode()
+test_help_documents_cache()
 
 print(f"\n{'='*40}")
 print(f"  Passed: {_pass}  Failed: {_fail}")

@@ -40,6 +40,21 @@ std::string build_cache_env_text(const std::vector<std::string> &globalNames,
                                  const std::vector<std::string> &stepNames,
                                  const std::unordered_map<std::string, std::string> &environment);
 
+// Turns a bool action into the void block the execution engines run. When
+// context->cacheSession is set and the action is cacheable, this computes the
+// signature, creates the session record and returns the up-to-date-check wrapper;
+// otherwise it returns a trivial adapter that just drops the bool. Shared by the
+// dependency-analysis task builder and serial dispatch so both engines cache
+// through identical logic. Must be called on the graph-building thread.
+std::function<void()> WrapActionWithCache(std::function<bool()> action,
+                                          const std::string &actionName,
+                                          const std::vector<std::string> &inputs,
+                                          const std::vector<std::string> &mutatingInputs,
+                                          const std::vector<std::string> &exclusiveInputs,
+                                          const std::vector<std::string> &outputs,
+                                          const ActionCacheInfo &cacheInfo,
+                                          ReplayContext *context);
+
 // One manifest entry as loaded from disk.
 struct StoredCacheEntry
 {

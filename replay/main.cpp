@@ -125,7 +125,8 @@ DisplayHelp(void)
 		"  -m, --stderr PATH  log standard error to provided file path.\n"
 		"  --cache            Enable the incremental execution cache: skip actions whose declared inputs,\n"
 		"                     owned paths and declared environment are unchanged since the last run.\n"
-		"                     Off by default. Requires a playlist file and dependency analysis.\n"
+		"                     Off by default. Requires a playlist file; works in the default concurrent\n"
+		"                     mode and in --serial mode. See \"Incremental execution cache\" below.\n"
 		"  --cache-dir DIR    Directory holding the cache manifest. Default \".replay-cache\". Implies --cache.\n"
 		"  --cache-format json|plist   Manifest format. Default \"json\". Implies --cache.\n"
 		"  --cache-hash crc32c|blake3   Per-file content hash algorithm. Default \"crc32c\". Implies --cache.\n"
@@ -218,6 +219,42 @@ DisplayHelp(void)
 		"     consumers of given input paths and cannot share their inputs with other actions. Producing additional items under\n"
 		"     such exclusive input paths is also not allowed. \"replay\" will report an error during dependency analysis\n"
 		"     and will not execute an action graph with exclusive input violations.\n"
+		"\n"
+	);
+
+	printf(
+		"Incremental execution cache:\n"
+		"\n"
+		"  With --cache, \"replay\" records a fingerprint of each cacheable action's declared world in a manifest\n"
+		"  (one per playlist file, in --cache-dir) and skips the action on later runs while that world is unchanged.\n"
+		"  The check is metadata-only: file content hashes of declared inputs, declared environment variable values,\n"
+		"  and the state of the action's owned paths (outputs, moved/deleted sources, edited files). Nothing about\n"
+		"  the action's stdout is stored or replayed; skipped actions print nothing.\n"
+		"\n"
+		"  Cacheable actions: execute with at least one declared output, clone/copy, hardlink, symlink,\n"
+		"  create file, create directory (checked for existence and type only, since later actions may write into it),\n"
+		"  move, delete, and edit (except with \"dry-run\": true). Never cached: read, list, tree, info, glob, echo,\n"
+		"  and execute without declared outputs - their product is their stdout or their side effects are unknown.\n"
+		"\n"
+		"  Per-step playlist keys:\n"
+		"    env       Array of environment variable names whose values are folded into this action's fingerprint.\n"
+		"              A change in any of them re-runs the action; a missing variable is an error.\n"
+		"    cache     Boolean override: false opts a cacheable action out of caching.\n"
+		"\n"
+		"  The owned-path snapshot is taken at the END of a run, so playlists that mutate earlier products\n"
+		"  downstream (an edit of a generated file, a delete of a temporary, a move) reach a fixed point:\n"
+		"  when nothing changed since the last run finished, every action skips, including the mutators.\n"
+		"  The cache trusts declarations: an undeclared input does not invalidate anything, exactly as it does\n"
+		"  not order execution in dependency analysis. Declare what an action reads and writes.\n"
+		"  Prefer absolute or environment-anchored paths in cached playlists; relative paths resolve against\n"
+		"  the current directory on every run and a directory change looks like a changed world.\n"
+		"  After restructuring a playlist (especially removing a step that mutated earlier products),\n"
+		"  run once with --cache-refresh to re-execute everything and rebuild the manifest.\n"
+		"\n"
+		"  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action without executing\n"
+		"  or writing anything - a \"what would rebuild\" query (no summary line, since nothing runs).\n"
+		"  Every run that actually executes with --cache ends with a summary line on stderr:\n"
+		"  cache: N hits, M executed, K failed, manifest <path>.\n"
 		"\n"
 	);
 
@@ -777,10 +814,8 @@ int main(int argc, const char * argv[])
 			unsupportedMode = "--start-server";
 		else if(playlistPath == nullptr)
 			unsupportedMode = "stdin streaming";
-		else if(!context.concurrent)
-			unsupportedMode = "--serial"; // supported later; nothing wires the cache into serial dispatch yet
-		else if(!context.analyzeDependencies)
-			unsupportedMode = "--no-dependency";
+		else if(context.concurrent && !context.analyzeDependencies)
+			unsupportedMode = "--no-dependency"; // serial dispatch never consults it, so -s -p caches fine
 
 		if(unsupportedMode != nullptr)
 		{

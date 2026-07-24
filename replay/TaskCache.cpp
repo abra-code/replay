@@ -1,5 +1,6 @@
 #include "TaskCache.h"
 #include "TaskFingerprint.h"
+#include "GlobOverlap.h"
 #include "LogStream.h"
 #include "OutputSerializer.h"
 #include "PosixFileOps.h"
@@ -202,6 +203,53 @@ build_cache_env_text(const std::vector<std::string> &globalNames,
 	appendGroup(globalNames);
 	appendGroup(stepNames);
 	return text;
+}
+
+std::function<void()>
+WrapActionWithCache(std::function<bool()> action,
+                    const std::string &actionName,
+                    const std::vector<std::string> &inputs,
+                    const std::vector<std::string> &mutatingInputs,
+                    const std::vector<std::string> &exclusiveInputs,
+                    const std::vector<std::string> &outputs,
+                    const ActionCacheInfo &cacheInfo,
+                    ReplayContext *context)
+{
+	CacheSession *session = context->cacheSession;
+	if((session == nullptr) || !cacheInfo.cacheable)
+	{
+		return [inner = std::move(action)]() {
+			(void)inner();
+		};
+	}
+
+	// Signature and env text come from the expanded, original-case declaration
+	// vectors, so the cache key is identical across execution engines and stays
+	// independent of dependency-analysis internals.
+	std::vector<std::string> signatureEnvNames = context->cacheGlobalEnvNames;
+	signatureEnvNames.insert(signatureEnvNames.end(), cacheInfo.envNames.begin(), cacheInfo.envNames.end());
+	std::string signature = compute_task_signature(actionName, inputs, exclusiveInputs, mutatingInputs, outputs,
+		cacheInfo.extras, signatureEnvNames, context->playlistKey);
+	std::string envText = build_cache_env_text(context->cacheGlobalEnvNames, cacheInfo.envNames, context->environment);
+
+	// Owned paths (world_out material): outputs + exclusive + mutating, glob or
+	// concrete. Concrete outputs separately for the miss-reason refinement.
+	std::vector<std::string> ownedPaths = outputs;
+	ownedPaths.insert(ownedPaths.end(), exclusiveInputs.begin(), exclusiveInputs.end());
+	ownedPaths.insert(ownedPaths.end(), mutatingInputs.begin(), mutatingInputs.end());
+
+	std::vector<std::string> concreteOutputs;
+	for(const auto &oneOutput : outputs)
+	{
+		if(!globoverlap::is_glob_pattern(oneOutput))
+			concreteOutputs.push_back(oneOutput);
+	}
+
+	TaskCacheRecord *record = session->make_record(std::move(signature), actionName, inputs,
+		std::move(ownedPaths), std::move(concreteOutputs), std::move(envText), cacheInfo.outputsExistenceOnly);
+	return [session, record, inner = std::move(action)]() {
+		session->run_task(record, inner);
+	};
 }
 
 // ============================================================================
