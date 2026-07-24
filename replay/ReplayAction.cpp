@@ -218,11 +218,14 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 
 	if(isSrcDestAction)
 	{
-		// Move becomes cacheable in stage 5 (fixed-point semantics for exclusive inputs).
-		bool srcDestCacheable = (replayAction != kFileActionMove);
+		// All source/destination actions are cacheable. Move relies on the fixed-point
+		// semantics of exclusive inputs: its recorded world_out has the source absent
+		// and the destination present, which is exactly what the check reproduces
+		// while nothing has changed (design 4.1/4.2).
+		bool srcDestCacheable = true;
 		// The glob fan-out loop below handles clone/move/hardlink only; a glob-source
 		// symlink is a silent no-op today, and a no-op must never earn a cache entry.
-		bool globSrcDestCacheable = srcDestCacheable && (replayAction != kFileActionSymlink);
+		bool globSrcDestCacheable = (replayAction != kFileActionSymlink);
 
 		auto sourcePath = step.string_value("from");
 		auto destinationPath = step.string_value("to");
@@ -451,7 +454,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							exclusiveInputs.clear();
 							if(context->concurrent)
 								exclusiveInputs = {globPattern};
-							emitAction(std::move(action), {}, {}, exclusiveInputs, {}, false); // cacheable in stage 5
+							emitAction(std::move(action), {}, {}, exclusiveInputs, {}, true);
 						}
 						else
 						{
@@ -466,7 +469,7 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							exclusiveInputs.clear();
 							if(context->concurrent)
 								exclusiveInputs = {capturedPath};
-							emitAction(std::move(action), {}, {}, exclusiveInputs, {}, false); // cacheable in stage 5
+							emitAction(std::move(action), {}, {}, exclusiveInputs, {}, true);
 						}
 					}
 					else if(context->stopOnError)
@@ -776,7 +779,8 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							mutatingInputs.clear();
 							if(context->concurrent)
 								mutatingInputs = {globPattern};
-							emitAction(std::move(action), {}, mutatingInputs, {}, {}, false, editExtras); // cacheable in stage 5
+							// An edit with "dry-run": true is a stdout action and never cacheable.
+							emitAction(std::move(action), {}, mutatingInputs, {}, {}, !actionDryRun, editExtras);
 						}
 						else
 						{
@@ -794,7 +798,8 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 							mutatingInputs.clear();
 							if(context->concurrent)
 								mutatingInputs = {capturedPath};
-							emitAction(std::move(action), {}, mutatingInputs, {}, {}, false, editExtras); // cacheable in stage 5
+							// An edit with "dry-run": true is a stdout action and never cacheable.
+							emitAction(std::move(action), {}, mutatingInputs, {}, {}, !actionDryRun, editExtras);
 						}
 					}
 				}

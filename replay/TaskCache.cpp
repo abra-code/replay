@@ -467,25 +467,27 @@ CacheSession::run_task(TaskCacheRecord *record, const std::function<bool()> &inn
 		missReason = "inputs changed";
 	else
 	{
-		// Fast explicit stat pass over the concrete declared outputs first: a deleted
-		// output is the common invalidation and needs no hashing to detect.
-		// lstat, not stat: the owned-paths rollup below records a symlink output as
-		// the link itself, so a dangling link must count as present here too or the
-		// two sides disagree and the task misses on every run.
-		for(const auto &path : record->concreteOutputs)
+		// The owned-paths rollup is the one and only skip criterion for products: it
+		// encodes presence and absence alike, so a product that is legitimately absent
+		// at end of run (created here, deleted by a later step - the delete fixed
+		// point) still matches its recorded state and hits. An existence check must
+		// never veto that: it would re-run create+delete chains on every run forever.
+		uint64_t currentOut = compute_world_out(record->ownedPaths, record->outputsExistenceOnly);
+		if(currentOut != entry->worldOut)
 		{
-			struct stat st;
-			if(lstat(path.c_str(), &st) != 0)
+			missReason = "products changed";
+			// Refine the reason for the common case. lstat, not stat: the rollup
+			// records a symlink output as the link itself, so a dangling link is
+			// a present product, not a missing one.
+			for(const auto &path : record->concreteOutputs)
 			{
-				missReason = "output missing";
-				break;
+				struct stat st;
+				if(lstat(path.c_str(), &st) != 0)
+				{
+					missReason = "output missing";
+					break;
+				}
 			}
-		}
-		if(missReason == nullptr)
-		{
-			uint64_t currentOut = compute_world_out(record->ownedPaths, record->outputsExistenceOnly);
-			if(currentOut != entry->worldOut)
-				missReason = "products changed";
 		}
 	}
 
