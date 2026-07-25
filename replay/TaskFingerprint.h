@@ -41,9 +41,16 @@ public:
 	// Paths that do not exist contribute nothing to the rollup, exactly as if
 	// they had not been listed - that is what makes the move/delete fixed points
 	// work. Presence still flips the fingerprint because a present file does contribute.
-	// requireConcreteFiles: when true, a missing or empty non-glob path yields nullopt
-	// so the caller can report "missing input" instead of a bogus fingerprint.
-	// Never throws and never fails the run; unreadable files are skipped.
+	// An empty FILE is recorded normally (size 0, hash 0) and stays distinct from an
+	// absent one, which contributes nothing at all.
+	// requireConcreteFiles: when true, a non-glob path that does not exist - or an empty
+	// path string, which is an input that expanded to nothing - yields nullopt so the
+	// caller can report "missing input" instead of a bogus fingerprint.
+	// Returns nullopt when any part of the declared world could not be READ (unreadable
+	// directory, stat or open failure, symlink nesting past the depth bound), regardless
+	// of requireConcreteFiles: an unread subtree contributes exactly what an absent one
+	// contributes, so a partial rollup could match a stored value it does not describe.
+	// Never throws and never fails the run.
 	static std::optional<uint64_t> fingerprint_paths(const std::vector<std::string> &paths, bool requireConcreteFiles);
 
 	// Folds declared environment text into a file fingerprint.

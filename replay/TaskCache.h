@@ -123,7 +123,16 @@ public:
 	size_t loaded_entry_count() const { return mLoadedEntries.size(); }
 
 private:
-	bool write_manifest(const std::unordered_map<std::string, StoredCacheEntry> &entries) const;
+	// Parses the manifest into outEntries, adding nothing when it is absent, empty,
+	// unparseable, of another version, hash algorithm or playlist.
+	void read_manifest_entries(std::unordered_map<std::string, StoredCacheEntry> &outEntries) const;
+
+	// Re-reads the manifest under the exclusive lock, applies this run's delta
+	// (removedSignatures then updatedEntries), prunes against seenSignatures and
+	// publishes the result via temp+rename.
+	bool write_manifest(const std::unordered_map<std::string, StoredCacheEntry> &updatedEntries,
+	                    const std::unordered_set<std::string> &removedSignatures,
+	                    const std::unordered_set<std::string> &seenSignatures) const;
 
 	std::string mPlaylistPath;
 	std::string mPlaylistKey;

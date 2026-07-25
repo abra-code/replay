@@ -204,10 +204,19 @@ Incremental execution cache:
   files are re-hashed on every run instead - correct, just slower on large inputs. Pass --cache-xattr
   explicitly to override when the input trees are writable inside the sandbox.
 
-  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action without executing
-  or writing anything - a "what would rebuild" query (no summary line, since nothing runs).
+  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action on stdout
+  without executing or writing anything - a "what would rebuild" query (no summary line, since
+  nothing runs). During a real run, --verbose reports the same hits and miss reasons on stderr as
+  "cache: HIT/MISS ..." lines, so stdout stays exactly what the playlist would print without --cache.
+  A task that misses with the reason "missing input" on every run has a declared path that cannot be
+  read - a nonexistent input, or an unreadable file inside a declared directory. Such a task can never
+  be cached, because an unread path and a deleted one are indistinguishable in the fingerprint.
   Every run that actually executes with --cache ends with a summary line on stderr:
   cache: N hits, M executed, K failed, manifest <path>.
+
+  A failed action's previous entry is kept. It can only produce a hit later if the declared world
+  returns to the exact state a SUCCESSFUL run recorded, so the skip is correct - but note that a run
+  which fails and is then reverted comes back green without re-executing the action.
 
 Actions and parameters:
 

@@ -109,8 +109,14 @@ CreateSourceDestinationAction(Action replayAction, std::string fromPath, std::st
 	return action;
 }
 
+// An entry whose ${VAR} expansion fails is dropped from the result (ExpandEnvVars has
+// already set lastError). outAnyDropped reports that, because a partially expanded
+// declaration must never be cached: the surviving paths look like the action's complete
+// world, so the dropped one is invisible to both the input fingerprint and the owned-path
+// rollup, and every later change to it would be a wrong skip. stopOnError is off by
+// default, so the step really does still run and really would store such an entry.
 static inline std::vector<std::string>
-GetExpandedPathsFromVector(const std::optional<std::vector<std::string>>& rawPaths, ReplayContext *context)
+GetExpandedPathsFromVector(const std::optional<std::vector<std::string>>& rawPaths, ReplayContext *context, bool *outAnyDropped = nullptr)
 {
 	std::vector<std::string> result;
 	if(!rawPaths.has_value())
@@ -121,6 +127,8 @@ GetExpandedPathsFromVector(const std::optional<std::vector<std::string>>& rawPat
 		auto expanded = ExpandEnvVars(onePath.c_str(), context);
 		if(expanded.has_value())
 			result.push_back(std::move(*expanded));
+		else if(outAnyDropped != nullptr)
+			*outAnyDropped = true;
 	}
 	return result;
 }
@@ -848,15 +856,22 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						// Cache identity is the hash of the DECODED bytes (what lands in the
 						// file), so a re-encoding of identical data still hits. Decode failure
 						// mirrors the action: zero bytes decoded means an empty file is written.
-						unsigned long encodedLen = (unsigned long)capturedBlob.size();
-						unsigned long maxDecoded = CalculateDecodedBufferMaxSize(encodedLen);
-						std::vector<unsigned char> decoded(maxDecoded > 0 ? maxDecoded : 1);
-						unsigned long decodedLen = encodedLen > 0
-							? DecodeBase64((const unsigned char *)capturedBlob.c_str(), encodedLen, decoded.data(), maxDecoded)
-							: 0;
+						// Only when the cache is on: this decodes the blob a second time (the
+						// action decodes it again when it runs) and allocates the full decoded
+						// size, which is pure waste on the default non-caching path for a
+						// playlist that embeds large assets.
 						std::string blobExtras;
-						AppendExtrasComponent(blobExtras, Blake3Hex(decoded.data(), decodedLen));
-						AppendExtrasComponent(blobExtras, "blob");
+						if(context->cacheEnabled)
+						{
+							unsigned long encodedLen = (unsigned long)capturedBlob.size();
+							unsigned long maxDecoded = CalculateDecodedBufferMaxSize(encodedLen);
+							std::vector<unsigned char> decoded(maxDecoded > 0 ? maxDecoded : 1);
+							unsigned long decodedLen = encodedLen > 0
+								? DecodeBase64((const unsigned char *)capturedBlob.c_str(), encodedLen, decoded.data(), maxDecoded)
+								: 0;
+							AppendExtrasComponent(blobExtras, Blake3Hex(decoded.data(), decodedLen));
+							AppendExtrasComponent(blobExtras, "blob");
+						}
 
 						if(context->concurrent || context->cacheEnabled)
 							outputs = {capturedPath};
@@ -991,16 +1006,20 @@ HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actio
 						// so we need to increase the counter second time
 						++(context->actionCounter);
 
+						bool anyPathDropped = false;
 						if(context->concurrent || context->cacheEnabled)
 						{
-							inputs = GetExpandedPathsFromVector(step.string_array("inputs"), context);
-							exclusiveInputs = GetExpandedPathsFromVector(step.string_array("exclusive inputs"), context);
-							outputs = GetExpandedPathsFromVector(step.string_array("outputs"), context);
+							inputs = GetExpandedPathsFromVector(step.string_array("inputs"), context, &anyPathDropped);
+							exclusiveInputs = GetExpandedPathsFromVector(step.string_array("exclusive inputs"), context, &anyPathDropped);
+							outputs = GetExpandedPathsFromVector(step.string_array("outputs"), context, &anyPathDropped);
 						}
 
 						// An execute without declared outputs has unknown side effects and
-						// must always run (design 4.2).
-						emitAction(std::move(action), inputs, {}, exclusiveInputs, outputs, !outputs.empty(), std::move(executeExtras));
+						// must always run (design 4.2). Neither may one whose declaration
+						// only partly expanded: the paths that survived would masquerade as
+						// the action's whole world.
+						emitAction(std::move(action), inputs, {}, exclusiveInputs, outputs,
+							!outputs.empty() && !anyPathDropped, std::move(executeExtras));
 					}
 				}
 			}

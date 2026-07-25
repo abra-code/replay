@@ -844,6 +844,210 @@ def test_help_documents_cache():
         check(f"help mentions {needle!r}", needle in r.stdout)
 
 
+def test_symlink_inside_declared_directory():
+    print("\n=== Scenario 22: symlink inside a declared input directory ===")
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        (d / "inc").mkdir()
+        (d / "src").mkdir()
+        real = d / "src" / "foo.h"
+        real.write_text("VERSION 1")
+        os.symlink("../src/foo.h", d / "inc" / "foo.h")
+        out = d / "out.txt"
+        cache = d / "cache"
+        playlist = d / "pl.json"
+        # inc/ is declared; the bytes actually consumed live in src/ behind the link.
+        playlist.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh",
+             "arguments": ["-c", f"cat {d}/inc/foo.h > {out}"],
+             "inputs": [str(d / "inc")], "outputs": [str(out)]},
+        ]))
+
+        r1 = cached(playlist, cache)
+        check("run 1 executes", summary(r1) == (0, 1, 0), r1.stderr)
+
+        r2 = cached(playlist, cache)
+        check("unchanged tree hits", summary(r2) == (1, 0, 0), r2.stderr)
+
+        # Same length, so only the CONTENT of the link target changes.
+        real.write_text("VERSION 2")
+        r3 = cached(playlist, cache)
+        check("editing the link target re-runs", summary(r3) == (0, 1, 0), r3.stderr)
+        check("consumer saw the new target content", out.read_text() == "VERSION 2")
+
+        # Retargeting the link is visible too.
+        other = d / "src" / "bar.h"
+        other.write_text("OTHER")
+        (d / "inc" / "foo.h").unlink()
+        os.symlink("../src/bar.h", d / "inc" / "foo.h")
+        r4 = cached(playlist, cache)
+        check("retargeting the link re-runs", summary(r4) == (0, 1, 0), r4.stderr)
+        check("consumer saw the new target", out.read_text() == "OTHER")
+
+        # A symlink to a DIRECTORY found inside a traversal must not widen the declared
+        # world to that tree. "loop -> .." reaches the parent, which holds the cache
+        # directory this very run rewrites - traversing it would make the task miss
+        # forever, and "link -> /" would walk every mounted volume.
+        os.symlink("..", d / "inc" / "loop")
+        r5 = cached(playlist, cache, timeout=30)
+        check("adding a directory symlink is a change", summary(r5) == (0, 1, 0), r5.stderr)
+        r6 = cached(playlist, cache, timeout=30)
+        check("a directory symlink does not widen the declared world",
+              summary(r6) == (1, 0, 0), r6.stderr)
+        r7 = cached(playlist, cache, timeout=30)
+        check("and the task stays cacheable run after run",
+              summary(r7) == (1, 0, 0), r7.stderr)
+
+        # Retargeting it is still visible, because the link entry itself is recorded.
+        (d / "inc" / "loop").unlink()
+        os.symlink(str(d / "src"), d / "inc" / "loop")
+        r8 = cached(playlist, cache, timeout=30)
+        check("retargeting a directory symlink is still a change",
+              summary(r8) == (0, 1, 0), r8.stderr)
+
+
+def test_partially_expanded_declaration_not_cached():
+    print("\n=== Scenario 23: a partly expanded declaration is never cached ===")
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        a = d / "a.txt"
+        b = d / "b.txt"
+        a.write_text("AAA")
+        b.write_text("BBB")
+        out = d / "out.txt"
+        cache = d / "cache"
+        playlist = d / "pl.json"
+        env = dict(os.environ)
+        env["SRC"] = str(d)
+        # ${SCR} is a typo: that input silently drops out of the declaration, so the
+        # surviving paths would misrepresent the action's whole world.
+        playlist.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh",
+             "arguments": ["-c", f"cat {a} {b} > {out}"],
+             "inputs": ["${SRC}/a.txt", "${SCR}/b.txt"],
+             "outputs": [str(out)]},
+        ]))
+
+        r1 = cached(playlist, cache, env=env)
+        check("run 1 reports the bad reference", r1.returncode != 0, r1.stderr)
+        check("run 1 caches nothing", summary(r1) == (0, 0, 0), r1.stderr)
+        check("manifest has no entry", manifest_entries(cache) == {})
+
+        b.write_text("CHANGED")
+        r2 = cached(playlist, cache, env=env)
+        check("the undeclared-by-typo input still re-runs", summary(r2) == (0, 0, 0), r2.stderr)
+        check("output reflects the change", out.read_text() == "AAACHANGED")
+
+
+def test_unreadable_subtree_is_not_absence():
+    print("\n=== Scenario 24: an unreadable subtree never reads as an absent one ===")
+    if os.geteuid() == 0:
+        print("  SKIP: running as root, permission bits do not apply")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        tree = d / "tree"
+        (tree / "sub").mkdir(parents=True)
+        (tree / "sub" / "x.txt").write_text("payload")
+        out = d / "out.txt"
+        cache = d / "cache"
+        playlist = d / "pl.json"
+        playlist.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh",
+             "arguments": ["-c", f"cat {tree}/sub/x.txt > {out}"],
+             "inputs": [str(tree)], "outputs": [str(out)]},
+        ]))
+
+        r1 = cached(playlist, cache)
+        check("run 1 executes", summary(r1) == (0, 1, 0), r1.stderr)
+        r2 = cached(playlist, cache)
+        check("unchanged tree hits", summary(r2) == (1, 0, 0), r2.stderr)
+
+        # A fifo/socket/device is a normal member of the tree, not a read failure. It has
+        # no content to hash, so like a directly named special file it contributes nothing
+        # and the tree keeps hitting - the point of the check is that it must NOT be
+        # mistaken for an unreadable entry, which would make the task uncacheable forever.
+        os.mkfifo(tree / "pipe")
+        r2b = cached(playlist, cache)
+        check("a tree containing a fifo stays cacheable", summary(r2b) == (1, 0, 0), r2b.stderr)
+
+        (tree / "sub").chmod(0o000)
+        try:
+            # An unreadable subtree contributes nothing to a rollup - byte for byte what
+            # a DELETED one contributes - so it must degrade to a miss, never to a hit.
+            r3 = cached(playlist, cache)
+            check("an unreadable subtree does not hit", summary(r3)[0] == 0, r3.stderr)
+            check("and says why under --verbose",
+                  "cache: MISS (missing input)" in cached(playlist, cache, "--verbose").stderr)
+        finally:
+            (tree / "sub").chmod(0o755)
+
+        # Readable again: one run to re-record, then hits resume.
+        r4 = cached(playlist, cache)
+        check("readable again re-records", summary(r4) == (0, 1, 0), r4.stderr)
+        r5 = cached(playlist, cache)
+        check("and hits again after that", summary(r5) == (1, 0, 0), r5.stderr)
+
+
+def test_created_directory_replaced_by_symlink():
+    print("\n=== Scenario 25: a created directory replaced by a symlink re-runs ===")
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        target = d / "D"
+        elsewhere = d / "elsewhere"
+        elsewhere.mkdir()
+        cache = d / "cache"
+        playlist = d / "pl.json"
+        playlist.write_text(json.dumps([{"action": "create", "directory": str(target)}]))
+
+        r1 = cached(playlist, cache)
+        check("run 1 creates the directory", summary(r1) == (0, 1, 0) and target.is_dir(), r1.stderr)
+        r2 = cached(playlist, cache)
+        check("unchanged directory hits", summary(r2) == (1, 0, 0), r2.stderr)
+
+        # The existence check must be lstat-based: a symlink pointing at some other
+        # directory is not the directory this action created, and accepting it would
+        # let every later step write through the link.
+        target.rmdir()
+        os.symlink(str(elsewhere), target)
+        r3 = cached(playlist, cache)
+        check("a symlink standing in for the directory re-runs", summary(r3) == (0, 1, 0), r3.stderr)
+
+
+def test_env_name_group_move_is_not_a_miss():
+    print("\n=== Scenario 26: moving an env name between --cache-env and \"env\" ===")
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        out = d / "out.txt"
+        cache = d / "cache"
+        env = dict(os.environ)
+        env["ALPHA"] = "a"
+        env["BETA"] = "b"
+
+        global_form = d / "global.json"
+        global_form.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh", "arguments": ["-c", f"echo x > {out}"],
+             "outputs": [str(out)], "env": ["BETA"]},
+        ]))
+        r1 = run(["--cache", "--cache-dir", cache, "--cache-env", "ALPHA", global_form], env=env)
+        check("run 1 executes", summary(r1) == (0, 1, 0), r1.stderr)
+
+        # Same playlist file, same two names, declared the other way round. The signature
+        # hashes the union, so the env TEXT folded into world_in must be the union too -
+        # otherwise this is a spurious miss with nothing to explain it.
+        step_form = d / "global.json"
+        step_form.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh", "arguments": ["-c", f"echo x > {out}"],
+             "outputs": [str(out)], "env": ["ALPHA", "BETA"]},
+        ]))
+        r2 = run(["--cache", "--cache-dir", cache, step_form], env=env)
+        check("declaring the same names step-side still hits", summary(r2) == (1, 0, 0), r2.stderr)
+
+        env["ALPHA"] = "changed"
+        r3 = run(["--cache", "--cache-dir", cache, step_form], env=env)
+        check("a real value change still re-runs", summary(r3) == (0, 1, 0), r3.stderr)
+
+
 if not REPLAY.exists():
     print(f"error: replay binary not found at {REPLAY}")
     sys.exit(1)
@@ -873,6 +1077,11 @@ test_wrong_skip_regression()
 test_glob_fixed_points()
 test_serial_mode()
 test_help_documents_cache()
+test_symlink_inside_declared_directory()
+test_partially_expanded_declaration_not_cached()
+test_unreadable_subtree_is_not_absence()
+test_created_directory_replaced_by_symlink()
+test_env_name_group_move_is_not_a_miss()
 
 print(f"\n{'='*40}")
 print(f"  Passed: {_pass}  Failed: {_fail}")

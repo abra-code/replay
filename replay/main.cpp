@@ -264,10 +264,19 @@ DisplayHelp(void)
 		"  files are re-hashed on every run instead - correct, just slower on large inputs. Pass --cache-xattr\n"
 		"  explicitly to override when the input trees are writable inside the sandbox.\n"
 		"\n"
-		"  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action without executing\n"
-		"  or writing anything - a \"what would rebuild\" query (no summary line, since nothing runs).\n"
+		"  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action on stdout\n"
+		"  without executing or writing anything - a \"what would rebuild\" query (no summary line, since\n"
+		"  nothing runs). During a real run, --verbose reports the same hits and miss reasons on stderr as\n"
+		"  \"cache: HIT/MISS ...\" lines, so stdout stays exactly what the playlist would print without --cache.\n"
+		"  A task that misses with the reason \"missing input\" on every run has a declared path that cannot be\n"
+		"  read - a nonexistent input, or an unreadable file inside a declared directory. Such a task can never\n"
+		"  be cached, because an unread path and a deleted one are indistinguishable in the fingerprint.\n"
 		"  Every run that actually executes with --cache ends with a summary line on stderr:\n"
 		"  cache: N hits, M executed, K failed, manifest <path>.\n"
+		"\n"
+		"  A failed action's previous entry is kept. It can only produce a hit later if the declared world\n"
+		"  returns to the exact state a SUCCESSFUL run recorded, so the skip is correct - but note that a run\n"
+		"  which fails and is then reverted comes back green without re-executing the action.\n"
 		"\n"
 	);
 
@@ -852,6 +861,14 @@ int main(int argc, const char * argv[])
 				LogError("error: --cache-env variable \"%s\" is not defined in the environment\n", oneName.c_str());
 				return EXIT_FAILURE;
 			}
+		}
+
+		// An empty --cache-dir resolves to an empty string, which would put the manifest
+		// at "/<hex>.replay-cache.json" and push "" into the sandbox write allow-list.
+		if(context.cacheDir.empty())
+		{
+			LogError("error: --cache-dir requires a non-empty directory path\n");
+			return EXIT_FAILURE;
 		}
 
 		// The cache directory is resolved now, while the CWD is still meaningful and

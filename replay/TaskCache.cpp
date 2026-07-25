@@ -6,7 +6,9 @@
 #include "PosixFileOps.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <vector>
@@ -155,9 +157,26 @@ compute_world_out(const std::vector<std::string> &ownedPaths, bool outputsExiste
 	std::sort(sorted.begin(), sorted.end());
 	for(const auto &path : sorted)
 	{
+		// lstat, not stat: stat follows the link, so replacing the created directory with
+		// a symlink to some other directory would still record "directory present" and the
+		// task would hit while every later step wrote through the link.
 		struct stat st;
-		bool isDirectory = (stat(path.c_str(), &st) == 0) && S_ISDIR(st.st_mode);
-		uint8_t marker = isDirectory ? 1 : 0;
+		uint8_t marker;
+		if(lstat(path.c_str(), &st) == 0)
+		{
+			marker = S_ISDIR(st.st_mode) ? 1 : 0;
+		}
+		else if((errno == ENOENT) || (errno == ENOTDIR))
+		{
+			marker = 0; // genuinely absent
+		}
+		else
+		{
+			// Could not look (EACCES on a parent, ELOOP, EIO). Recording marker 0 here
+			// would be the same value as "absent", so a stored absence would match a
+			// directory that exists but is unreachable and it would never be created.
+			return std::nullopt;
+		}
 
 		uint8_t lengthBytes[8];
 		uint64_t length = (uint64_t)path.size();
@@ -186,23 +205,26 @@ build_cache_env_text(const std::vector<std::string> &globalNames,
                      const std::vector<std::string> &stepNames,
                      const std::unordered_map<std::string, std::string> &environment)
 {
+	// One sorted, deduplicated sequence over the UNION of both groups. The task signature
+	// hashes that same union (WrapActionWithCache), so emitting the two groups separately
+	// would let a name move between --cache-env and a step's "env" - or appear in both -
+	// change this text, and therefore world_in, while the signature stayed identical: a
+	// full spurious miss with nothing to explain it.
+	std::vector<std::string> names = globalNames;
+	names.insert(names.end(), stepNames.begin(), stepNames.end());
+	std::sort(names.begin(), names.end());
+	names.erase(std::unique(names.begin(), names.end()), names.end());
+
 	std::string text;
-	auto appendGroup = [&text, &environment](const std::vector<std::string> &names)
+	for(const auto &name : names)
 	{
-		std::vector<std::string> sorted = names;
-		std::sort(sorted.begin(), sorted.end());
-		for(const auto &name : sorted)
-		{
-			text += name;
-			text.push_back('=');
-			auto found = environment.find(name);
-			if(found != environment.end())
-				text += found->second;
-			text.push_back('\n');
-		}
-	};
-	appendGroup(globalNames);
-	appendGroup(stepNames);
+		text += name;
+		text.push_back('=');
+		auto found = environment.find(name);
+		if(found != environment.end())
+			text += found->second;
+		text.push_back('\n');
+	}
 	return text;
 }
 
@@ -267,10 +289,36 @@ static std::string current_timestamp()
 	return std::string(buffer);
 }
 
-static uint64_t hex64_from_cfstring(CFStringRef value)
+// Strict inverse of hex64: exactly 16 hex digits, nothing else. strtoull alone would
+// accept "0x..", leading spaces, a sign and trailing junk, and would silently yield 0
+// for a field that is not a number at all - a value a real rollup can also take.
+static bool hex64_from_cfstring(CFStringRef value, uint64_t &outValue)
 {
+	if(value == nullptr)
+		return false;
+	if(CFGetTypeID(value) != CFStringGetTypeID())
+		return false;
+
 	std::string text = CFStr::ToString(value);
-	return strtoull(text.c_str(), nullptr, 16);
+	if(text.size() != 16)
+		return false;
+
+	uint64_t result = 0;
+	for(char oneChar : text)
+	{
+		unsigned digit;
+		if((oneChar >= '0') && (oneChar <= '9'))
+			digit = (unsigned)(oneChar - '0');
+		else if((oneChar >= 'a') && (oneChar <= 'f'))
+			digit = (unsigned)(oneChar - 'a') + 10;
+		else if((oneChar >= 'A') && (oneChar <= 'F'))
+			digit = (unsigned)(oneChar - 'A') + 10;
+		else
+			return false;
+		result = (result << 4) | digit;
+	}
+	outValue = result;
+	return true;
 }
 
 // Load a binary plist into a CFMutableDictionary. Returns an empty dict on failure.
@@ -376,16 +424,17 @@ CacheSession::CacheSession(std::string playlistPath, std::string playlistKey, Re
 }
 
 void
-CacheSession::load()
+CacheSession::read_manifest_entries(std::unordered_map<std::string, StoredCacheEntry> &outEntries) const
 {
 	// The manifest is disposable state: absent, empty, unparseable, wrong-version and
 	// wrong-hash-algorithm all mean the same thing here - start from nothing and
 	// overwrite on save. None of them is worth a diagnostic or a failure.
 	//
-	// Deliberately no read-side lock: write_manifest publishes atomically via
-	// temp+rename, so any open() here sees a complete manifest inode. Keep it that
-	// way - adding a shared flock here would only be needed if the write side ever
-	// stopped being atomic, and that is the thing not to do.
+	// Deliberately no read-side lock in load(): write_manifest publishes atomically via
+	// temp+rename, so any open() there sees a complete manifest inode. Keep it that
+	// way - adding a shared flock would only be needed if the write side ever stopped
+	// being atomic, and that is the thing not to do. write_manifest calls this a second
+	// time while holding the exclusive lock, to merge rather than clobber.
 	struct stat st;
 	if((stat(mManifestPath.c_str(), &st) != 0) || (st.st_size <= 0))
 		return;
@@ -435,19 +484,41 @@ CacheSession::load()
 		CFDict task(taskRef);
 		StoredCacheEntry entry;
 
+		// world_in and world_out are the two fields a wrong skip would ride on, so a
+		// missing or unparseable one invalidates the whole entry rather than defaulting
+		// to zero: a zero-defaulted field would compare equal to any other truncated
+		// entry, and to a genuine rollup that happens to be zero.
 		CFStringRef text = nullptr;
+		if(!task.GetValue(CFSTR("world_in"), text) || !hex64_from_cfstring(text, entry.worldIn))
+			continue;
+		if(!task.GetValue(CFSTR("world_out"), text) || !hex64_from_cfstring(text, entry.worldOut))
+			continue;
+
 		if(task.GetValue(CFSTR("action"), text))
 			entry.actionName = CFStr::ToString(text);
 		if(task.GetValue(CFSTR("key"), text))
 			entry.playlistKey = CFStr::ToString(text);
-		if(task.GetValue(CFSTR("world_in"), text))
-			entry.worldIn = hex64_from_cfstring(text);
-		if(task.GetValue(CFSTR("world_out"), text))
-			entry.worldOut = hex64_from_cfstring(text);
 		if(task.GetValue(CFSTR("timestamp"), text))
 			entry.timestamp = CFStr::ToString(text);
 
-		mLoadedEntries.emplace(CFStr::ToString(signature), std::move(entry));
+		outEntries.emplace(CFStr::ToString(signature), std::move(entry));
+	}
+}
+
+void
+CacheSession::load()
+{
+	// A corrupt manifest must never be fatal, and parsing one is not allocation-free:
+	// load_plist_file_as_cfdict sizes a buffer from the file length, and the CF and
+	// yyjson readers allocate per node. bad_alloc here would take down a run over
+	// disposable state.
+	try
+	{
+		read_manifest_entries(mLoadedEntries);
+	}
+	catch(...)
+	{
+		mLoadedEntries.clear();
 	}
 }
 
@@ -549,12 +620,20 @@ CacheSession::run_task(TaskCacheRecord *record, const std::function<bool()> &inn
 	if(missReason == nullptr)
 	{
 		record->outcome.store(CacheOutcome::Hit, std::memory_order_release);
-		// orderedOutput is forced off in the dependency-analysis engine, so the line
-		// can go through the serializer directly without slot bookkeeping.
-		if(mContext->dryRun || mContext->verbose)
+		if(mContext->dryRun)
 		{
+			// The dry-run report IS the output of the run, so it belongs on stdout.
+			// orderedOutput is forced off in both engines that can cache (main.cpp), so
+			// the line can go through the serializer without slot bookkeeping - the
+			// skipped action never fills the slots it reserved.
 			std::string line = std::string("[cache] HIT ") + record->actionName + " " + report_path(record) + "\n";
 			mContext->outputSerializer->scheduleString(std::move(line), -1);
+		}
+		else if(mContext->verbose)
+		{
+			// During a real run this is a diagnostic, not output: stderr, same "cache:"
+			// prefix as the summary line, so --cache never alters a playlist's stdout.
+			LogError("cache: HIT %s %s\n", record->actionName.c_str(), report_path(record).c_str());
 		}
 		return;
 	}
@@ -563,6 +642,21 @@ CacheSession::run_task(TaskCacheRecord *record, const std::function<bool()> &inn
 	{
 		std::string line = std::string("[cache] MISS (") + missReason + ") " + record->actionName + " " + report_path(record) + "\n";
 		mContext->outputSerializer->scheduleString(std::move(line), -1);
+	}
+	else if(mContext->verbose)
+	{
+		// Under --verbose the reason goes to STDERR as a "cache:" diagnostic, next to the
+		// end-of-run summary - not to stdout as the "[cache]" dry-run report format. A miss
+		// is followed by the action's own output, so putting the line on stdout would make
+		// --cache change what an executing playlist prints. It is worth printing at all
+		// because a task whose world cannot be fingerprinted (an unreadable file under a
+		// declared output, a declared input that does not exist) misses on EVERY run,
+		// forever, and nothing else distinguishes that from a merely cold cache.
+		LogError("cache: MISS (%s) %s %s\n", missReason, record->actionName.c_str(), report_path(record).c_str());
+	}
+
+	if(mContext->dryRun)
+	{
 		// Handlers no-op under dryRun but still print their action descriptions.
 		// The outcome is left at NotSeen: nothing executed, and finalize never runs
 		// under dryRun anyway, so no entry can be stored for this pretend run.
@@ -577,10 +671,13 @@ CacheSession::run_task(TaskCacheRecord *record, const std::function<bool()> &inn
 void
 CacheSession::finalize_and_save()
 {
-	// Start from everything that was on disk, then prune and overwrite below.
-	// Entries belonging to playlist keys this invocation did not process are
-	// preserved verbatim - they describe tasks we never got to look at.
-	std::unordered_map<std::string, StoredCacheEntry> entries = mLoadedEntries;
+	// This run's delta only. The manifest itself is re-read under the exclusive lock in
+	// write_manifest and the delta applied there, so a concurrent invocation on another
+	// playlist key of the same playlist file cannot be clobbered: merging into the
+	// snapshot load() took before the scheduler started would silently drop whatever
+	// that other invocation published in the meantime.
+	std::unordered_map<std::string, StoredCacheEntry> updatedEntries;
+	std::unordered_set<std::string> removedSignatures;
 
 	std::unordered_set<std::string> seenSignatures;
 	size_t hitCount = 0;
@@ -614,7 +711,7 @@ CacheSession::finalize_and_save()
 				// trade-off the design asks for.
 				if(!record.checkedWorldIn.has_value())
 				{
-					entries.erase(record.signature);
+					removedSignatures.insert(record.signature);
 					break;
 				}
 
@@ -630,7 +727,7 @@ CacheSession::finalize_and_save()
 					// rollup is likely deterministic (a glob that will not compile), and a
 					// stored sentinel would match the same failure at check time - a wrong
 					// hit. One spurious execution next run is the accepted price.
-					entries.erase(record.signature);
+					removedSignatures.insert(record.signature);
 					break;
 				}
 
@@ -640,20 +737,95 @@ CacheSession::finalize_and_save()
 				entry.worldIn = *record.checkedWorldIn;
 				entry.worldOut = *worldOut;
 				entry.timestamp = timestamp;
-				entries[record.signature] = std::move(entry);
+				updatedEntries[record.signature] = std::move(entry);
 			}
 			break;
 
 			case CacheOutcome::Failed:
 				++failedCount;
-				// Carry the old entry if there is one: it will be revalidated against the
-				// real filesystem next run, so carrying can only cost an extra execution.
+				// Carry the old entry if there is one. It can only produce a hit later if
+				// the declared world returns to the exact state that entry was recorded
+				// from - i.e. the state a SUCCESSFUL run left - so the hit is correct even
+				// though the last attempt failed. (Consequence worth knowing: a run that
+				// fails and is then reverted comes back green without re-executing.)
 			break;
 
 			case CacheOutcome::NotSeen:
 				// Never dispatched (cycle, or stop-on-error truncated the run). Carry.
 			break;
 		}
+	}
+
+	if(!write_manifest(updatedEntries, removedSignatures, seenSignatures))
+		return;
+
+	LogError("cache: %zu hits, %zu executed, %zu failed, manifest %s\n",
+		hitCount, executedCount, failedCount, mManifestPath.c_str());
+}
+
+bool
+CacheSession::write_manifest(const std::unordered_map<std::string, StoredCacheEntry> &updatedEntries,
+                             const std::unordered_set<std::string> &removedSignatures,
+                             const std::unordered_set<std::string> &seenSignatures) const
+{
+	if(!posix_mkdir_p(mContext->cacheDir))
+	{
+		LogError("error: cannot create cache directory: %s\n", mContext->cacheDir.c_str());
+		return false;
+	}
+
+	// Lock a dedicated file rather than the manifest itself: the manifest inode is
+	// replaced by the rename below, so a lock held on it stops excluding anyone the
+	// moment the first writer finishes, and a third process would sail straight past
+	// a second one that is still writing. The lock file is never renamed or removed.
+	// O_CLOEXEC so the descriptor cannot leak into an [execute] child and hold the
+	// lock past our own close.
+	std::string lockPath = mManifestPath + ".lock";
+	int fd = open(lockPath.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+	if(fd < 0)
+	{
+		LogError("error: cannot open cache lock file: %s\n", lockPath.c_str());
+		return false;
+	}
+	int lockResult;
+	while(((lockResult = flock(fd, LOCK_EX)) != 0) && (errno == EINTR))
+		{ /* a signal interrupted the wait: keep waiting rather than writing unlocked */ }
+	if(lockResult != 0)
+	{
+		// ENOLCK, or a filesystem that does not implement flock - realistic on the network
+		// and FUSE mounts where a shared cache directory is the whole point. Proceeding
+		// would reintroduce the lost update this lock exists to prevent, silently.
+		LogError("error: cannot lock cache manifest (%s): %s\n", strerror(errno), lockPath.c_str());
+		close(fd);
+		return false;
+	}
+
+	// Re-read the manifest now that the lock is held, and apply this run's delta to
+	// THAT, not to the snapshot load() took before the scheduler started. Two replay
+	// invocations on different playlist keys of one playlist file share this manifest;
+	// with a load-time snapshot the second writer's entries would silently overwrite
+	// the first writer's and those tasks would re-execute on the next run.
+	// Guarded for the same reason load() is: parsing a manifest allocates, this one may
+	// have just been grown by another process, and an escaping bad_alloc here would
+	// terminate the process AFTER the whole build succeeded. A failed re-read means we
+	// merge into nothing, which costs a rebuild - never a wrong skip.
+	std::unordered_map<std::string, StoredCacheEntry> entries;
+	try
+	{
+		read_manifest_entries(entries);
+	}
+	catch(...)
+	{
+		entries.clear();
+	}
+
+	for(const auto &signature : removedSignatures)
+	{
+		entries.erase(signature);
+	}
+	for(const auto &pair : updatedEntries)
+	{
+		entries[pair.first] = pair.second;
 	}
 
 	// Prune entries for the playlist key we just processed whose task no longer exists
@@ -675,35 +847,6 @@ CacheSession::finalize_and_save()
 				++it;
 		}
 	}
-
-	if(!write_manifest(entries))
-		return;
-
-	LogError("cache: %zu hits, %zu executed, %zu failed, manifest %s\n",
-		hitCount, executedCount, failedCount, mManifestPath.c_str());
-}
-
-bool
-CacheSession::write_manifest(const std::unordered_map<std::string, StoredCacheEntry> &entries) const
-{
-	if(!posix_mkdir_p(mContext->cacheDir))
-	{
-		LogError("error: cannot create cache directory: %s\n", mContext->cacheDir.c_str());
-		return false;
-	}
-
-	// Lock a dedicated file rather than the manifest itself: the manifest inode is
-	// replaced by the rename below, so a lock held on it stops excluding anyone the
-	// moment the first writer finishes, and a third process would sail straight past
-	// a second one that is still writing. The lock file is never renamed or removed.
-	std::string lockPath = mManifestPath + ".lock";
-	int fd = open(lockPath.c_str(), O_RDWR | O_CREAT, 0644);
-	if(fd < 0)
-	{
-		LogError("error: cannot open cache lock file: %s\n", lockPath.c_str());
-		return false;
-	}
-	flock(fd, LOCK_EX);
 
 	// Format-parallel serialization: JSON is built natively with yyjson and never
 	// passes through CFDictionary; plist goes through CF. Deserialization converges
@@ -776,11 +919,18 @@ CacheSession::write_manifest(const std::unordered_map<std::string, StoredCacheEn
 
 	if(result == EXIT_SUCCESS)
 	{
-		// Atomic replacement: readers of the old manifest never see a partial write.
+		// Atomic against concurrent readers: they see either the old inode or the new one,
+		// never a partial write. Not durable against a crash - there is no fsync here -
+		// but a truncated or zero-length manifest is loaded as empty, so the worst case
+		// is a full re-execution.
 		if(rename(tempPath.c_str(), mManifestPath.c_str()) != 0)
 		{
 			LogError("error: cannot replace cache manifest: %s\n", mManifestPath.c_str());
 			result = EXIT_FAILURE;
+			// The rename can fail for reasons that leave the temp file intact (ENOSPC,
+			// EROFS, the manifest path replaced by a directory); clean it up here too or
+			// it stays in the cache directory forever.
+			unlink(tempPath.c_str());
 		}
 	}
 	else

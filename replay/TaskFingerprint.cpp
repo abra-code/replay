@@ -9,9 +9,12 @@
 #include "blake3.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <climits>
 #include <cstring>
+#include <set>
 #include <unordered_set>
+#include <utility>
 
 // Globals required by FileHashing.h and by fingerprint.cpp (both declare them extern).
 // Mirrors gate/main.cpp:37-40. Set from the command line before execution starts.
@@ -26,10 +29,36 @@ namespace
 // Bound on symlink chain following, same spirit as the kernel's SYMLOOP_MAX.
 constexpr int kMaxSymlinkHops = 32;
 
+// Bound on collect_directory -> collect_symlink_target -> collect_directory nesting.
+// visitedDirs already breaks cycles; this only keeps a pathological chain of distinct
+// directories from running the thread's stack out.
+constexpr int kMaxCollectDepth = 32;
+
 struct HashedFile
 {
 	std::string path;
 	FileInfo info;
+};
+
+// Collection state threaded through the whole rollup of one fingerprint_paths call.
+struct CollectState
+{
+	std::vector<HashedFile> entries;
+
+	// Directories already traversed, by (device, inode). Identity rather than spelling,
+	// so a symlink pointing back at an ancestor terminates and two spellings of one
+	// directory are not walked twice.
+	std::set<std::pair<dev_t, ino_t>> visitedDirs;
+
+	int depth = 0;
+
+	// Set when any part of the tree could not be read: fts_open failed, or fts reported
+	// an unreadable directory or a stat failure. Such a subtree contributes NOTHING to
+	// the rollup, which is byte-for-byte what an ABSENT subtree contributes - so without
+	// this flag "I could not look" and "it is gone" produce the same fingerprint, and a
+	// deleted output whose parent is momentarily unreadable would hit. The whole rollup
+	// degrades to nullopt instead, which can only cost an extra execution.
+	bool failed = false;
 };
 
 // Appends every regular file, symlink and directory under a tree.
@@ -37,14 +66,48 @@ struct HashedFile
 // an empty directory is distinguishable from an absent one: without that, deleting an
 // empty subdirectory of a declared output would leave the fingerprint unchanged and the
 // producing task would be skipped forever.
-// Unreadable subdirectories are skipped; traversal failures are not fatal.
-void collect_directory(const std::string &dirPath, std::vector<HashedFile> &out)
+// A subtree that cannot be read marks the rollup failed rather than being skipped:
+// see CollectState::failed.
+// followDirectoryTargets distinguishes the two ways a symlink can be reached.
+// A symlink NAMED as a declared path is an explicit request: if it points at a
+// directory, that whole directory is what the task declared, so it is traversed.
+// A symlink DISCOVERED inside a traversal is not: following a directory target there
+// would silently widen the declared world to an arbitrary tree the playlist never named.
+// A single "link -> .." inside a declared directory pulls in its parent - which in a
+// normal layout contains the cache directory the run is about to rewrite, so the task
+// could never hit again - and "link -> /" would walk every mounted volume.
+void collect_symlink_target(const std::string &linkPath, CollectState &state, bool followDirectoryTargets);
+
+void collect_directory(const std::string &dirPath, CollectState &state)
 {
+	if(state.depth >= kMaxCollectDepth)
+	{
+		state.failed = true;
+		return;
+	}
+
+	struct stat dirStat;
+	if(lstat(dirPath.c_str(), &dirStat) != 0)
+	{
+		state.failed = true;
+		return;
+	}
+	if(!state.visitedDirs.insert({dirStat.st_dev, dirStat.st_ino}).second)
+		return; // already traversed under another name, or a symlink pointing back at an ancestor
+
 	char *paths[2] = {const_cast<char *>(dirPath.c_str()), nullptr};
 	// FTS_PHYSICAL fills fts_statp via lstat, which is exactly the metadata FileInfo needs.
 	FTSPtr fts(fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, nullptr), fts_close);
 	if(fts == nullptr)
+	{
+		state.failed = true;
 		return;
+	}
+
+	// Symlinks are followed after the walk finishes, not during it: collect_symlink_target
+	// can recurse into collect_directory, and starting a nested fts while this one is open
+	// would multiply the descriptor pressure across a wide concurrent first wave.
+	std::vector<std::string> symlinks;
 
 	FTSENT *ent;
 	while((ent = fts_read(fts.get())) != nullptr)
@@ -57,14 +120,48 @@ void collect_directory(const std::string &dirPath, std::vector<HashedFile> &out)
 			case FTS_SLNONE:
 			{
 				if(ent->fts_statp == nullptr)
+				{
+					state.failed = true;
 					break;
-				out.push_back({std::string(ent->fts_path, ent->fts_pathlen), FileInfo(*ent->fts_statp)});
+				}
+				std::string path(ent->fts_path, ent->fts_pathlen);
+				if((ent->fts_info == FTS_SL) || (ent->fts_info == FTS_SLNONE))
+					symlinks.push_back(path);
+				state.entries.push_back({std::move(path), FileInfo(*ent->fts_statp)});
 				break;
 			}
+
+			case FTS_DP:
+				break; // post-order visit of a directory already recorded on the way down
+
+			case FTS_DEFAULT:
+				// fifo, socket, block/char device: has no content to hash and contributes
+				// nothing, exactly as collect_concrete_path treats one named directly.
+				// This is a normal tree member, NOT a read failure - degrading the rollup
+				// here would make any playlist with a socket under a declared directory
+				// permanently uncacheable.
+			break;
+
+			case FTS_DNR: // directory unreadable
+			case FTS_NS:  // stat failed
+			case FTS_ERR: // read error
+			case FTS_DC:  // cycle (should not arise under FTS_PHYSICAL, but is not a clean read)
 			default:
-				break;
+				state.failed = true;
+			break;
 		}
 	}
+
+	// A symlink INSIDE a declared directory must contribute its target's bytes: a task
+	// that declares include/ and reads include/foo.h -> ../src/foo.h consumes src/foo.h,
+	// so an edit there has to be visible. Recording only the link text made such an edit
+	// a wrong skip. File targets only - see collect_symlink_target's declaration.
+	++state.depth;
+	for(const auto &linkPath : symlinks)
+	{
+		collect_symlink_target(linkPath, state, /*followDirectoryTargets=*/false);
+	}
+	--state.depth;
 }
 
 // Follows a symlink chain from an already-recorded link, appending every element and
@@ -72,7 +169,7 @@ void collect_directory(const std::string &dirPath, std::vector<HashedFile> &out)
 // A declared input that happens to be a symlink must reflect what the task actually
 // consumed, which is the TARGET's bytes - hashing only the link text would make edits
 // to the target invisible. Mirrors the engine's resolve_symlink_chain (fingerprint.cpp).
-void collect_symlink_target(const std::string &linkPath, std::vector<HashedFile> &out)
+void collect_symlink_target(const std::string &linkPath, CollectState &state, bool followDirectoryTargets)
 {
 	std::string current = linkPath;
 	std::unordered_set<std::string> visited;
@@ -83,7 +180,13 @@ void collect_symlink_target(const std::string &linkPath, std::vector<HashedFile>
 		char buffer[PATH_MAX];
 		ssize_t length = readlink(current.c_str(), buffer, sizeof(buffer) - 1);
 		if(length <= 0)
+		{
+			// The caller has already established this is a symlink, so a failed readlink
+			// is a read failure, not an absence - and an absence is what contributing
+			// nothing would encode.
+			state.failed = true;
 			return;
+		}
 		buffer[length] = '\0';
 
 		std::string target(buffer, (size_t)length);
@@ -102,51 +205,78 @@ void collect_symlink_target(const std::string &linkPath, std::vector<HashedFile>
 
 		struct stat st;
 		if(lstat(target.c_str(), &st) != 0)
-			return; // broken link: the target contributes nothing, like any absent path
+		{
+			// ENOENT/ENOTDIR is a genuinely broken link: the target contributes nothing,
+			// like any absent path. Anything else (EACCES on a parent, EIO, an unreachable
+			// automount) means the target could not be looked at, and recording that as
+			// absence would let an unread input compare equal to a deleted one.
+			if((errno != ENOENT) && (errno != ENOTDIR))
+				state.failed = true;
+			return;
+		}
 
 		if(S_ISLNK(st.st_mode))
 		{
-			out.push_back({target, FileInfo(st)});
+			state.entries.push_back({target, FileInfo(st)});
 			current = std::move(target);
 			continue;
 		}
 
 		if(S_ISDIR(st.st_mode))
-			collect_directory(target, out);
+		{
+			if(followDirectoryTargets)
+				collect_directory(target, state);
+			// Otherwise the link entry recorded by the caller is the whole contribution:
+			// retargeting the link stays visible, and the tree behind it is left to
+			// whatever declaration actually names it.
+		}
 		else if(S_ISREG(st.st_mode))
-			out.push_back({target, FileInfo(st)});
+		{
+			state.entries.push_back({target, FileInfo(st)});
+		}
 		return;
 	}
 }
 
 // Collects one concrete (non-glob) path. Returns false when the path does not exist.
 // Existing but non-regular entries (fifo, socket, device) contribute nothing.
-bool collect_concrete_path(const std::string &path, std::vector<HashedFile> &out)
+bool collect_concrete_path(const std::string &path, CollectState &state)
 {
+	// Only ENOENT/ENOTDIR mean "not there". EACCES on a parent, ELOOP, EIO and
+	// ENAMETOOLONG mean "could not look", and reporting those as absence would let a
+	// path that exists contribute nothing - indistinguishable from a deleted one.
 	struct stat st;
 	if(lstat(path.c_str(), &st) != 0)
+	{
+		if((errno != ENOENT) && (errno != ENOTDIR))
+			state.failed = true;
 		return false;
+	}
 
 	if(S_ISDIR(st.st_mode))
 	{
-		collect_directory(path, out);
+		collect_directory(path, state);
 	}
 	else if(S_ISLNK(st.st_mode))
 	{
 		// Record the link itself (so retargeting it is visible) AND what it points at.
-		out.push_back({path, FileInfo(st)});
-		collect_symlink_target(path, out);
+		// Named explicitly, so a directory target IS the declared world and is traversed.
+		state.entries.push_back({path, FileInfo(st)});
+		collect_symlink_target(path, state, /*followDirectoryTargets=*/true);
 	}
 	else if(S_ISREG(st.st_mode))
 	{
-		out.push_back({path, FileInfo(st)});
+		state.entries.push_back({path, FileInfo(st)});
 	}
 	return true;
 }
 
 // Fills in info.hash for one file, honoring the xattr stat-cache mode.
 // Identical policy to the engine's process_matched_file_async (fingerprint.cpp).
-void hash_one_file(HashedFile &entry)
+// Returns false when the file's content could not be read, so the caller can degrade the
+// whole rollup rather than let an unreadable file contribute a 0 hash: the same file
+// edited to the same size behind a persistent read failure would otherwise be invisible.
+bool hash_one_file(HashedFile &entry)
 {
 	// A directory contributes its existence and nothing else: its content is the files
 	// already collected under it, and its st_size is allocation noise, not content.
@@ -154,7 +284,7 @@ void hash_one_file(HashedFile &entry)
 	{
 		entry.info.size = 0;
 		entry.info.hash.blake3 = 0;
-		return;
+		return true;
 	}
 
 	bool needsHash = true;
@@ -175,14 +305,19 @@ void hash_one_file(HashedFile &entry)
 		writeXattr = true;
 	}
 
+	bool hashed = true;
 	if(needsHash)
 	{
-		compute_file_hash(entry.path, entry.info);
+		hashed = compute_file_hash(entry.path, entry.info);
 	}
-	if(writeXattr)
+	// Only memoize a hash that was really computed. Persisting the 0 left behind by a
+	// failed read would make every later run hit that xattr record and reuse the 0
+	// without reopening the file, until its size or mtime changes.
+	if(writeXattr && hashed)
 	{
 		write_xattr_fileinfo(entry.path, entry.info);
 	}
+	return hashed;
 }
 
 void hash_update_u64_le(blake3_hasher &hasher, uint64_t value)
@@ -200,8 +335,8 @@ void hash_update_u64_le(blake3_hasher &hasher, uint64_t value)
 static std::optional<uint64_t>
 fingerprint_paths_internal(const std::vector<std::string> &paths, bool requireConcreteFiles)
 {
-	std::vector<HashedFile> entries;
-	entries.reserve(paths.size());
+	CollectState state;
+	state.entries.reserve(paths.size());
 
 	for(const auto &path : paths)
 	{
@@ -217,7 +352,7 @@ fingerprint_paths_internal(const std::vector<std::string> &paths, bool requireCo
 		// legitimately contain glob metacharacters (data[1].json), and treating such a
 		// file as a pattern would silently match nothing AND bypass the missing-input
 		// check, turning every later edit of that file into a wrong skip.
-		if(collect_concrete_path(path, entries))
+		if(collect_concrete_path(path, state))
 			continue;
 
 		if(globoverlap::is_glob_pattern(path))
@@ -226,7 +361,7 @@ fingerprint_paths_internal(const std::vector<std::string> &paths, bool requireCo
 			// which is the same as all its matches being absent.
 			for(const auto &match : expand_glob(path))
 			{
-				collect_concrete_path(match, entries);
+				collect_concrete_path(match, state);
 			}
 		}
 		else if(requireConcreteFiles)
@@ -237,21 +372,28 @@ fingerprint_paths_internal(const std::vector<std::string> &paths, bool requireCo
 
 	// Deterministic order, and the same file reached through two declarations
 	// must contribute only once.
-	std::sort(entries.begin(), entries.end(),
+	std::sort(state.entries.begin(), state.entries.end(),
 		[](const HashedFile &a, const HashedFile &b) { return a.path < b.path; });
-	auto last = std::unique(entries.begin(), entries.end(),
+	auto last = std::unique(state.entries.begin(), state.entries.end(),
 		[](const HashedFile &a, const HashedFile &b) { return a.path == b.path; });
-	entries.erase(last, entries.end());
+	state.entries.erase(last, state.entries.end());
 
-	for(auto &entry : entries)
+	for(auto &entry : state.entries)
 	{
-		hash_one_file(entry);
+		if(!hash_one_file(entry))
+			state.failed = true;
 	}
+
+	// Anything the rollup could not read makes the result unusable rather than merely
+	// incomplete: an unread subtree and an absent one produce the same bytes, so a
+	// partial rollup could match a stored value it does not actually describe.
+	if(state.failed)
+		return std::nullopt;
 
 	blake3_hasher hasher;
 	blake3_hasher_init(&hasher);
 
-	for(const auto &entry : entries)
+	for(const auto &entry : state.entries)
 	{
 		if(entry.info.is_nonexistent())
 			continue;

@@ -77,13 +77,19 @@ void compute_buffer_hash(const void *buffer, size_t size, FileInfo &fileInfo)
     }
 }
 
+// Returns true when info.hash was actually computed over the file's bytes, false when
+// the content could not be read (open/read/mmap/readlink failure) and the hash is
+// therefore still the 0 it was initialized to. Callers MUST NOT persist a false result
+// into the xattr stat-cache: a stored {inode, size, mtime, hash = 0} record keeps
+// hitting on every later run, so one transient EMFILE or permission failure would pin
+// the file's recorded content hash at 0 until its size or mtime changes.
 inline __attribute__((always_inline))
-void compute_file_hash(const std::string &path, FileInfo &info)
+bool compute_file_hash(const std::string &path, FileInfo &info)
 {
     // Don't try to read non-existent files
     if (info.is_nonexistent())
     {
-        return; // Sentinel value already set
+        return false; // Sentinel value already set
     }
 
     // For symlinks, read the symlink data itself, not the target
@@ -96,16 +102,15 @@ void compute_file_hash(const std::string &path, FileInfo &info)
         {
             target[len] = '\0';
             compute_buffer_hash(target, len, info);
+            return true;
         }
-        else
+
+        // Failed to read symlink - leave hash as 0
+        if (g_verbose)
         {
-            // Failed to read symlink - leave hash as 0
-            if (g_verbose)
-            {
-                std::cerr << "Warning: failed to read symlink: " << path << '\n';
-            }
+            std::cerr << "Warning: failed to read symlink: " << path << '\n';
         }
-        return;
+        return false;
     }
 
     // Regular file processing
@@ -113,12 +118,13 @@ void compute_file_hash(const std::string &path, FileInfo &info)
     if (fd < 0)
     {
         // TODO: log error
-        return;
+        return false;
     }
 
     // 16 MB is the mmap threshold - TODO: experiment with different thresholds
     const size_t MMAP_THRESHOLD = 16 * 1024 * 1024;
 
+    bool hashed = false;
     if ((info.size < MMAP_THRESHOLD) && (info.size > 0))
     {
         std::unique_ptr<char, decltype(&free)> buffer(
@@ -128,6 +134,7 @@ void compute_file_hash(const std::string &path, FileInfo &info)
             if (read(fd, buffer.get(), info.size) == (ssize_t)info.size)
             {
                 compute_buffer_hash(buffer.get(), info.size, info);
+                hashed = true;
             }
         }
     }
@@ -140,11 +147,16 @@ void compute_file_hash(const std::string &path, FileInfo &info)
             madvise(map, info.size, MADV_SEQUENTIAL);
             compute_buffer_hash(map, info.size, info);
             munmap(map, info.size);
+            hashed = true;
         }
     }
-    // else size == 0: hash remains 0 (correct for empty file)
+    else
+    {
+        hashed = true; // size == 0: hash remains 0, which is correct for an empty file
+    }
 
     close(fd);
+    return hashed;
 }
 
 // returns true if file info stored in xattr is the same as current iteration info & stores the hash in appropriate current_file_info.hash

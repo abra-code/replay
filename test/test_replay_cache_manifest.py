@@ -692,6 +692,48 @@ def test_concurrent_processes() -> None:
         check("no temp files left behind", not leftovers, str(leftovers))
 
 
+def test_concurrent_keys_do_not_clobber() -> None:
+    print("\n--- Scenario 12f: concurrent invocations on different playlist keys ---")
+
+    # Two --playlist-key invocations of one playlist file share a single manifest. Each
+    # loads it before its scheduler starts, so unless the read-modify-write happens under
+    # the file lock the second writer publishes a manifest built from a pre-run snapshot
+    # and silently drops the first writer's entries.
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        cache_dir = td / "cache"
+        playlist = td / "keyed.json"
+        playlist.write_text(json.dumps({
+            "keyA": [{"action": "execute", "tool": "/bin/sh",
+                      "arguments": ["-c", f"sleep 1; echo A > {td}/a.txt"],
+                      "outputs": [str(td / "a.txt")]}],
+            "keyB": [{"action": "execute", "tool": "/bin/sh",
+                      "arguments": ["-c", f"sleep 1; echo B > {td}/b.txt"],
+                      "outputs": [str(td / "b.txt")]}],
+        }))
+
+        procs = [subprocess.Popen(
+            [str(REPLAY), "--cache", "--cache-dir", str(cache_dir),
+             "--playlist-key", key, str(playlist)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for key in ("keyA", "keyB")]
+        codes = [p.wait(timeout=60) for p in procs]
+        check("both keyed runs exit 0", all(c == 0 for c in codes), str(codes))
+
+        found = manifests_in(cache_dir)
+        check("one manifest for the playlist file", len(found) == 1, str(found))
+        tasks = json.loads(found[0].read_text()).get("tasks", {})
+        keys = sorted(entry.get("key", "") for entry in tasks.values())
+        check("neither key's entry was clobbered", keys == ["keyA", "keyB"], str(keys))
+
+        # Both must now hit; a lost entry shows up here as an execution.
+        for key in ("keyA", "keyB"):
+            warm = run(["--cache", "--cache-dir", cache_dir, "--playlist-key", key, playlist])
+            hits = [line for line in warm.stderr.splitlines()
+                    if line.startswith("cache: 1 hits, 0 executed")]
+            check(f"warm {key} hits", len(hits) == 1, warm.stderr)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -721,6 +763,7 @@ test_remaining_unsupported_modes()
 test_multiple_playlist_keys()
 test_manifest_is_stable()
 test_concurrent_processes()
+test_concurrent_keys_do_not_clobber()
 
 print(f"\n{'='*40}")
 print(f"  Passed: {_pass}  Failed: {_fail}")
