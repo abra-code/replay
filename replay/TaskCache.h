@@ -7,6 +7,7 @@
 
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,7 +18,7 @@
 // disagree. outputsExistenceOnly (create-directory) compares a constant marker plus
 // existence and S_ISDIR instead of directory content, because other tasks legitimately
 // write into that directory afterwards (design 4.6).
-uint64_t compute_world_out(const std::vector<std::string> &ownedPaths, bool outputsExistenceOnly);
+std::optional<uint64_t> compute_world_out(const std::vector<std::string> &ownedPaths, bool outputsExistenceOnly);
 
 // Content-based cache key for one task, stable across runs and execution modes.
 // blake3 over domain-tagged, length-prefixed fields; 16 lowercase hex chars.

@@ -193,6 +193,11 @@ Incremental execution cache:
   After restructuring a playlist (especially removing a step that mutated earlier products),
   run once with --cache-refresh to re-execute everything and rebuild the manifest.
 
+  The per-file hash memoization (--cache-xattr) trusts a file's inode, size and mtime: a rewrite
+  that restores all three (a tool preserving timestamps, touch -r) is invisible to it, so the file
+  can look unchanged and cause a wrong skip. Use --cache-xattr refresh (or off) when input files
+  are rewritten with restored modification times.
+
   With --sandbox, the cache directory is granted read-write in the sandbox automatically, and the
   per-file xattr hash memoization defaults to off: input trees are typically read-only under the
   sandbox, so every memoization write would be denied and logged as a sandbox violation. Unchanged

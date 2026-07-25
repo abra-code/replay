@@ -253,6 +253,11 @@ DisplayHelp(void)
 		"  After restructuring a playlist (especially removing a step that mutated earlier products),\n"
 		"  run once with --cache-refresh to re-execute everything and rebuild the manifest.\n"
 		"\n"
+		"  The per-file hash memoization (--cache-xattr) trusts a file's inode, size and mtime: a rewrite\n"
+		"  that restores all three (a tool preserving timestamps, touch -r) is invisible to it, so the file\n"
+		"  can look unchanged and cause a wrong skip. Use --cache-xattr refresh (or off) when input files\n"
+		"  are rewritten with restored modification times.\n"
+		"\n"
 		"  With --sandbox, the cache directory is granted read-write in the sandbox automatically, and the\n"
 		"  per-file xattr hash memoization defaults to off: input trees are typically read-only under the\n"
 		"  sandbox, so every memoization write would be denied and logged as a sandbox violation. Unchanged\n"
@@ -885,8 +890,11 @@ int main(int argc, const char * argv[])
 		}
 
 		// Configuration for the fingerprint code shared with gate/fingerprint.
+		// --dry-run promises to write nothing, and the xattr memoization would write
+		// hash xattrs on fingerprinted files (briefly chmod-ing read-only ones), so a
+		// dry run turns it off entirely and re-hashes instead.
 		g_hash = context.cacheHash;
-		g_xattr_mode = context.cacheXattrMode;
+		g_xattr_mode = context.dryRun ? XattrMode::Off : context.cacheXattrMode;
 		g_verbose = context.verbose;
 	}
 

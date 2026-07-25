@@ -131,16 +131,17 @@ compute_task_signature(const std::string &actionName,
 // world_out
 // ============================================================================
 
-uint64_t
+std::optional<uint64_t>
 compute_world_out(const std::vector<std::string> &ownedPaths, bool outputsExistenceOnly)
 {
 	if(!outputsExistenceOnly)
 	{
 		// requireConcreteFiles is false on purpose: an owned path that is absent is a
 		// legitimate end state (a delete's items, a move's source), and absence is what
-		// the fixed-point check reproduces.
-		std::optional<uint64_t> rollup = TaskFingerprint::fingerprint_paths(ownedPaths, false);
-		return rollup.value_or(0);
+		// the fixed-point check reproduces. A failed rollup (glob compile, allocation)
+		// propagates as nullopt: collapsing it to a sentinel would make the same
+		// deterministic failure at store and check time look like a match - a wrong hit.
+		return TaskFingerprint::fingerprint_paths(ownedPaths, false);
 	}
 
 	// create directory: the output must be checked as existence + type only, never as
@@ -380,6 +381,11 @@ CacheSession::load()
 	// The manifest is disposable state: absent, empty, unparseable, wrong-version and
 	// wrong-hash-algorithm all mean the same thing here - start from nothing and
 	// overwrite on save. None of them is worth a diagnostic or a failure.
+	//
+	// Deliberately no read-side lock: write_manifest publishes atomically via
+	// temp+rename, so any open() here sees a complete manifest inode. Keep it that
+	// way - adding a shared flock here would only be needed if the write side ever
+	// stopped being atomic, and that is the thing not to do.
 	struct stat st;
 	if((stat(mManifestPath.c_str(), &st) != 0) || (st.st_size <= 0))
 		return;
@@ -520,8 +526,9 @@ CacheSession::run_task(TaskCacheRecord *record, const std::function<bool()> &inn
 		// at end of run (created here, deleted by a later step - the delete fixed
 		// point) still matches its recorded state and hits. An existence check must
 		// never veto that: it would re-run create+delete chains on every run forever.
-		uint64_t currentOut = compute_world_out(record->ownedPaths, record->outputsExistenceOnly);
-		if(currentOut != entry->worldOut)
+		// A rollup that cannot be computed can never hit.
+		std::optional<uint64_t> currentOut = compute_world_out(record->ownedPaths, record->outputsExistenceOnly);
+		if(!currentOut.has_value() || (*currentOut != entry->worldOut))
 		{
 			missReason = "products changed";
 			// Refine the reason for the common case. lstat, not stat: the rollup
@@ -616,11 +623,22 @@ CacheSession::finalize_and_save()
 				// (an edit of a generated file, a move, a delete). The end-of-run state
 				// is what a full re-execution would reproduce, which is what gives the
 				// fixed-point semantics. See design 4.1.
+				std::optional<uint64_t> worldOut = compute_world_out(record.ownedPaths, record.outputsExistenceOnly);
+				if(!worldOut.has_value())
+				{
+					// Same rule as an unavailable world_in above: store nothing. A failed
+					// rollup is likely deterministic (a glob that will not compile), and a
+					// stored sentinel would match the same failure at check time - a wrong
+					// hit. One spurious execution next run is the accepted price.
+					entries.erase(record.signature);
+					break;
+				}
+
 				StoredCacheEntry entry;
 				entry.actionName = record.actionName;
 				entry.playlistKey = record.playlistKey;
 				entry.worldIn = *record.checkedWorldIn;
-				entry.worldOut = compute_world_out(record.ownedPaths, record.outputsExistenceOnly);
+				entry.worldOut = *worldOut;
 				entry.timestamp = timestamp;
 				entries[record.signature] = std::move(entry);
 			}
