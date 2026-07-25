@@ -24,6 +24,7 @@
 #include "EnvVarExpand.h"
 #include "PlaylistDoc.h"
 #include "TaskFingerprint.h"
+#include "PosixFileOps.h"
 
 #include <limits.h>
 
@@ -134,7 +135,8 @@ DisplayHelp(void)
 		"  --cache-env NAME   Fold the value of this environment variable into every task's input fingerprint.\n"
 		"                     May be repeated. Implies --cache.\n"
 		"  --cache-xattr on|off|refresh   Control the per-file hash memoization stored in file xattrs.\n"
-		"                     Default \"on\". Implies --cache.\n"
+		"                     Default \"on\", or \"off\" when --sandbox is active; an explicit value always wins.\n"
+		"                     Implies --cache.\n"
 		"  --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay\n"
 		"                     auto-discovers declared paths from the playlist and adds them to the policy.\n"
 		"                     Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.\n"
@@ -250,6 +252,12 @@ DisplayHelp(void)
 		"  the current directory on every run and a directory change looks like a changed world.\n"
 		"  After restructuring a playlist (especially removing a step that mutated earlier products),\n"
 		"  run once with --cache-refresh to re-execute everything and rebuild the manifest.\n"
+		"\n"
+		"  With --sandbox, the cache directory is granted read-write in the sandbox automatically, and the\n"
+		"  per-file xattr hash memoization defaults to off: input trees are typically read-only under the\n"
+		"  sandbox, so every memoization write would be denied and logged as a sandbox violation. Unchanged\n"
+		"  files are re-hashed on every run instead - correct, just slower on large inputs. Pass --cache-xattr\n"
+		"  explicitly to override when the input trees are writable inside the sandbox.\n"
 		"\n"
 		"  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action without executing\n"
 		"  or writing anything - a \"what would rebuild\" query (no summary line, since nothing runs).\n"
@@ -610,6 +618,9 @@ int main(int argc, const char * argv[])
 	struct CliAllowedDir { std::string path; bool writable; };
 	std::vector<CliAllowedDir> cliAllowedDirs;
 	bool mcpServerMode = false;
+	// Distinguishes an explicit --cache-xattr choice from the built-in default,
+	// which flips to "off" when the sandbox is active (see the cache setup below).
+	bool cacheXattrExplicit = false;
 
 	while(true)
 	{
@@ -770,6 +781,7 @@ int main(int argc, const char * argv[])
 			case kOptCacheXattr:
 			{
 				context.cacheEnabled = true;
+				cacheXattrExplicit = true;
 				std::string mode(optarg);
 				if(mode == "on")
 					context.cacheXattrMode = XattrMode::On;
@@ -841,6 +853,36 @@ int main(int argc, const char * argv[])
 		// before the sandbox is applied, so the manifest path cannot move under us.
 		context.cacheDir = file_helpers::resolve_literal_path(context.cacheDir);
 		context.playlistPath = file_helpers::resolve_literal_path(playlistPath);
+
+		if(sandboxRequested)
+		{
+			// The manifest lives in the cache directory, which no playlist ever
+			// declares, so auto-discovery cannot find it: grant it read-write
+			// explicitly. The directory is created now, before the sandbox is
+			// applied, so the grant anchors to a real directory and the end-of-run
+			// save never performs its first mkdir inside the sandbox. --dry-run
+			// writes nothing, so it must not create the directory either.
+			if(!context.dryRun && !posix_mkdir_p(context.cacheDir))
+			{
+				LogError("error: cannot create cache directory: %s\n", context.cacheDir.c_str());
+				return EXIT_FAILURE;
+			}
+			sandboxAllowWrite.push_back(context.cacheDir);
+
+			if(!cacheXattrExplicit)
+			{
+				// Input trees are typically read-only under the sandbox: every xattr
+				// memoization write would be denied - silently on stderr, but each
+				// denial is still a kernel sandbox violation, and a non-writable file
+				// provokes an extra lchmod attempt first. Re-hashing unchanged files
+				// is slower but quiet; an explicit --cache-xattr opts back in.
+				context.cacheXattrMode = XattrMode::Off;
+				if(context.verbose)
+				{
+					LogError("cache: xattr memoization defaults to off under --sandbox (pass --cache-xattr to override)\n");
+				}
+			}
+		}
 
 		// Configuration for the fingerprint code shared with gate/fingerprint.
 		g_hash = context.cacheHash;

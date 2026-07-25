@@ -87,7 +87,8 @@ Options:
   --cache-env NAME   Fold the value of this environment variable into every task's input fingerprint.
                      May be repeated. Implies --cache.
   --cache-xattr on|off|refresh   Control the per-file hash memoization stored in file xattrs.
-                     Default "on". Implies --cache.
+                     Default "on", or "off" when --sandbox is active; an explicit value always wins.
+                     Implies --cache.
   --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay
                      auto-discovers declared paths from the playlist and adds them to the policy.
                      Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.
@@ -191,6 +192,12 @@ Incremental execution cache:
   the current directory on every run and a directory change looks like a changed world.
   After restructuring a playlist (especially removing a step that mutated earlier products),
   run once with --cache-refresh to re-execute everything and rebuild the manifest.
+
+  With --sandbox, the cache directory is granted read-write in the sandbox automatically, and the
+  per-file xattr hash memoization defaults to off: input trees are typically read-only under the
+  sandbox, so every memoization write would be denied and logged as a sandbox violation. Unchanged
+  files are re-hashed on every run instead - correct, just slower on large inputs. Pass --cache-xattr
+  explicitly to override when the input trees are writable inside the sandbox.
 
   --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action without executing
   or writing anything - a "what would rebuild" query (no summary line, since nothing runs).
