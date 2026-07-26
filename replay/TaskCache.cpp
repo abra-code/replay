@@ -13,6 +13,7 @@
 #include <fstream>
 #include <vector>
 
+#include <dispatch/dispatch.h>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -133,8 +134,8 @@ compute_task_signature(const std::string &actionName,
 // world_out
 // ============================================================================
 
-std::optional<uint64_t>
-compute_world_out(const std::vector<std::string> &ownedPaths, bool outputsExistenceOnly)
+static std::optional<uint64_t>
+compute_world_out_internal(const std::vector<std::string> &ownedPaths, bool outputsExistenceOnly)
 {
 	if(!outputsExistenceOnly)
 	{
@@ -198,6 +199,24 @@ compute_world_out(const std::vector<std::string> &ownedPaths, bool outputsExiste
 		result |= ((uint64_t)output[i]) << (8 * i);
 	}
 	return result;
+}
+
+std::optional<uint64_t>
+compute_world_out(const std::vector<std::string> &ownedPaths, bool outputsExistenceOnly)
+{
+	// Same guarantee as TaskFingerprint::fingerprint_paths, which the non-existence-only
+	// branch already has: this runs inside a taskBlock on a GCD queue (run_task) and on
+	// the finalize fan-out, where an escaping exception is std::terminate. The
+	// existence-only branch copies and sorts a vector, so it can throw bad_alloc on its
+	// own. Report it as "unavailable", which can only cost an extra execution.
+	try
+	{
+		return compute_world_out_internal(ownedPaths, outputsExistenceOnly);
+	}
+	catch(...)
+	{
+		return std::nullopt;
+	}
 }
 
 std::string
@@ -671,6 +690,24 @@ CacheSession::run_task(TaskCacheRecord *record, const std::function<bool()> &inn
 void
 CacheSession::finalize_and_save()
 {
+	// The whole of finalize is disposable bookkeeping running after the build already
+	// succeeded, and it allocates freely (maps, the manifest merge, the serializers).
+	// An escaping bad_alloc here would terminate the process with every product already
+	// written, so it is caught for the same reason load() catches: losing the manifest
+	// costs a rebuild, losing the run costs the run.
+	try
+	{
+		finalize_and_save_internal();
+	}
+	catch(...)
+	{
+		LogError("error: could not save cache manifest: %s\n", mManifestPath.c_str());
+	}
+}
+
+void
+CacheSession::finalize_and_save_internal()
+{
 	// This run's delta only. The manifest itself is re-read under the exclusive lock in
 	// write_manifest and the delta applied there, so a concurrent invocation on another
 	// playlist key of the same playlist file cannot be clobbered: merging into the
@@ -686,6 +723,12 @@ CacheSession::finalize_and_save()
 
 	std::string timestamp = current_timestamp();
 
+	// Records that need an end-of-run world_out, collected first so the rollups can run
+	// concurrently below. Doing them inline here would put one serial re-walk and re-hash
+	// of every product tree on the critical path after the scheduler has already drained,
+	// which on a wide playlist is the single longest thing left in the run.
+	std::vector<TaskCacheRecord *> toStore;
+
 	for(auto &record : mRecords)
 	{
 		seenSignatures.insert(record.signature);
@@ -699,7 +742,6 @@ CacheSession::finalize_and_save()
 			break;
 
 			case CacheOutcome::ExecutedOK:
-			{
 				++executedCount;
 
 				// world_in was captured at CHECK time and already has envText folded in -
@@ -710,35 +752,9 @@ CacheSession::finalize_and_save()
 				// forbids. Not storing costs one spurious miss next run, which is the
 				// trade-off the design asks for.
 				if(!record.checkedWorldIn.has_value())
-				{
 					removedSignatures.insert(record.signature);
-					break;
-				}
-
-				// world_out is captured HERE, at the end of the run, not when the task
-				// finished: a later task may legitimately mutate this task's products
-				// (an edit of a generated file, a move, a delete). The end-of-run state
-				// is what a full re-execution would reproduce, which is what gives the
-				// fixed-point semantics. See design 4.1.
-				std::optional<uint64_t> worldOut = compute_world_out(record.ownedPaths, record.outputsExistenceOnly);
-				if(!worldOut.has_value())
-				{
-					// Same rule as an unavailable world_in above: store nothing. A failed
-					// rollup is likely deterministic (a glob that will not compile), and a
-					// stored sentinel would match the same failure at check time - a wrong
-					// hit. One spurious execution next run is the accepted price.
-					removedSignatures.insert(record.signature);
-					break;
-				}
-
-				StoredCacheEntry entry;
-				entry.actionName = record.actionName;
-				entry.playlistKey = record.playlistKey;
-				entry.worldIn = *record.checkedWorldIn;
-				entry.worldOut = *worldOut;
-				entry.timestamp = timestamp;
-				updatedEntries[record.signature] = std::move(entry);
-			}
+				else
+					toStore.push_back(&record);
 			break;
 
 			case CacheOutcome::Failed:
@@ -754,6 +770,44 @@ CacheSession::finalize_and_save()
 				// Never dispatched (cycle, or stop-on-error truncated the run). Carry.
 			break;
 		}
+	}
+
+	// world_out is captured HERE, at the end of the run, not when each task finished:
+	// a later task may legitimately mutate an earlier task's products (an edit of a
+	// generated file, a move, a delete). The end-of-run state is what a full
+	// re-execution would reproduce, which is what gives the fixed-point semantics
+	// (design 4.1). The scheduler has drained, so nothing is writing these paths and
+	// the rollups are independent - fan them out.
+	std::vector<std::optional<uint64_t>> worldOuts(toStore.size());
+	if(!toStore.empty())
+	{
+		TaskCacheRecord **records = toStore.data();
+		std::optional<uint64_t> *results = worldOuts.data();
+		dispatch_apply(toStore.size(), DISPATCH_APPLY_AUTO, ^(size_t i) {
+			results[i] = compute_world_out(records[i]->ownedPaths, records[i]->outputsExistenceOnly);
+		});
+	}
+
+	for(size_t i = 0; i < toStore.size(); ++i)
+	{
+		const TaskCacheRecord *record = toStore[i];
+		if(!worldOuts[i].has_value())
+		{
+			// Same rule as an unavailable world_in above: store nothing. A failed
+			// rollup is likely deterministic (a glob that will not compile), and a
+			// stored sentinel would match the same failure at check time - a wrong
+			// hit. One spurious execution next run is the accepted price.
+			removedSignatures.insert(record->signature);
+			continue;
+		}
+
+		StoredCacheEntry entry;
+		entry.actionName = record->actionName;
+		entry.playlistKey = record->playlistKey;
+		entry.worldIn = *record->checkedWorldIn;
+		entry.worldOut = *worldOuts[i];
+		entry.timestamp = timestamp;
+		updatedEntries[record->signature] = std::move(entry);
 	}
 
 	if(!write_manifest(updatedEntries, removedSignatures, seenSignatures))
@@ -779,14 +833,26 @@ CacheSession::write_manifest(const std::unordered_map<std::string, StoredCacheEn
 	// moment the first writer finishes, and a third process would sail straight past
 	// a second one that is still writing. The lock file is never renamed or removed.
 	// O_CLOEXEC so the descriptor cannot leak into an [execute] child and hold the
-	// lock past our own close.
+	// lock past our own close. O_NOFOLLOW because a shared cache directory is an
+	// advertised use case: without it another user can pre-plant this name as a
+	// symlink and have us open an arbitrary file of theirs for writing.
 	std::string lockPath = mManifestPath + ".lock";
-	int fd = open(lockPath.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+	int fd = open(lockPath.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0644);
 	if(fd < 0)
 	{
 		LogError("error: cannot open cache lock file: %s\n", lockPath.c_str());
 		return false;
 	}
+	// Everything from here to the unlock allocates (the manifest re-read, the merge, the
+	// serializers), so the descriptor and the exclusive lock are released by scope exit
+	// rather than by the code path: an escaping exception would otherwise hold the lock
+	// until process exit and wedge every concurrent replay on this manifest.
+	struct LockGuard
+	{
+		int fd;
+		~LockGuard() { flock(fd, LOCK_UN); close(fd); }
+	} lockGuard{fd};
+
 	int lockResult;
 	while(((lockResult = flock(fd, LOCK_EX)) != 0) && (errno == EINTR))
 		{ /* a signal interrupted the wait: keep waiting rather than writing unlocked */ }
@@ -796,7 +862,6 @@ CacheSession::write_manifest(const std::unordered_map<std::string, StoredCacheEn
 		// and FUSE mounts where a shared cache directory is the whole point. Proceeding
 		// would reintroduce the lost update this lock exists to prevent, silently.
 		LogError("error: cannot lock cache manifest (%s): %s\n", strerror(errno), lockPath.c_str());
-		close(fd);
 		return false;
 	}
 
@@ -854,6 +919,22 @@ CacheSession::write_manifest(const std::unordered_map<std::string, StoredCacheEn
 	// The temp name carries the pid so two processes racing on the same manifest cannot
 	// write the same temp file and hand each other a half-written manifest.
 	std::string tempPath = mManifestPath + "." + std::to_string((long)getpid()) + ".tmp";
+
+	// Claim the temp name before the writers open it by path. Both writers (yyjson's
+	// fopen and std::ofstream) follow symlinks, so in a shared cache directory a name
+	// planted by another user would redirect the manifest write onto any file WE can
+	// write. O_EXCL|O_NOFOLLOW refuses anything already sitting there, including a
+	// symlink; the unlink first clears a stale temp left behind by a crashed run that
+	// happened to have this pid.
+	unlink(tempPath.c_str());
+	int tempFd = open(tempPath.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0644);
+	if(tempFd < 0)
+	{
+		LogError("error: cannot create temporary cache manifest: %s\n", tempPath.c_str());
+		return false;
+	}
+	close(tempFd);
+
 	int result;
 
 	// unordered_map iteration order varies run to run; sort so an unchanged cache
@@ -938,8 +1019,6 @@ CacheSession::write_manifest(const std::unordered_map<std::string, StoredCacheEn
 		unlink(tempPath.c_str());
 	}
 
-	flock(fd, LOCK_UN);
-	close(fd);
-
+	// lockGuard releases the flock and closes the descriptor here.
 	return (result == EXIT_SUCCESS);
 }

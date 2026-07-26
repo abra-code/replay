@@ -110,8 +110,21 @@ void collect_directory(const std::string &dirPath, CollectState &state)
 	std::vector<std::string> symlinks;
 
 	FTSENT *ent;
-	while((ent = fts_read(fts.get())) != nullptr)
+	while(true)
 	{
+		// fts_read returns NULL at the end of the traversal AND on error; only errno
+		// separates them. Treating an aborted walk as a completed one would hand the
+		// rollup a truncated entry list that hashes exactly like a smaller tree - the
+		// wrong-skip shape this whole module exists to avoid. Clear errno each time so
+		// a leftover value from the loop body cannot be mistaken for a walk failure.
+		errno = 0;
+		ent = fts_read(fts.get());
+		if(ent == nullptr)
+		{
+			if(errno != 0)
+				state.failed = true;
+			break;
+		}
 		switch(ent->fts_info)
 		{
 			case FTS_D:
@@ -358,8 +371,21 @@ fingerprint_paths_internal(const std::vector<std::string> &paths, bool requireCo
 		if(globoverlap::is_glob_pattern(path))
 		{
 			// A glob matching nothing is not an error: it contributes nothing,
-			// which is the same as all its matches being absent.
-			for(const auto &match : expand_glob(path))
+			// which is the same as all its matches being absent. A glob whose walk
+			// FAILED is a different thing entirely and must degrade the rollup: an
+			// unreadable directory shortens the match list, and a shortened list is
+			// byte-for-byte what deleting those files produces. The fixed point of a
+			// glob delete or move is precisely "matches nothing", so a transient
+			// fts_open failure (EMFILE under a wide first wave) would otherwise
+			// reproduce the stored value exactly and skip a task that must run.
+			bool globFailed = false;
+			std::vector<std::string> matches = expand_glob(path, &globFailed);
+			if(globFailed)
+			{
+				state.failed = true;
+				continue;
+			}
+			for(const auto &match : matches)
 			{
 				collect_concrete_path(match, state);
 			}

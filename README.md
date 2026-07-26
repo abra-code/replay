@@ -188,6 +188,9 @@ Incremental execution cache:
   when nothing changed since the last run finished, every action skips, including the mutators.
   The cache trusts declarations: an undeclared input does not invalidate anything, exactly as it does
   not order execution in dependency analysis. Declare what an action reads and writes.
+  That includes the "execute" tool itself: an action's identity covers the expanded command line, not the
+  bytes of the binary or script it names, so rebuilding the tool alone does not re-run the action. List the
+  tool in "inputs" whenever a new build of it must invalidate what it produced.
   Prefer absolute or environment-anchored paths in cached playlists; relative paths resolve against
   the current directory on every run and a directory change looks like a changed world.
   After restructuring a playlist (especially removing a step that mutated earlier products),

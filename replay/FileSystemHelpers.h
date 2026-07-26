@@ -26,7 +26,12 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth);
 
 // Expand a single absolute glob pattern (e.g. /src/**/*.swift) to matching absolute paths.
 // Case-insensitive (macOS APFS default). Returns sorted results.
-std::vector<std::string> expand_glob(const std::string &pattern);
+// outFailed, when not null, is SET (never cleared) if any part of the walk could not be
+// read: fts_open failed, a directory was unreadable, or a stat failed. Such a walk returns
+// a SHORTER match list that is otherwise indistinguishable from "those files are gone",
+// which is a wrong answer for callers that compare match lists across runs - the cache
+// fingerprint above all. Callers that only consume the matches can keep ignoring it.
+std::vector<std::string> expand_glob(const std::string &pattern, bool *outFailed = nullptr);
 
 // Search files matching any positive pattern, excluding paths that match any exclude pattern.
 // Exclude patterns use the same glob engine as positive patterns (glob::glob / glob_match,

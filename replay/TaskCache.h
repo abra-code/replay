@@ -123,6 +123,9 @@ public:
 	size_t loaded_entry_count() const { return mLoadedEntries.size(); }
 
 private:
+	// The body of finalize_and_save, which only adds the exception guard around it.
+	void finalize_and_save_internal();
+
 	// Parses the manifest into outEntries, adding nothing when it is absent, empty,
 	// unparseable, of another version, hash algorithm or playlist.
 	void read_manifest_entries(std::unordered_map<std::string, StoredCacheEntry> &outEntries) const;

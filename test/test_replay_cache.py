@@ -31,6 +31,8 @@ Scenarios:
   20. serial mode (-s --cache): miss/hit, edit fixed point, dry-run reporting,
       cross-engine manifest sharing with the concurrent engine
   21. help text documents the incremental execution cache
+  28. a glob whose walk failed (unreadable directory) must not reproduce the
+      "matched nothing" fixed point and hit
 
 Usage: python3 test_replay_cache.py [/path/to/replay]
 Exit:  0 = all checks passed, 1 = one or more failures
@@ -1048,6 +1050,49 @@ def test_env_name_group_move_is_not_a_miss():
         check("a real value change still re-runs", summary(r3) == (0, 1, 0), r3.stderr)
 
 
+def test_unreadable_dir_under_glob_is_not_no_matches():
+    print("\n=== Scenario 28: a glob whose walk failed never reads as 'matched nothing' ===")
+    if os.geteuid() == 0:
+        print("  SKIP: running as root, permission bits do not apply")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        cache = d / "cache"
+        src = d / "src"
+        (src / "sub").mkdir(parents=True)
+        (src / "sub" / "a.txt").write_text("payload")
+
+        # A glob delete's recorded fixed point IS "the pattern matches nothing", so a glob
+        # expansion that comes back short because a directory could not be READ reproduces
+        # that stored value exactly. Without the failure signal the check hits and the
+        # delete is skipped forever while its targets are sitting there unread.
+        playlist = d / "pl.json"
+        playlist.write_text(json.dumps([
+            {"action": "delete", "items": [f"{src}/**/*.txt"]},
+        ]))
+
+        r1 = cached(playlist, cache)
+        check("run 1 deletes the match", r1.returncode == 0 and summary(r1) == (0, 1, 0), r1.stderr)
+        check("match is gone", not (src / "sub" / "a.txt").exists())
+        r2 = cached(playlist, cache)
+        check("no-matches state hits", summary(r2) == (1, 0, 0), r2.stderr)
+
+        (src / "sub" / "a.txt").write_text("payload")
+        (src / "sub").chmod(0o000)
+        try:
+            r3 = cached(playlist, cache)
+            check("an unreadable directory under the glob does not hit", summary(r3)[0] == 0, r3.stderr)
+        finally:
+            (src / "sub").chmod(0o755)
+        check("the unreachable match survived the skipped run", (src / "sub" / "a.txt").exists())
+
+        # Readable again: the delete really does have work to do, which is what the
+        # cache refused to certify while it could not look.
+        r4 = cached(playlist, cache)
+        check("readable again re-runs the delete", r4.returncode == 0 and summary(r4) == (0, 1, 0), r4.stderr)
+        check("and the match is gone again", not (src / "sub" / "a.txt").exists())
+
+
 if not REPLAY.exists():
     print(f"error: replay binary not found at {REPLAY}")
     sys.exit(1)
@@ -1082,6 +1127,7 @@ test_partially_expanded_declaration_not_cached()
 test_unreadable_subtree_is_not_absence()
 test_created_directory_replaced_by_symlink()
 test_env_name_group_move_is_not_a_miss()
+test_unreadable_dir_under_glob_is_not_no_matches()
 
 print(f"\n{'='*40}")
 print(f"  Passed: {_pass}  Failed: {_fail}")
