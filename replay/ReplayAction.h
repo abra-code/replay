@@ -116,7 +116,8 @@ typedef struct
 	std::string cacheDir;
 	CacheFormat cacheFormat;
 	FileHashAlgorithm cacheHash;
-	XattrMode cacheXattrMode;
+	CacheMemo cacheMemo;            // --cache-memo: where per-file content hashes are memoized
+	bool cacheMemoRefresh;          // --cache-memo-refresh: recompute every hash and rewrite the memo
 	std::vector<std::string> cacheGlobalEnvNames; // --cache-env, folded into every task
 	CacheSession *cacheSession;     // owned by the dispatch function, null when not caching
 	std::string playlistPath;       // resolved absolute playlist path; keys the manifest

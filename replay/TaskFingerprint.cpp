@@ -1,6 +1,7 @@
 #include "TaskFingerprint.h"
 
 #include "FileSystemHelpers.h"
+#include "FingerprintStore.h"
 #include "PosixFileOps.h"
 #include "GlobOverlap.h"
 
@@ -19,9 +20,19 @@
 // Globals required by FileHashing.h and by fingerprint.cpp (both declare them extern).
 // Mirrors gate/main.cpp:37-40. Set from the command line before execution starts.
 FileHashAlgorithm g_hash = FileHashAlgorithm::CRC32C;
-XattrMode g_xattr_mode = XattrMode::On;
+// Only the CacheMemo::Xattr branch below reads this, but fingerprint.cpp declares it
+// extern and is linked into replay through FingerprintLib, so the definition stays.
+// Defaults to Off, matching the default backend: main sets it for real whenever the
+// cache is enabled, and any path that ever fingerprints without going through that
+// setup should write nothing to the user's files rather than everything.
+XattrMode g_xattr_mode = XattrMode::Off;
 bool g_verbose = false;
 double g_traversal_time = 0.0;
+
+// Memoization backend selection - see TaskFingerprint.h.
+CacheMemo g_memo_backend = CacheMemo::Off;
+bool g_memo_refresh = false;
+FingerprintStore *g_fingerprint_store = nullptr;
 
 namespace
 {
@@ -284,8 +295,29 @@ bool collect_concrete_path(const std::string &path, CollectState &state)
 	return true;
 }
 
-// Fills in info.hash for one file, honoring the xattr stat-cache mode.
-// Identical policy to the engine's process_matched_file_async (fingerprint.cpp).
+// The content hash currently held by info, as one 64-bit value, per the selected
+// algorithm. Explicit rather than always reading hash.blake3: a zero-extended crc32c
+// happens to read back correctly through the union's 64-bit member on a little-endian
+// machine, which is exactly the kind of thing that stops being true the day someone
+// reorders the union.
+uint64_t current_hash_value(const FileInfo &info)
+{
+	if(g_hash == FileHashAlgorithm::CRC32C)
+		return (uint64_t)info.hash.crc32c;
+	return info.hash.blake3;
+}
+
+void store_hash_value(FileInfo &info, uint64_t value)
+{
+	if(g_hash == FileHashAlgorithm::CRC32C)
+		info.hash.crc32c = (uint32_t)value;
+	else
+		info.hash.blake3 = value;
+}
+
+// Fills in info.hash for one file, honoring the selected memoization backend.
+// The xattr branch keeps the exact policy of the engine's process_matched_file_async
+// (fingerprint.cpp), so the "public.fingerprint.*" format stays shared with gate.
 // Returns false when the file's content could not be read, so the caller can degrade the
 // whole rollup rather than let an unreadable file contribute a 0 hash: the same file
 // edited to the same size behind a persistent read failure would otherwise be invisible.
@@ -293,10 +325,34 @@ bool hash_one_file(HashedFile &entry)
 {
 	// A directory contributes its existence and nothing else: its content is the files
 	// already collected under it, and its st_size is allocation noise, not content.
+	// Returning here also keeps directories out of the store, where they would occupy
+	// slots that say nothing.
 	if(entry.info.is_directory())
 	{
 		entry.info.size = 0;
 		entry.info.hash.blake3 = 0;
+		return true;
+	}
+
+	if((g_memo_backend == CacheMemo::Sidecar) && (g_fingerprint_store != nullptr))
+	{
+		uint64_t memoized = 0;
+		if(!g_memo_refresh && g_fingerprint_store->lookup(entry.info, memoized))
+		{
+			store_hash_value(entry.info, memoized);
+			// Recorded even though nothing was computed: the store evicts what a run
+			// does not mention, and a file that hits on every run must not age out.
+			g_fingerprint_store->record(entry.info, memoized);
+			return true; // the file was never opened
+		}
+
+		// Never record a hash that was not actually computed. The 0 left behind by a
+		// failed read would be memoized as this file's content and reused on every
+		// later run, so one transient EMFILE would pin it until size or mtime moved.
+		if(!compute_file_hash(entry.path, entry.info))
+			return false;
+
+		g_fingerprint_store->record(entry.info, current_hash_value(entry.info));
 		return true;
 	}
 

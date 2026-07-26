@@ -24,6 +24,7 @@
 #include "EnvVarExpand.h"
 #include "PlaylistDoc.h"
 #include "TaskFingerprint.h"
+#include "FingerprintStore.h"
 #include "PosixFileOps.h"
 
 #include <limits.h>
@@ -48,7 +49,8 @@ enum
 	kOptCacheHash,
 	kOptCacheRefresh,
 	kOptCacheEnv,
-	kOptCacheXattr,
+	kOptCacheMemo,
+	kOptCacheMemoRefresh,
 };
 
 static struct option sLongOptions[] =
@@ -77,7 +79,8 @@ static struct option sLongOptions[] =
 	{"cache-hash",			required_argument,	NULL, kOptCacheHash},
 	{"cache-refresh",		no_argument,			NULL, kOptCacheRefresh},
 	{"cache-env",			required_argument,	NULL, kOptCacheEnv},
-	{"cache-xattr",			required_argument,	NULL, kOptCacheXattr},
+	{"cache-memo",			required_argument,	NULL, kOptCacheMemo},
+	{"cache-memo-refresh",	no_argument,			NULL, kOptCacheMemoRefresh},
 	{"version",				no_argument,		NULL, 'V'},
 	{"help",				no_argument,		NULL, 'h'},
 	{NULL, 					0,					NULL,  0 }
@@ -134,8 +137,14 @@ DisplayHelp(void)
 		"  --cache-refresh    Execute everything, ignoring stored entries, but record fresh ones. Implies --cache.\n"
 		"  --cache-env NAME   Fold the value of this environment variable into every task's input fingerprint.\n"
 		"                     May be repeated. Implies --cache.\n"
-		"  --cache-xattr on|off|refresh   Control the per-file hash memoization stored in file xattrs.\n"
-		"                     Default \"on\", or \"off\" when --sandbox is active; an explicit value always wins.\n"
+		"  --cache-memo sidecar|xattr|off   Where per-file content hashes are memoized between runs, so that\n"
+		"                     unchanged files are not re-read. \"sidecar\" (default) keeps them in a compact index\n"
+		"                     in --cache-dir: it works when the source tree is read-only, which is the usual case\n"
+		"                     under --sandbox, and costs about a tenth of what \"xattr\" costs per fingerprinted\n"
+		"                     file. \"xattr\" stores them in each file's public.fingerprint.* attribute, shared\n"
+		"                     with the gate and fingerprint tools, and needs the files to be writable.\n"
+		"                     Implies --cache.\n"
+		"  --cache-memo-refresh   Ignore what is memoized, recompute every file hash and rewrite the memo.\n"
 		"                     Implies --cache.\n"
 		"  --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay\n"
 		"                     auto-discovers declared paths from the playlist and adds them to the policy.\n"
@@ -256,16 +265,42 @@ DisplayHelp(void)
 		"  After restructuring a playlist (especially removing a step that mutated earlier products),\n"
 		"  run once with --cache-refresh to re-execute everything and rebuild the manifest.\n"
 		"\n"
-		"  The per-file hash memoization (--cache-xattr) trusts a file's inode, size and mtime: a rewrite\n"
-		"  that restores all three (a tool preserving timestamps, touch -r) is invisible to it, so the file\n"
-		"  can look unchanged and cause a wrong skip. Use --cache-xattr refresh (or off) when input files\n"
-		"  are rewritten with restored modification times.\n"
+		"  The per-file hash memoization (--cache-memo) records a content hash per file so that unchanged\n"
+		"  files are not read again. The two backends answer the same question but trust different things,\n"
+		"  because one of them writes to the very file it is memoizing and the other does not:\n"
+		"    sidecar  A compact index in the cache directory, keyed by device and inode and validated against\n"
+		"             size, modification time, CHANGE time and file type. Nothing is written to the inputs, so\n"
+		"             it works on a read-only tree. Not touching the files is also what lets it check ctime,\n"
+		"             which closes the wrong skip below wherever the filesystem keeps a real one (APFS and\n"
+		"             HFS+ do): utimes() is an inode metadata change, so a tool that restores mtime cannot\n"
+		"             restore ctime. On a filesystem that carries no true change time and derives it from\n"
+		"             the modification time, that guarantee degrades to the \"xattr\" one below. The index is\n"
+		"             machine-local, because inode numbers are, while the manifest beside it is shareable;\n"
+		"             --cache-hash selects a separate index. It carries a checksum and is rebuilt from scratch\n"
+		"             if it fails - that detects accidental corruption, NOT tampering: there is no key, so\n"
+		"             anyone who can write the cache directory can write a matching checksum, and can also\n"
+		"             crash a concurrent replay by truncating the index while it is mapped. Protect the cache\n"
+		"             directory with filesystem permissions.\n"
+		"    xattr    The public.fingerprint.* attribute on each file, the format shared with the gate and\n"
+		"             fingerprint tools. Needs the files to be writable and briefly chmods read-only ones. It\n"
+		"             trusts a file's inode, size and mtime only: a rewrite that restores all three (a tool\n"
+		"             preserving timestamps, touch -r) is invisible to it, so the file can look unchanged and\n"
+		"             cause a wrong skip. Use --cache-memo-refresh (or off) when inputs are rewritten with\n"
+		"             restored modification times.\n"
+		"  --dry-run reads the sidecar and never writes it, so a dry run leaves the memo byte-identical. With\n"
+		"  \"xattr\" the memoization is turned off for the run instead: that backend has no read-only mode, so\n"
+		"  any file that missed would have its record written (and a read-only file briefly chmod-ed) as part\n"
+		"  of the same pass. Turning it off costs a re-hash and keeps the dry run's promise to write nothing.\n"
 		"\n"
-		"  With --sandbox, the cache directory is granted read-write in the sandbox automatically, and the\n"
-		"  per-file xattr hash memoization defaults to off: input trees are typically read-only under the\n"
-		"  sandbox, so every memoization write would be denied and logged as a sandbox violation. Unchanged\n"
-		"  files are re-hashed on every run instead - correct, just slower on large inputs. Pass --cache-xattr\n"
-		"  explicitly to override when the input trees are writable inside the sandbox.\n"
+		"  Cost, measured on a warm run whose declared world is one directory of 20000 files: sidecar 1.9 us\n"
+		"  per file, xattr 18.6 us (a getxattr syscall each), off 20.8 us (every file read and re-hashed).\n"
+		"  How much of that a run notices depends on how much of it is fingerprinting - a playlist dominated\n"
+		"  by process spawning sees no difference between the three.\n"
+		"\n"
+		"  With --sandbox, the cache directory is granted read-write in the sandbox automatically. The default\n"
+		"  sidecar memoization lives there, so it keeps working when the input trees are read-only. Choosing\n"
+		"  --cache-memo xattr under a sandbox means every memoization write to an input is denied and logged\n"
+		"  as a kernel sandbox violation; the run stays correct, just noisier and slower.\n"
 		"\n"
 		"  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action on stdout\n"
 		"  without executing or writing anything - a \"what would rebuild\" query (no summary line, since\n"
@@ -620,7 +655,8 @@ int main(int argc, const char * argv[])
 	context.cacheDir = ".replay-cache";
 	context.cacheFormat = CacheFormat::Json;
 	context.cacheHash = FileHashAlgorithm::CRC32C;
-	context.cacheXattrMode = XattrMode::On;
+	context.cacheMemo = CacheMemo::Sidecar;
+	context.cacheMemoRefresh = false;
 	context.cacheSession = nullptr;
 
 	std::vector<std::string> playlistKeys;
@@ -635,9 +671,6 @@ int main(int argc, const char * argv[])
 	struct CliAllowedDir { std::string path; bool writable; };
 	std::vector<CliAllowedDir> cliAllowedDirs;
 	bool mcpServerMode = false;
-	// Distinguishes an explicit --cache-xattr choice from the built-in default,
-	// which flips to "off" when the sandbox is active (see the cache setup below).
-	bool cacheXattrExplicit = false;
 
 	while(true)
 	{
@@ -795,23 +828,27 @@ int main(int argc, const char * argv[])
 				context.cacheGlobalEnvNames.emplace_back(optarg);
 			break;
 
-			case kOptCacheXattr:
+			case kOptCacheMemo:
 			{
 				context.cacheEnabled = true;
-				cacheXattrExplicit = true;
-				std::string mode(optarg);
-				if(mode == "on")
-					context.cacheXattrMode = XattrMode::On;
-				else if(mode == "off")
-					context.cacheXattrMode = XattrMode::Off;
-				else if(mode == "refresh")
-					context.cacheXattrMode = XattrMode::Refresh;
+				std::string backend(optarg);
+				if(backend == "sidecar")
+					context.cacheMemo = CacheMemo::Sidecar;
+				else if(backend == "xattr")
+					context.cacheMemo = CacheMemo::Xattr;
+				else if(backend == "off")
+					context.cacheMemo = CacheMemo::Off;
 				else
 				{
-					LogError("error: invalid --cache-xattr \"%s\". Expected \"on\", \"off\" or \"refresh\"\n", optarg);
+					LogError("error: invalid --cache-memo \"%s\". Expected \"sidecar\", \"xattr\" or \"off\"\n", optarg);
 					return EXIT_FAILURE;
 				}
 			}
+			break;
+
+			case kOptCacheMemoRefresh:
+				context.cacheEnabled = true;
+				context.cacheMemoRefresh = true;
 			break;
 
 			case 'V':
@@ -893,29 +930,41 @@ int main(int argc, const char * argv[])
 				return EXIT_FAILURE;
 			}
 			sandboxAllowWrite.push_back(context.cacheDir);
-
-			if(!cacheXattrExplicit)
-			{
-				// Input trees are typically read-only under the sandbox: every xattr
-				// memoization write would be denied - silently on stderr, but each
-				// denial is still a kernel sandbox violation, and a non-writable file
-				// provokes an extra lchmod attempt first. Re-hashing unchanged files
-				// is slower but quiet; an explicit --cache-xattr opts back in.
-				context.cacheXattrMode = XattrMode::Off;
-				if(context.verbose)
-				{
-					LogError("cache: xattr memoization defaults to off under --sandbox (pass --cache-xattr to override)\n");
-				}
-			}
+			// No memoization special case here any more: the default sidecar backend
+			// lives in the cache directory that was just granted read-write, so it
+			// keeps working when the input trees are read-only. Only --cache-memo
+			// xattr writes to the inputs, and choosing it is now explicit.
 		}
 
 		// Configuration for the fingerprint code shared with gate/fingerprint.
-		// --dry-run promises to write nothing, and the xattr memoization would write
-		// hash xattrs on fingerprinted files (briefly chmod-ing read-only ones), so a
-		// dry run turns it off entirely and re-hashes instead.
 		g_hash = context.cacheHash;
-		g_xattr_mode = context.dryRun ? XattrMode::Off : context.cacheXattrMode;
 		g_verbose = context.verbose;
+		g_memo_backend = context.cacheMemo;
+		g_memo_refresh = context.cacheMemoRefresh;
+
+		// The xattr backend's own mode. --dry-run promises to write nothing, and this
+		// backend has no read-only mode: a hit is a pure getxattr, but every file that
+		// MISSES has its record written by the same pass, briefly chmod-ing read-only
+		// files to do it. So a dry run turns it off entirely and re-hashes instead.
+		// The sidecar has no such coupling: a dry run reads it and simply never saves.
+		if(context.cacheMemo != CacheMemo::Xattr)
+			g_xattr_mode = XattrMode::Off;
+		else if(context.dryRun)
+			g_xattr_mode = XattrMode::Off;
+		else
+			g_xattr_mode = context.cacheMemoRefresh ? XattrMode::Refresh : XattrMode::On;
+	}
+
+	// Opened here, after the cache directory is resolved and before the sandbox is
+	// applied: the mapping survives sandbox_init, and the cache directory is granted
+	// read-write anyway for the end-of-run save. One store per cache directory per
+	// PROCESS, not per playlist - it holds file metadata, not playlist state, so
+	// several --playlist-key runs share one load and one save.
+	std::unique_ptr<FingerprintStore> fingerprintStore;
+	if(context.cacheEnabled && (context.cacheMemo == CacheMemo::Sidecar))
+	{
+		fingerprintStore = FingerprintStore::Open(context.cacheDir, context.cacheHash, context.verbose);
+		g_fingerprint_store = fingerprintStore.get();
 	}
 
 	// Load the playlist once before the sandbox is applied so we can read the file freely.
@@ -1056,6 +1105,22 @@ int main(int argc, const char * argv[])
 			safe_exit(EXIT_SUCCESS);
 		}
 		ProcessPlaylist(steps, &context);
+	}
+
+	// After every playlist has finished, so one process publishes the store once even
+	// when several --playlist-key runs contributed to it. --dry-run still READ the
+	// store - which is where most of its cost goes - it just never publishes, so a dry
+	// run leaves the memo byte-identical.
+	if(fingerprintStore != nullptr)
+	{
+		if(!context.dryRun)
+			fingerprintStore->save();
+		if(context.verbose)
+		{
+			LogError("memo: %zu hits, %zu computed, store %s\n",
+				fingerprintStore->hit_count(), fingerprintStore->computed_count(),
+				fingerprintStore->path().c_str());
+		}
 	}
 
 	// It looks like a lot of unnecessary Obj-C memory cleanup is happening at exit

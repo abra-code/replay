@@ -86,8 +86,14 @@ Options:
   --cache-refresh    Execute everything, ignoring stored entries, but record fresh ones. Implies --cache.
   --cache-env NAME   Fold the value of this environment variable into every task's input fingerprint.
                      May be repeated. Implies --cache.
-  --cache-xattr on|off|refresh   Control the per-file hash memoization stored in file xattrs.
-                     Default "on", or "off" when --sandbox is active; an explicit value always wins.
+  --cache-memo sidecar|xattr|off   Where per-file content hashes are memoized between runs, so that
+                     unchanged files are not re-read. "sidecar" (default) keeps them in a compact index
+                     in --cache-dir: it works when the source tree is read-only, which is the usual case
+                     under --sandbox, and costs about a tenth of what "xattr" costs per fingerprinted
+                     file. "xattr" stores them in each file's public.fingerprint.* attribute, shared
+                     with the gate and fingerprint tools, and needs the files to be writable.
+                     Implies --cache.
+  --cache-memo-refresh   Ignore what is memoized, recompute every file hash and rewrite the memo.
                      Implies --cache.
   --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay
                      auto-discovers declared paths from the playlist and adds them to the policy.
@@ -196,16 +202,46 @@ Incremental execution cache:
   After restructuring a playlist (especially removing a step that mutated earlier products),
   run once with --cache-refresh to re-execute everything and rebuild the manifest.
 
-  The per-file hash memoization (--cache-xattr) trusts a file's inode, size and mtime: a rewrite
-  that restores all three (a tool preserving timestamps, touch -r) is invisible to it, so the file
-  can look unchanged and cause a wrong skip. Use --cache-xattr refresh (or off) when input files
-  are rewritten with restored modification times.
+  The per-file hash memoization (--cache-memo) records a content hash per file so that unchanged
+  files are not read again. The two backends answer the same question but trust different things,
+  because one of them writes to the very file it is memoizing and the other does not:
 
-  With --sandbox, the cache directory is granted read-write in the sandbox automatically, and the
-  per-file xattr hash memoization defaults to off: input trees are typically read-only under the
-  sandbox, so every memoization write would be denied and logged as a sandbox violation. Unchanged
-  files are re-hashed on every run instead - correct, just slower on large inputs. Pass --cache-xattr
-  explicitly to override when the input trees are writable inside the sandbox.
+    sidecar  A compact index in the cache directory, keyed by device and inode and validated against
+             size, modification time, CHANGE time and file type. Nothing is written to the inputs, so
+             it works on a read-only tree. Not touching the files is also what lets it check ctime,
+             which closes the wrong skip described under "xattr" below wherever the filesystem keeps
+             a real one (APFS and HFS+ do): utimes() is an inode metadata change, so a tool that
+             restores mtime cannot restore ctime. On a filesystem that carries no true change time
+             and derives it from the modification time, that guarantee degrades to the "xattr" one.
+             The index is machine-local, because inode numbers are, while the manifest beside it
+             is shareable; --cache-hash selects a separate index file, so switching algorithms does
+             not invalidate the other. It carries a checksum and is rebuilt from scratch if it fails
+             - that detects accidental corruption, NOT tampering: there is no key, so anyone who can
+             write the cache directory can write a matching checksum, and can also crash a concurrent
+             replay by truncating the index while it is mapped. Protect the cache directory with
+             filesystem permissions.
+
+    xattr    The public.fingerprint.* attribute on each file, the format shared with the gate and
+             fingerprint tools. Needs the files to be writable and briefly chmods read-only ones. It
+             trusts a file's inode, size and mtime only: a rewrite that restores all three (a tool
+             preserving timestamps, touch -r) is invisible to it, so the file can look unchanged and
+             cause a wrong skip. Use --cache-memo-refresh (or off) when inputs are rewritten with
+             restored modification times.
+
+  --dry-run reads the sidecar and never writes it, so a dry run leaves the memo byte-identical. With
+  "xattr" the memoization is turned off for the run instead: that backend has no read-only mode, so any
+  file that missed would have its record written (and a read-only file briefly chmod-ed) as part of the
+  same pass. Turning it off costs a re-hash and keeps the dry run's promise to write nothing.
+
+  Cost, measured on a warm run whose declared world is one directory of 20000 files: sidecar 1.9 us per
+  file, xattr 18.6 us (a getxattr syscall each), off 20.8 us (every file read and re-hashed). How much
+  of that a run notices depends on how much of it is fingerprinting - a playlist dominated by process
+  spawning sees no difference between the three.
+
+  With --sandbox, the cache directory is granted read-write in the sandbox automatically. The default
+  sidecar memoization lives there, so it keeps working when the input trees are read-only. Choosing
+  --cache-memo xattr under a sandbox means every memoization write to an input is denied and logged
+  as a kernel sandbox violation; the run stays correct, just noisier and slower.
 
   --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action on stdout
   without executing or writing anything - a "what would rebuild" query (no summary line, since

@@ -11,7 +11,7 @@ Scenarios:
   3. --cache-hash blake3 is recorded in the manifest
   4. execution output is identical with and without --cache
   5. --cache is ignored with a warning in --no-dependency, stdin and server modes
-  6. invalid --cache-format / --cache-hash / --cache-xattr values are rejected
+  6. invalid --cache-format / --cache-hash / --cache-memo values are rejected
   7. --dry-run --cache writes no manifest
   8. --help documents the cache options
 
@@ -266,8 +266,8 @@ def test_execution_unchanged() -> None:
 
     cache_lines = [line for line in cached.stderr.splitlines() if line.startswith("cache:")]
     other_stderr = "\n".join(line for line in cached.stderr.splitlines()
-                             if not line.startswith("cache:"))
-    check("the only new stderr output is the cache: lines",
+                             if not line.startswith("cache:") and not line.startswith("memo:"))
+    check("the only new stderr output is the cache: and memo: lines",
           other_stderr.strip() == plain.stderr.strip(),
           f"cached extra: {other_stderr[:200]} | plain: {plain.stderr[:200]}")
     check("cache lines were emitted", len(cache_lines) >= 1, cached.stderr[:300])
@@ -324,7 +324,7 @@ def test_invalid_option_values() -> None:
         for option, value, expected in [
             ("--cache-format", "yaml", "--cache-format"),
             ("--cache-hash", "md5", "--cache-hash"),
-            ("--cache-xattr", "maybe", "--cache-xattr"),
+            ("--cache-memo", "maybe", "--cache-memo"),
         ]:
             result = run([option, value, playlist])
             check(f"{option} {value} exits non-zero", result.returncode != 0,
@@ -362,7 +362,7 @@ def test_help_lists_cache_options() -> None:
 
     result = run(["--help"])
     for flag in ["--cache", "--cache-dir", "--cache-format", "--cache-hash",
-                 "--cache-refresh", "--cache-env", "--cache-xattr"]:
+                 "--cache-refresh", "--cache-env", "--cache-memo", "--cache-memo-refresh"]:
         check(f"help mentions {flag}", flag in result.stdout, "")
 
 
@@ -568,9 +568,10 @@ def test_valid_option_values_run() -> None:
         ["--cache-refresh"],
         ["--cache", "--cache-env", "HOME"],
         ["--cache", "--cache-env", "HOME", "--cache-env", "PATH"],
-        ["--cache-xattr", "on"],
-        ["--cache-xattr", "off"],
-        ["--cache-xattr", "refresh"],
+        ["--cache-memo", "sidecar"],
+        ["--cache-memo", "xattr"],
+        ["--cache-memo", "off"],
+        ["--cache-memo-refresh"],
     ]
     for extra in variants:
         with tempfile.TemporaryDirectory() as td:
