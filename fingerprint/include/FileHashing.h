@@ -50,7 +50,8 @@ inline constexpr const char* kBlake3XattrName = "public.fingerprint.blake3";
 inline __attribute__((always_inline))
 void report_xattr_failure(const char* operation, int result, int err, const std::string& path) noexcept
 {
-    // ENOATTR: removing an xattr that was never written - the normal case for --cache-xattr clear.
+    // ENOATTR: removing an xattr that was never written - the normal case for the
+    // fingerprint tool's --xattr clear. (replay never selects XattrMode::Clear.)
     if ((err == EACCES) || (err == EPERM) || (err == ENOTSUP) || (err == EROFS) || (err == ENOATTR))
         return;
     if (!g_verbose)
@@ -208,9 +209,14 @@ void write_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcep
 
     const char* xattrName = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
 
+    // Address the base subobject explicitly rather than relying on it sitting at offset 0
+    // of the derived object: FileInfo has data members in both the base and the derived
+    // class, so it is not standard-layout and that offset is an assumption rather than a
+    // guarantee. Same codegen, and it stops the assumption from growing more load-bearing
+    // as runtime-only fields are added.
     int xattr_result = ::setxattr(path.c_str(),
                        xattrName,
-                       &info,
+                       &static_cast<const FileInfoCore &>(info),
                        sizeof(FileInfoCore), //only the core part of the FileInfo is persisted
                        0,              // position (ignored)
                        XATTR_NOFOLLOW); // or 0 to not follow symlinks
