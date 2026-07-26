@@ -26,8 +26,16 @@
 // wrong-skip hole, because utimes() is an inode metadata change and POSIX requires it
 // to move ctime.
 //
-// Every entry point is thread-safe. lookup() is lock-free (it only reads the mapping);
-// record() shards its writes; save() is called once, after the scheduler has drained.
+// The table is accompanied by a small append-only journal. Publishing the table means
+// rewriting all of it, which is the wrong shape for the common incremental run: two
+// changed files out of twenty thousand would rewrite every slot. A run whose changes fit
+// within a bounded delta appends them to the journal instead and leaves the table alone;
+// the next run that does not fit folds the journal back in, which is also where eviction
+// and resizing happen. Lookups read the journal first, because it is newer.
+//
+// Every entry point is thread-safe. lookup() is lock-free (it only reads the mapping and
+// the journal overlay, both immutable for the life of the object); record() shards its
+// writes; save() is called once, after the scheduler has drained.
 
 #include <atomic>
 #include <cstddef>
@@ -39,7 +47,8 @@
 
 namespace fpstore
 {
-	struct FpSlot; // on-disk slot; the layout lives in FingerprintStore.cpp
+	struct FpSlot;    // on-disk slot; the layout lives in FingerprintStore.cpp
+	struct SlotIndex; // an in-memory probe table, used to overlay the journal on the table
 }
 
 class FingerprintStore
@@ -88,18 +97,28 @@ public:
 	// because both were observed together.
 	void record(const FileInfo &info, uint64_t contentHash);
 
-	// Merges this run's records with the surviving entries of the store on disk and
-	// publishes the result atomically (temp + rename, never an in-place truncation).
-	// A no-op when nothing this run recorded differs from what was already stored, so a
-	// fully cached incremental run writes zero bytes.
+	// Publishes what this run learned, by whichever of the two routes fits:
+	//
+	//   - nothing differs from what is already on disk: no write at all, which is the
+	//     steady state and the case that matters most.
+	//   - the difference fits the journal's budget: one appended batch, sized by the
+	//     number of changed files rather than the number of known files.
+	//   - otherwise: the whole table is rewritten, folding the journal back in, evicting
+	//     entries no recent run has mentioned and resizing. Atomic (temp + rename, never
+	//     an in-place truncation), and the journal is cleared afterwards.
 	//
 	// Call once, after the scheduler has drained and after any end-of-run fingerprinting
 	// has finished. Never throws and never fails the run: losing the memo costs a re-hash.
 	void save();
 
-	// Entries in the store as loaded. Advisory - it is the header's own count, which is
-	// never used for bounds.
+	// Entries in the table as loaded. Advisory - it is the header's own count, which is
+	// never used for bounds. Excludes the journal; see journal_entry_count().
 	size_t loaded_entry_count() const { return mLoadedCount; }
+
+	// Distinct entries the journal overlays on the table, as loaded.
+	size_t journal_entry_count() const { return mJournalCount; }
+
+	const std::string &journal_path() const { return mJournalPath; }
 
 	// Counted per lookup, not per file: a header fingerprinted by twenty tasks counts
 	// twenty hits, because that is twenty file reads (or getxattr calls) not made.
@@ -112,20 +131,26 @@ public:
 	const std::string &path() const { return mPath; }
 
 private:
-	FingerprintStore(std::string cacheDir, std::string path, uint32_t algorithmTag,
-	                 const uint8_t *hostUuid, bool verbose);
+	FingerprintStore(std::string cacheDir, std::string path, std::string journalPath,
+	                 uint32_t algorithmTag, const uint8_t *hostUuid, bool verbose);
 
 	// The body of save(), which only adds the exception guard around it.
 	void save_internal();
 
-	// True when the loaded mapping already holds exactly this record. Drives mDirty, so
-	// that a run which changed nothing can skip the rewrite entirely.
-	bool matches_loaded(uint64_t fileKey, uint64_t statTag, uint64_t contentHash) const;
+	// The entry for this file in the journal overlay if it has one, otherwise the entry in
+	// the table, otherwise null. The journal is newer than the table by construction, so
+	// it wins - a file changed since the last rewrite has an entry in both.
+	const fpstore::FpSlot *find_known(uint64_t fileKey) const;
+
+	// True when what is already on disk - table or journal - is exactly this record.
+	// Drives mDirty, so that a run which changed nothing writes nothing at all.
+	bool matches_known(uint64_t fileKey, uint64_t statTag, uint64_t contentHash) const;
 
 	struct Shard;
 
 	std::string mCacheDir;
 	std::string mPath;
+	std::string mJournalPath;
 	uint32_t mAlgorithmTag = 0;
 	uint8_t mHostUuid[16] = {0};
 	bool mVerbose = false;
@@ -140,6 +165,16 @@ private:
 	size_t mLoadedCount = 0;
 	// Deliberately no cached run counter: save() re-reads the store under its lock and
 	// takes the counter from THAT, because another process may have published since.
+
+	// The journal's records, indexed for probing. Built once at Open and then immutable,
+	// which is what lets lookup() read it without a lock. mOverlaySlots/mOverlayCapacity
+	// are the hot-path view into mOverlay, kept separately so a probe is not two chased
+	// pointers. Empty whenever the table is - a journal is only meaningful on top of the
+	// image it was written against.
+	std::unique_ptr<fpstore::SlotIndex> mOverlay;
+	const fpstore::FpSlot *mOverlaySlots = nullptr;
+	uint64_t mOverlayCapacity = 0;
+	size_t mJournalCount = 0;
 
 	std::unique_ptr<Shard[]> mShards;
 

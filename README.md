@@ -228,6 +228,13 @@ Incremental execution cache:
              cause a wrong skip. Use --cache-memo-refresh (or off) when inputs are rewritten with
              restored modification times.
 
+  The sidecar is two files: the index, and a small append-only journal beside it. A run that changes
+  nothing writes neither. A run that changes a few files appends only those records to the journal, so
+  an incremental build does not rewrite an index that may be tens of megabytes. The first run whose
+  changes no longer fit the journal folds it back into the index and clears it, which is also when
+  entries no recent run has mentioned are evicted. Every journal batch carries its own checksum, so a
+  batch left half-written by a crash costs that batch and nothing else.
+
   --dry-run reads the sidecar and never writes it, so a dry run leaves the memo byte-identical. With
   "xattr" the memoization is turned off for the run instead: that backend has no read-only mode, so any
   file that missed would have its record written (and a read-only file briefly chmod-ed) as part of the

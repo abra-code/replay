@@ -287,6 +287,12 @@ DisplayHelp(void)
 		"             preserving timestamps, touch -r) is invisible to it, so the file can look unchanged and\n"
 		"             cause a wrong skip. Use --cache-memo-refresh (or off) when inputs are rewritten with\n"
 		"             restored modification times.\n"
+		"  The sidecar is two files: the index, and a small append-only journal beside it. A run that changes\n"
+		"  nothing writes neither. A run that changes a few files appends only those records to the journal,\n"
+		"  so an incremental build does not rewrite an index that may be tens of megabytes. The first run\n"
+		"  whose changes no longer fit the journal folds it back into the index and clears it, which is also\n"
+		"  when entries no recent run has mentioned are evicted. Every journal batch carries its own\n"
+		"  checksum, so a batch left half-written by a crash costs that batch and nothing else.\n"
 		"  --dry-run reads the sidecar and never writes it, so a dry run leaves the memo byte-identical. With\n"
 		"  \"xattr\" the memoization is turned off for the run instead: that backend has no read-only mode, so\n"
 		"  any file that missed would have its record written (and a read-only file briefly chmod-ed) as part\n"
@@ -1117,9 +1123,13 @@ int main(int argc, const char * argv[])
 			fingerprintStore->save();
 		if(context.verbose)
 		{
-			LogError("memo: %zu hits, %zu computed, store %s\n",
+			// The journal count is how many of the entries available to this run came
+			// from the append log rather than the table, which is what makes "did the
+			// incremental path actually work" visible without parsing the files.
+			LogError("memo: %zu hits, %zu computed, store %s (%zu table, %zu journalled)\n",
 				fingerprintStore->hit_count(), fingerprintStore->computed_count(),
-				fingerprintStore->path().c_str());
+				fingerprintStore->path().c_str(),
+				fingerprintStore->loaded_entry_count(), fingerprintStore->journal_entry_count());
 		}
 	}
 

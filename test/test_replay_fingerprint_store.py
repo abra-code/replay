@@ -9,13 +9,15 @@ summary line
 
     memo: <hits> hits, <computed> computed, store <path>
 
-plus the store file itself, which this suite parses independently - header,
-capacity, entry count and the crc32c trailer are all re-derived here rather than
-taken on trust, so a format change that breaks a reader shows up as a failure.
+plus the store's two files, which this suite parses independently - header,
+capacity, entry count, the crc32c trailer and every journal batch checksum are
+re-derived here rather than taken on trust, so a format change that breaks a
+reader shows up as a failure.
 
 Scenarios:
   1.  a cached run creates the store; the next run hits the memo for every file
-  2.  the entry count tracks the number of distinct files across runs
+  2.  the entry count tracks the number of distinct files across runs, with new
+      files landing in the journal rather than rewriting the table
   3.  a flipped byte inside the slots is caught: 0 hits, correct output, rebuilt
   4.  a chopped trailer is treated as an empty store, run still correct
   5.  a store from another machine is ignored
@@ -32,7 +34,22 @@ Scenarios:
       correctness difference between the two backends, pinned deliberately
   12. many concurrent tasks over a shared input tree: correct entry count, and
       the second run fully hits
-  13. steady state writes nothing: an unchanged run leaves the store untouched
+  13. steady state writes nothing: an unchanged run leaves neither file touched,
+      and one changed file writes a journal batch instead of the whole table
+  14. a journal torn by a crash is repaired without rewriting the table, and the
+      batches that did verify are carried into the replacement
+  15. a batch left behind for a superseded table image is dropped, not overlaid
+  16. exceeding the journal's budget folds it back into the table and clears it,
+      and the records that lived only in the journal survive that fold
+  17. a table too full to absorb the journal compacts and grows, even while the
+      journal is still under its own budget
+  18. a FIFO planted at either store path fails the open rather than hanging on it
+  19. an unusable journal with nothing to recover is removed, not answered with a
+      whole-table rewrite
+  20. rewriting files the table already holds stays in the journal: they add no
+      slots, so they must not force the table to compact and grow
+  21. a table written before the nonce field existed rewrites once to mint one,
+      instead of journalling batches no reader could ever accept
 
 Usage: python3 test_replay_fingerprint_store.py [/path/to/replay]
 Exit:  0 = all checks passed, 1 = one or more failures
@@ -56,13 +73,26 @@ XATTR_NAMES = ("public.fingerprint.crc32c", "public.fingerprint.blake3")
 
 # Mirrors replay/FingerprintStore.cpp. Little-endian, no padding: the structs are
 # laid out so that every field is naturally aligned.
-FP_HEADER     = struct.Struct("<QIIQQQ16s8s")   # 64 bytes
+FP_HEADER     = struct.Struct("<QIIQQQ16sQ")    # 64 bytes
 FP_TRAILER    = struct.Struct("<QII")           # 16 bytes
 HEADER_MAGIC  = 0x01535046594C5052              # "RPLYFPS\1"
 TRAILER_MAGIC = 0x01545046594C5052              # "RPLYFPT\1"
 SLOT_SIZE     = 32
-# magic 0, version 8, hashAlgo 12, capacity 16, count 24, runCounter 32, hostUuid 40.
+# magic 0, version 8, hashAlgo 12, capacity 16, count 24, runCounter 32, hostUuid 40,
+# nonce 56.
 HOSTUUID_OFF  = 40
+
+# The journal beside it: FpJournalHeader | (FpBatchHeader | n slots | FpBatchTrailer)*
+FP_JOURNAL      = struct.Struct("<QII16s")      # 32 bytes
+FP_BATCH        = struct.Struct("<QQQQ")        # 32: magic, count, storeRun, storeNonce
+FP_BATCH_END    = struct.Struct("<QII")         # 16 bytes: magic, crc32c, reserved
+JOURNAL_MAGIC   = 0x014A5046594C5052            # "RPLYFPJ\1"
+BATCH_MAGIC     = 0x01425046594C5052            # "RPLYFPB\1"
+BATCH_END_MAGIC = 0x01455046594C5052            # "RPLYFPE\1"
+# The store rewrites itself when the journal would exceed capacity/4 entries, or
+# when table + journal would pass the 0.7 load factor. Mirrors FingerprintStore.cpp.
+JOURNAL_SHARE   = 4
+MIN_CAPACITY    = 1024
 
 _pass = 0
 _fail = 0
@@ -108,13 +138,23 @@ def summary(proc: subprocess.CompletedProcess) -> tuple:
 
 
 def memo(proc: subprocess.CompletedProcess) -> tuple:
-    """'memo: N hits, M computed, store PATH', printed only under --verbose.
-    (-1, -1, '') if absent."""
+    """'memo: N hits, M computed, store PATH (T table, J journalled)', printed only
+    under --verbose. (-1, -1, '') if absent."""
     for line in proc.stderr.splitlines():
         if line.startswith("memo: ") and " hits, " in line:
             parts = line.split()
             return (int(parts[1]), int(parts[3]), parts[6])
     return (-1, -1, "")
+
+
+def memo_sources(proc: subprocess.CompletedProcess) -> tuple:
+    """The '(T table, J journalled)' tail of the memo line: where the entries this
+    run could see came from. (-1, -1) if absent."""
+    for line in proc.stderr.splitlines():
+        if line.startswith("memo: ") and " table, " in line:
+            parts = line.split()
+            return (int(parts[7].lstrip("(")), int(parts[9]))
+    return (-1, -1)
 
 
 # --- independent crc32c, so the trailer is verified rather than assumed --------
@@ -161,7 +201,7 @@ class Store:
 
         if len(self.raw) < FP_HEADER.size + FP_TRAILER.size:
             return
-        magic, version, algo, capacity, count, runs, host, _res = \
+        magic, version, algo, capacity, count, runs, host, nonce = \
             FP_HEADER.unpack_from(self.raw, 0)
         if magic != HEADER_MAGIC:
             return
@@ -178,6 +218,7 @@ class Store:
         self.count = count
         self.run_counter = runs
         self.host = host
+        self.nonce = nonce
         self.valid = True
 
     def live_slots(self) -> int:
@@ -190,6 +231,77 @@ class Store:
             if file_key != 0:
                 live += 1
         return live
+
+
+def journal_path(cache: Path):
+    if not cache.exists():
+        return None
+    paths = sorted(cache.glob("fingerprints-*.jrnl"))
+    return paths[0] if len(paths) == 1 else None
+
+
+class Journal:
+    """A parsed journal. Every batch checksum is recomputed here, so a batch that
+    replay would refuse to read is one this parser refuses too."""
+
+    def __init__(self, path):
+        self.path = path
+        # Tolerates a missing journal so that a scenario whose expectation is wrong
+        # reports a clean FAIL and lets the rest of the suite run, rather than dying
+        # with a traceback and skipping everything after it.
+        self.raw = path.read_bytes() if (path is not None and path.exists()) else b""
+        self.valid = False
+        self.host = b""
+        # (storeRun, storeNonce, slot_count) per verified batch, in file order
+        self.batches = []
+        self.trailing = 0   # bytes after the last batch that verified
+
+        if len(self.raw) < FP_JOURNAL.size:
+            return
+        magic, version, algo, host = FP_JOURNAL.unpack_from(self.raw, 0)
+        if magic != JOURNAL_MAGIC:
+            return
+        self.version = version
+        self.algo = algo
+        self.host = host
+        self.valid = True
+
+        offset = FP_JOURNAL.size
+        while offset < len(self.raw):
+            remaining = len(self.raw) - offset
+            if remaining < FP_BATCH.size + FP_BATCH_END.size:
+                break
+            bmagic, count, store_run, store_nonce = FP_BATCH.unpack_from(self.raw, offset)
+            if bmagic != BATCH_MAGIC or count == 0:
+                break
+            body = FP_BATCH.size + (count * SLOT_SIZE)
+            if body + FP_BATCH_END.size > remaining:
+                break
+            emagic, stored_crc, _ = FP_BATCH_END.unpack_from(self.raw, offset + body)
+            if emagic != BATCH_END_MAGIC:
+                break
+            if crc32c(self.raw[offset:offset + body]) != stored_crc:
+                break
+            self.batches.append((store_run, store_nonce, count))
+            offset += body + FP_BATCH_END.size
+        self.trailing = len(self.raw) - offset
+
+    @property
+    def entries(self) -> int:
+        """Slots across every batch that verified. Counts a file once per batch it
+        appears in, which is what the file holds - replay collapses them on read."""
+        return sum(count for _run, _nonce, count in self.batches)
+
+
+def read_journal(cache: Path) -> Journal:
+    """The journal a scenario expects to exist. A missing one is a real failure mode
+    of the code under test, so it is reported as a FAIL and parsing continues against
+    an empty journal - the caller's own checks then fail cleanly too."""
+    path = journal_path(cache)
+    if path is None:
+        listing = [p.name for p in sorted(cache.iterdir())] if cache.exists() else "nothing"
+        fail("a journal was expected in the cache directory", str(listing))
+    return Journal(path)
 
 
 def digest(path: Path) -> str:
@@ -292,8 +404,10 @@ def test_entry_count():
               store.capacity >= 1024 and (store.capacity & (store.capacity - 1)) == 0,
               str(store.capacity))
 
-        # A new file for a new task: the entry count grows by exactly two
-        # (its input and its output), the rest carry forward as survivors.
+        # A new file for a new task adds exactly two records - its input and its
+        # output - and two records is nowhere near the journal's budget, so they
+        # go there and the table is not rewritten at all.
+        table_digest = digest(store_path(cache))
         steps = json.loads(playlist.read_text())
         extra = src / "in_extra.txt"
         extra.write_text("extra payload")
@@ -304,13 +418,34 @@ def test_entry_count():
         })
         playlist.write_text(json.dumps(steps))
 
-        run(args + [playlist])
-        grown = Store(store_path(cache))
-        check("adding one task adds exactly its two files",
-              grown.count == expected + 2, f"count={grown.count} expected={expected + 2}")
-        check("the rewrite bumped the run counter",
-              grown.run_counter == store.run_counter + 1,
-              f"{store.run_counter} -> {grown.run_counter}")
+        r = run(args + ["-v", playlist])
+        check("adding a task appends to the journal rather than rewriting the table",
+              "appended 2 records" in r.stderr, r.stderr)
+        check("the table really was left byte-identical",
+              digest(store_path(cache)) == table_digest, str(store_path(cache)))
+
+        jrnl = journal_path(cache)
+        check("a journal file now exists", jrnl is not None, str(cache))
+        parsed = Journal(jrnl)
+        check("the journal parses and every batch checksum verifies",
+              parsed.valid and parsed.trailing == 0, f"trailing={parsed.trailing}")
+        check("the journal holds exactly the two new files",
+              parsed.entries == 2, f"entries={parsed.entries} batches={parsed.batches}")
+        check("the table carries a nonzero image nonce", store.nonce != 0, str(store.nonce))
+        check("the batch names the table image it extends, counter AND nonce",
+              parsed.batches == [(store.run_counter, store.nonce, 2)],
+              f"{parsed.batches} vs run={store.run_counter} nonce={store.nonce}")
+
+        # Table plus journal is what a lookup sees, and it has to add up to every
+        # distinct file: the next run hits all of them and computes nothing.
+        r2 = run(args + ["-v", playlist])
+        check("table plus journal covers every file: nothing is recomputed",
+              memo(r2)[1] == 0, f"{memo(r2)} in: {r2.stderr}")
+        check("and the count of distinct files is the table's plus the journal's",
+              Store(store_path(cache)).count + read_journal(cache).entries
+                  == expected + 2,
+              f"{Store(store_path(cache)).count} + "
+              f"{read_journal(cache).entries} != {expected + 2}")
 
 
 def test_corruption():
@@ -661,7 +796,7 @@ def test_concurrent_shared_tree():
 
 
 def test_steady_state_writes_nothing():
-    print("\n=== Scenario 13: an unchanged run leaves the store untouched ===")
+    print("\n=== Scenario 13: an unchanged run writes nothing at all ===")
     with tempfile.TemporaryDirectory() as td:
         d = Path(td).resolve()
         playlist, src, out, _ = make_tree(d, 3)
@@ -673,6 +808,8 @@ def test_steady_state_writes_nothing():
         first_digest = digest(path)
         first_mtime = path.stat().st_mtime_ns
         first_inode = path.stat().st_ino
+        check("a cold run writes no journal: it just wrote the whole table",
+              journal_path(cache) is None, str(sorted(cache.iterdir())))
 
         r2 = run(args + [playlist])
         check("run 2 hit everything", summary(r2) == (3, 0, 0), r2.stderr)
@@ -680,17 +817,469 @@ def test_steady_state_writes_nothing():
         check("run 2 did not even replace the inode",
               path.stat().st_ino == first_inode and path.stat().st_mtime_ns == first_mtime,
               str(path))
+        check("run 2 wrote no journal either", journal_path(cache) is None,
+              str(sorted(cache.iterdir())))
 
         r3 = run(args + [playlist])
         check("run 3 likewise", digest(path) == first_digest and
               path.stat().st_ino == first_inode, str(path))
 
-        # A single changed file must still trigger exactly one rewrite.
+        # One changed file is what the journal is for: its two records are written
+        # as a batch, and the table - which may be 32 MB - is not touched.
         (src / "in1.txt").write_text("payload 1 v2 longer")
         r4 = run(args + [playlist])
         check("a changed file re-runs its task", summary(r4) == (2, 1, 0), r4.stderr)
-        check("and the store was rewritten", digest(path) != first_digest, str(path))
-        check("the rewritten store verifies", Store(path).crc_ok, str(path))
+        check("the table was not rewritten for it", digest(path) == first_digest, str(path))
+        check("its records went to the journal instead",
+              journal_path(cache) is not None and read_journal(cache).entries == 2,
+              r4.stderr)
+
+        # And the steady state holds on top of a journal, not just on top of a
+        # freshly written table: a run that changes nothing appends nothing.
+        jrnl = journal_path(cache)
+        jrnl_digest = digest(jrnl)
+        r5 = run(args + [playlist])
+        check("run 5 hits everything again", summary(r5) == (3, 0, 0), r5.stderr)
+        check("run 5 recomputes nothing, so the journal was read", memo(r5)[1] == 0,
+              f"{memo(r5)} in: {r5.stderr}")
+        check("and it says so: 6 entries from the table, 2 from the journal",
+              memo_sources(r5) == (6, 2), f"{memo_sources(r5)} in: {r5.stderr}")
+        check("run 5 leaves both files byte-identical",
+              digest(path) == first_digest and digest(jrnl) == jrnl_digest, str(jrnl))
+
+
+def journalled_tree(d: Path, count: int = 3):
+    """A tree run once cold and then changed just enough to leave a journal
+    behind. Returns everything the caller needs to poke at it."""
+    playlist, src, out, _ = make_tree(d, count)
+    cache = d / "cache"
+    args = ["--cache", "--cache-dir", cache, "-v"]
+    run(args + [playlist])
+    (src / "in0.txt").write_text("payload 0 v2 longer")
+    run(args + [playlist])
+    return playlist, src, out, cache, args
+
+
+def test_torn_journal_is_repaired():
+    print("\n=== Scenario 14: a journal torn by a crash is repaired in place ===")
+    # A batch is only as good as its checksum, and a reader stops at the first one
+    # that fails - so a tail half-written by a crash would hide every batch after
+    # it. The repair rewrites the journal from the batches that did verify rather
+    # than falling back on rewriting the whole table.
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td).resolve()
+        playlist, src, out, cache, args = journalled_tree(d, 3)
+        table = store_path(cache)
+        jrnl = journal_path(cache)
+        check("the setup left a journal", jrnl is not None, str(sorted(cache.iterdir())))
+        table_digest = digest(table)
+
+        # Append a plausible-looking but unfinished batch, exactly as a crash
+        # partway through a write() would leave behind.
+        torn = bytearray(jrnl.read_bytes())
+        torn += FP_BATCH.pack(BATCH_MAGIC, 4, 1, 1)
+        torn += b"\x11" * (2 * SLOT_SIZE)   # half the slots the header promises
+        jrnl.write_bytes(bytes(torn))
+        damaged = Journal(jrnl)
+        check("the torn batch is not readable, and is at the tail",
+              damaged.entries == 2 and damaged.trailing > 0,
+              f"entries={damaged.entries} trailing={damaged.trailing}")
+
+        r = run(args + [playlist])
+        check("the run over a torn journal exits 0", r.returncode == 0, r.stderr)
+        check("the cache verdict is unaffected", summary(r) == (3, 0, 0), r.stderr)
+        check("recovering the journal did not rewrite the table",
+              digest(table) == table_digest, str(table))
+
+        repaired = read_journal(cache)
+        check("the journal is whole again", repaired.valid and repaired.trailing == 0,
+              f"trailing={repaired.trailing}")
+        check("the records that verified were carried into the replacement",
+              repaired.entries == 2, f"entries={repaired.entries}")
+
+        # The real proof that nothing was lost: nothing has to be recomputed.
+        r2 = run(args + [playlist])
+        check("the repaired journal still answers every lookup", memo(r2)[1] == 0,
+              f"{memo(r2)} in: {r2.stderr}")
+
+
+def test_stale_generation_is_dropped():
+    print("\n=== Scenario 15: a batch for a superseded table image is dropped ===")
+    # The window this covers is a crash between publishing a new table and clearing
+    # the journal that described the old one. Those records are still true, but
+    # their epochs belong to a generation that is gone, so they must not be overlaid
+    # on a table they were never written against.
+    #
+    # Both halves of the image identity are exercised. The run counter alone is not
+    # enough: it restarts at 1 every time the table is rebuilt from nothing, which a
+    # failed checksum makes routine, so two different images really can share one.
+    # The nonce is what tells them apart, and "same counter, different nonce" is the
+    # case that would otherwise be accepted.
+    for label, bump_run, bump_nonce in (("different counter", True, False),
+                                        ("same counter, different nonce", False, True)):
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td).resolve()
+            playlist, src, out, cache, args = journalled_tree(d, 3)
+            jrnl = journal_path(cache)
+            table = Store(store_path(cache))
+            check(f"[{label}] the batch starts out matching the table",
+                  Journal(jrnl).batches == [(table.run_counter, table.nonce, 2)],
+                  f"{Journal(jrnl).batches} vs ({table.run_counter}, {table.nonce})")
+
+            # Restamp the batch for an image that does not exist, and repair its
+            # checksum so that ONLY the generation check can reject it.
+            raw = bytearray(jrnl.read_bytes())
+            offset = FP_JOURNAL.size
+            bmagic, count, run_id, nonce = FP_BATCH.unpack_from(raw, offset)
+            if bump_run:
+                run_id += 99
+            if bump_nonce:
+                nonce ^= 0xA5A5A5A5A5A5A5A5
+            FP_BATCH.pack_into(raw, offset, bmagic, count, run_id, nonce)
+            body = FP_BATCH.size + (count * SLOT_SIZE)
+            FP_BATCH_END.pack_into(raw, offset + body, BATCH_END_MAGIC,
+                                   crc32c(bytes(raw[offset:offset + body])), 0)
+            jrnl.write_bytes(bytes(raw))
+            check(f"[{label}] the restamped batch still verifies its own checksum",
+                  Journal(jrnl).entries == count, str(Journal(jrnl).batches))
+
+            r = run(args + [playlist])
+            check(f"[{label}] the run exits 0", r.returncode == 0, r.stderr)
+            check(f"[{label}] the cache verdict is unaffected",
+                  summary(r) == (3, 0, 0), r.stderr)
+            check(f"[{label}] the stale records were not trusted: the file was re-hashed",
+                  memo(r)[1] > 0, f"{memo(r)} in: {r.stderr}")
+            rebuilt = read_journal(cache)
+            check(f"[{label}] and the journal was reset to this table image",
+                  rebuilt.batches == [(table.run_counter, table.nonce, 2)],
+                  f"{rebuilt.batches} vs ({table.run_counter}, {table.nonce})")
+
+
+def test_planted_fifo_does_not_hang():
+    print("\n=== Scenario 18: a FIFO planted at either store path fails, never hangs ===")
+    # A shared cache directory is an advertised use case, so another user can create
+    # names in it. O_NOFOLLOW covers symlinks; a FIFO is the other way to make an
+    # open block forever, and it blocks before any fstat could reject the file. The
+    # run must degrade to "no memo", not to a build that never finishes.
+    for label, suffix in (("index", ".bin"), ("journal", ".jrnl")):
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td).resolve()
+            playlist, src, out, _ = make_tree(d, 2)
+            cache = d / "cache"
+            args = ["--cache", "--cache-dir", cache, "-v"]
+
+            run(args + [playlist])          # establish the real names
+            table = store_path(cache)
+            if not check(f"[{label}] the setup run created a store", table is not None,
+                         str(sorted(cache.iterdir())) if cache.exists() else str(cache)):
+                continue
+            target = table.with_suffix(suffix)
+            if target.exists():
+                target.unlink()
+            os.mkfifo(target)
+            check(f"[{label}] a FIFO is in place", target.is_fifo(), str(target))
+
+            try:
+                r = run(args + [playlist], timeout=25)
+                timed_out = False
+            except subprocess.TimeoutExpired:
+                r = None
+                timed_out = True
+            check(f"[{label}] the run finishes rather than blocking on the open",
+                  not timed_out, "timed out after 25s")
+            if not timed_out:
+                check(f"[{label}] and it exits 0", r.returncode == 0, r.stderr)
+                check(f"[{label}] the cache verdict is unaffected",
+                      summary(r) == (2, 0, 0), r.stderr)
+
+
+def test_unusable_journal_is_only_removed():
+    print("\n=== Scenario 19: an unusable journal is removed, not answered with a rewrite ===")
+    # A journal that cannot be read and has nothing to recover is repaired by
+    # deleting it. Falling through to the table rewrite would republish bytes that
+    # are already correct - at the sizes this feature targets, tens of megabytes to
+    # fix a file that should simply have been unlinked.
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td).resolve()
+        playlist, src, out, cache, args = journalled_tree(d, 3)
+        table = store_path(cache)
+        table_digest = digest(table)
+
+        # Destroy the journal beyond recovery, and drop the task whose files it
+        # described - so this run has nothing new to record either.
+        journal_path(cache).write_bytes(b"GARBAGE!" * 4)
+        steps = json.loads(playlist.read_text())
+        playlist.write_text(json.dumps(steps[1:]))
+
+        r = run(args + [playlist])
+        check("the run exits 0", r.returncode == 0, r.stderr)
+        check("the cache verdict is unaffected", summary(r) == (2, 0, 0), r.stderr)
+        check("the table was NOT rewritten to repair a journal",
+              digest(table) == table_digest, r.stderr)
+        check("the unusable journal is simply gone", journal_path(cache) is None,
+              str(sorted(cache.iterdir())))
+
+
+def test_pre_nonce_table_upgrades_once():
+    print("\n=== Scenario 21: a table with no nonce rewrites once, then journals ===")
+    # A table written before the nonce field existed carries 0 there, and 0 identifies
+    # no image, so no batch can name it. Appending to it anyway would write a batch the
+    # reader rejects forever: the changed files would be re-hashed and re-appended every
+    # run, and the journal could never grow enough to trigger the compaction that would
+    # fix it. The first store-modifying run must rewrite the table instead, which mints
+    # a nonce, after which the journal works normally.
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td).resolve()
+        playlist, src, out, _ = make_tree(d, 3)
+        cache = d / "cache"
+        args = ["--cache", "--cache-dir", cache, "-v"]
+
+        run(args + [playlist])
+        table = store_path(cache)
+
+        # Age the store back to before the field existed, repairing the trailer so
+        # that ONLY the zero nonce distinguishes it.
+        raw = bytearray(table.read_bytes())
+        struct.pack_into("<Q", raw, 56, 0)
+        body = bytes(raw[:len(raw) - FP_TRAILER.size])
+        FP_TRAILER.pack_into(raw, len(raw) - FP_TRAILER.size,
+                             TRAILER_MAGIC, crc32c(body), 0)
+        table.write_bytes(bytes(raw))
+        aged = Store(table)
+        check("the aged table still verifies its checksum", aged.crc_ok, str(table))
+        check("and carries no nonce", aged.nonce == 0, str(aged.nonce))
+
+        (src / "in0.txt").write_text("payload 0 v2 longer")
+        r1 = run(args + [playlist])
+        check("the first change rewrites the table rather than journalling it",
+              "rewrote the store" in r1.stderr, r1.stderr)
+        upgraded = Store(table)
+        check("the rewrite minted a nonce", upgraded.nonce != 0, str(upgraded.nonce))
+        check("and wrote no journal", journal_path(cache) is None,
+              str(sorted(cache.iterdir())))
+
+        # The livelock this guards against: without the fix every later run re-hashes
+        # the same files and rewrites a journal no reader will ever accept.
+        r2 = run(args + [playlist])
+        check("the next unchanged run recomputes nothing", memo(r2)[1] == 0,
+              f"{memo(r2)} in: {r2.stderr}")
+        table_digest = digest(table)
+
+        (src / "in1.txt").write_text("payload 1 v2 longer")
+        r3 = run(args + [playlist])
+        check("a later change now goes to the journal", "appended 2 records" in r3.stderr,
+              r3.stderr)
+        check("leaving the upgraded table alone", digest(table) == table_digest, str(table))
+        r4 = run(args + [playlist])
+        check("and that journal is accepted on the next run", memo(r4)[1] == 0,
+              f"{memo(r4)} in: {r4.stderr}")
+
+
+def test_changed_existing_files_stay_in_journal():
+    print("\n=== Scenario 20: rewriting existing files does not force the table to grow ===")
+    # The compaction rule asks whether the TABLE can hold what the journal adds. A
+    # changed file already owns a slot, so it adds nothing - counting it as new made
+    # a run that merely rewrote existing files compact, and then double the table for
+    # a load it was never going to carry.
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td).resolve()
+        tasks = 260                       # 520 files in a 1024-slot table: load 0.51
+        playlist, src, out, _ = big_tree(d, tasks)
+        cache = d / "cache"
+        args = ["--cache", "--cache-dir", cache, "-v"]
+
+        run(args + [playlist])
+        table = store_path(cache)
+        cold = Store(table)
+        budget = max(64, cold.capacity // JOURNAL_SHARE)
+        table_digest = digest(table)
+
+        # Enough changed EXISTING files that the naive count would pass 0.7 of the
+        # table, while the true number of new slots is zero.
+        changed = 120
+        records = changed * 2             # each task's input and its regenerated output
+        check("the change stays inside the journal's entry budget",
+              records <= budget, f"{records} > {budget}")
+        check("but the naive count would have passed the 0.7 load factor",
+              (cold.count + records) > ((cold.capacity * 7) // 10),
+              f"{cold.count} + {records} vs {(cold.capacity * 7) // 10}")
+
+        for i in range(changed):
+            (src / f"in{i}.txt").write_text(f"payload {i} v2 longer")
+        r = run(args + [playlist])
+        check("the run exits 0", r.returncode == 0, r.stderr)
+        check("it appended instead of rewriting", f"appended {records} records" in r.stderr,
+              r.stderr)
+        check("the table was left byte-identical", digest(table) == table_digest, str(table))
+        check("so its capacity did not double for files it already held",
+              Store(table).capacity == cold.capacity,
+              f"{cold.capacity} -> {Store(table).capacity}")
+
+        r2 = run(args + [playlist])
+        check("everything hits afterwards", summary(r2) == (tasks, 0, 0), r2.stderr)
+        check("and nothing is recomputed", memo(r2)[1] == 0, f"{memo(r2)} in: {r2.stderr}")
+
+
+def big_tree(d: Path, count: int, name: str = "pl", first: int = 0):
+    """count independent copy tasks - 2*count declared files - written straight to
+    a playlist. Large enough to reach the journal's size rules. `first` offsets the
+    file names so two playlists can share a directory without overlapping."""
+    src = d / "src"
+    out = d / "out"
+    src.mkdir(exist_ok=True)
+    out.mkdir(exist_ok=True)
+    steps = []
+    for i in range(first, first + count):
+        (src / f"in{i}.txt").write_text(f"payload {i} v1")
+        steps.append({
+            "action": "execute", "tool": "/bin/sh",
+            "arguments": ["-c", f"cat {src}/in{i}.txt > {out}/out{i}.txt"],
+            "inputs": [str(src / f"in{i}.txt")],
+            "outputs": [str(out / f"out{i}.txt")],
+        })
+    playlist = d / f"{name}.json"
+    playlist.write_text(json.dumps(steps))
+    return playlist, src, out, steps
+
+
+def test_journal_budget_forces_compaction():
+    print("\n=== Scenario 16: exceeding the journal budget folds it into the table ===")
+    # Two playlists share the cache directory, which is what gives the fold-in
+    # something only it can save. A compaction writes every record of the run that
+    # triggered it, so a file THAT run also touched would survive whether or not the
+    # journal is merged. The second playlist's files are the ones that would not.
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td).resolve()
+        tasks = 140                       # playlist A: 280 declared files
+        side = 20                         # playlist B: 40 more, same cache directory
+        playlist, src, out, _ = big_tree(d, tasks)
+        side_playlist, _, _, _ = big_tree(d, side, name="side", first=1000)
+        cache = d / "cache"
+        args = ["--cache", "--cache-dir", cache, "-v"]
+
+        run(args + [playlist])
+        table = store_path(cache)
+        cold = Store(table)
+        budget = max(64, cold.capacity // JOURNAL_SHARE)
+        check("the cold run wrote every file into the table",
+              cold.count == tasks * 2, f"count={cold.count} expected={tasks * 2}")
+        check("and wrote no journal", journal_path(cache) is None,
+              str(sorted(cache.iterdir())))
+
+        # Playlist B's files are new, so they land in the journal - and the table,
+        # written before B ever ran, is the one place they are NOT.
+        rb = run(args + [side_playlist])
+        check("the second playlist appended to the journal",
+              f"appended {side * 2} records" in rb.stderr, rb.stderr)
+        first_digest = digest(table)
+        check("the table did not absorb them", Store(table).count == tasks * 2,
+              str(Store(table).count))
+        check("the journal holds exactly the second playlist's files",
+              read_journal(cache).entries == side * 2,
+              str(read_journal(cache).batches))
+
+        # Now change enough of playlist A that the journal would pass its budget.
+        # A's run never looks at B's files, so only the fold-in can preserve them.
+        changed = (budget // 2) + 4
+        for i in range(changed):
+            (src / f"in{i}.txt").write_text(f"payload {i} v2 longer")
+        r = run(args + [playlist])
+        check("the run exits 0", r.returncode == 0, r.stderr)
+        check("passing the budget rewrote the table instead of appending",
+              "rewrote the store" in r.stderr, r.stderr)
+        check("the table really changed", digest(table) != first_digest, str(table))
+        check("and the journal was cleared", journal_path(cache) is None,
+              str(sorted(cache.iterdir())))
+
+        folded = Store(table)
+        check("the compacted table verifies", folded.crc_ok, str(table))
+        check("the journal's records were folded in, not dropped",
+              folded.count == (tasks + side) * 2,
+              f"count={folded.count} expected={(tasks + side) * 2}")
+        check("the fold-in bumped the run counter",
+              folded.run_counter == cold.run_counter + 1,
+              f"{cold.run_counter} -> {folded.run_counter}")
+
+        folded_digest = digest(table)
+        r2 = run(args + [playlist])
+        check("every task hits after the compaction", summary(r2) == (tasks, 0, 0), r2.stderr)
+        check("and the compacted table is itself a steady state",
+              digest(table) == folded_digest and journal_path(cache) is None,
+              str(sorted(cache.iterdir())))
+
+        # The behavioural half of the same claim: the second playlist, which has not
+        # run since its records were journal-only, must not have to re-hash anything.
+        rb2 = run(args + [side_playlist])
+        check("the second playlist still hits every task",
+              summary(rb2) == (side, 0, 0), rb2.stderr)
+        check("and recomputes nothing: its records survived the fold",
+              memo(rb2)[1] == 0, f"{memo(rb2)} in: {rb2.stderr}")
+        check("so it writes nothing either",
+              digest(table) == folded_digest and journal_path(cache) is None,
+              str(sorted(cache.iterdir())))
+
+
+def test_load_factor_forces_compaction():
+    print("\n=== Scenario 17: a table too full to absorb the journal grows ===")
+    # The other compaction trigger, and the one that keeps the table from being
+    # left permanently over its load factor: the journal is still well inside its
+    # own budget here, so only the 0.7 rule can fire.
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td).resolve()
+        tasks = 260                       # 520 files: a 1024-slot table at 0.51
+        playlist, src, out, steps = big_tree(d, tasks)
+        cache = d / "cache"
+        args = ["--cache", "--cache-dir", cache, "-v"]
+
+        run(args + [playlist])
+        table = store_path(cache)
+        cold = Store(table)
+        budget = max(64, cold.capacity // JOURNAL_SHARE)
+        check("the cold table is at the minimum capacity",
+              cold.capacity == MIN_CAPACITY, str(cold.capacity))
+        check("it holds every file", cold.count == tasks * 2, str(cold.count))
+
+        # Enough NEW files to pass 0.7 of the table, but few enough to stay inside
+        # the journal's own budget - so the two triggers are told apart.
+        added = 110
+        for i in range(tasks, tasks + added):
+            (src / f"in{i}.txt").write_text(f"payload {i} v1")
+            steps.append({
+                "action": "execute", "tool": "/bin/sh",
+                "arguments": ["-c", f"cat {src}/in{i}.txt > {out}/out{i}.txt"],
+                "inputs": [str(src / f"in{i}.txt")],
+                "outputs": [str(out / f"out{i}.txt")],
+            })
+        playlist.write_text(json.dumps(steps))
+        new_records = added * 2
+        check("the change stays inside the journal's budget",
+              new_records <= budget, f"{new_records} > {budget}")
+        check("but table plus journal would pass the 0.7 load factor",
+              (cold.count + new_records) > ((cold.capacity * 7) // 10),
+              f"{cold.count} + {new_records} vs {(cold.capacity * 7) // 10}")
+
+        r = run(args + [playlist])
+        check("the run exits 0", r.returncode == 0, r.stderr)
+        check("the load factor rule rewrote the table",
+              "rewrote the store" in r.stderr, r.stderr)
+        grown = Store(table)
+        check("the table grew rather than staying over its load factor",
+              grown.capacity == cold.capacity * 2,
+              f"{cold.capacity} -> {grown.capacity}")
+        check("it holds every file, old and new",
+              grown.count == (tasks + added) * 2,
+              f"count={grown.count} expected={(tasks + added) * 2}")
+        # Not "count <= 0.7 * capacity" - with both of those already pinned above that
+        # cannot fail. What is worth asserting is that the size chosen is the SMALLEST
+        # power of two that fits, so an over-eager growth rule would show up here.
+        check("and it grew to the smallest power of two that fits",
+              grown.count > ((cold.capacity * 7) // 10),
+              f"count={grown.count} would have fit in {cold.capacity}")
+        check("the grown table verifies", grown.crc_ok, str(table))
+
+        r2 = run(args + [playlist])
+        check("everything hits afterwards", summary(r2) == (tasks + added, 0, 0), r2.stderr)
+        check("and nothing is recomputed", memo(r2)[1] == 0, f"{memo(r2)} in: {r2.stderr}")
 
 
 def main() -> int:
@@ -718,6 +1307,14 @@ def main() -> int:
     test_touch_r_regression()
     test_concurrent_shared_tree()
     test_steady_state_writes_nothing()
+    test_torn_journal_is_repaired()
+    test_stale_generation_is_dropped()
+    test_journal_budget_forces_compaction()
+    test_load_factor_forces_compaction()
+    test_planted_fifo_does_not_hang()
+    test_unusable_journal_is_only_removed()
+    test_pre_nonce_table_upgrades_once()
+    test_changed_existing_files_stay_in_journal()
 
     print("\n========================================")
     print(f"  Passed: {_pass}  Failed: {_fail}")
