@@ -50,6 +50,10 @@ Scenarios:
       slots, so they must not force the table to compact and grow
   21. a table written before the nonce field existed rewrites once to mint one,
       instead of journalling batches no reader could ever accept
+  22. the index records its own checksum in an xattr under replay's own name, not a
+      public.fingerprint.* one the other tools would trust in place of reading it -
+      and replay still catches a rotted index, because what it verifies is the
+      trailer inside the file rather than any record beside it
 
 Usage: python3 test_replay_fingerprint_store.py [/path/to/replay]
 Exit:  0 = all checks passed, 1 = one or more failures
@@ -70,6 +74,10 @@ DEFAULT_REPLAY = REPO_DIR / "build" / "Release" / "replay"
 REPLAY         = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_REPLAY
 
 XATTR_NAMES = ("public.fingerprint.crc32c", "public.fingerprint.blake3")
+# replay's own name for the index's self-record. Deliberately not one of the above:
+# those carry a trust rule (inode+size+mtime match => skip reading the file) that an
+# index cannot honour, because bit rot moves none of the three.
+STORE_XATTR_NAME = "public.replay.store-crc32c"
 
 # Mirrors replay/FingerprintStore.cpp. Little-endian, no padding: the structs are
 # laid out so that every field is naturally aligned.
@@ -316,6 +324,19 @@ def xattr_names(path: Path) -> list:
 
 def has_fingerprint_xattr(path: Path) -> bool:
     return any(n in xattr_names(path) for n in XATTR_NAMES)
+
+
+def read_store_checksum_xattr(path: Path):
+    """The 32-byte record the index writes about itself, as (inode, size, mtime_ns,
+    hash), or None. Read through /usr/bin/xattr because os.getxattr is Linux-only."""
+    proc = subprocess.run(["/usr/bin/xattr", "-px", STORE_XATTR_NAME, str(path)],
+                          capture_output=True, text=True, timeout=10)
+    if proc.returncode != 0:
+        return None
+    raw = bytes.fromhex(proc.stdout.replace(" ", "").replace("\n", ""))
+    if len(raw) != 32:
+        return None
+    return struct.unpack("<qqqQ", raw)
 
 
 def make_tree(d: Path, count: int = 3, shared: bool = False) -> tuple:
@@ -1282,6 +1303,102 @@ def test_load_factor_forces_compaction():
         check("and nothing is recomputed", memo(r2)[1] == 0, f"{memo(r2)} in: {r2.stderr}")
 
 
+def test_checksum_xattr_mirror():
+    print("\n=== Scenario 22: the index records its own checksum, under its own name ===")
+    # The record says what the index contained when it was published, which is a
+    # weaker claim than what it contains now - no attribute can notice bit rot, since
+    # rot moves neither size nor mtime. That is why the name matters: under a
+    # public.fingerprint.* name the gate and fingerprint tools would trust it in place
+    # of reading the file, and a rotted index would report its pre-rot hash exactly
+    # when someone was investigating the rot. The last third of this scenario pins
+    # that replay is not fooled either.
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td).resolve()
+        playlist, src, out, _ = make_tree(d, 3)
+        cache = d / "cache"
+        args = ["--cache", "--cache-dir", cache, "-v"]
+
+        run(args + [playlist])
+        table = store_path(cache)
+        if not check("the setup run created an index", table is not None,
+                     str(sorted(cache.iterdir())) if cache.exists() else str(cache)):
+            return
+        record = read_store_checksum_xattr(table)
+        check("the index carries its own checksum record", record is not None,
+              str(xattr_names(table)))
+        check("under replay's name, NOT a memo name the other tools would trust",
+              STORE_XATTR_NAME in xattr_names(table) and not has_fingerprint_xattr(table),
+              str(xattr_names(table)))
+        if record is not None:
+            inode, size, mtime_ns, packed = record
+            st = table.stat()
+            check("its record describes the index as it stands",
+                  (inode == st.st_ino) and (size == st.st_size) and (mtime_ns == st.st_mtime_ns),
+                  f"{record} vs inode={st.st_ino} size={st.st_size} mtime={st.st_mtime_ns}")
+            check("and its checksum is the crc32c of the WHOLE file, trailer included",
+                  (packed & 0xFFFFFFFF) == crc32c(table.read_bytes()),
+                  f"{hex(packed & 0xFFFFFFFF)} vs {hex(crc32c(table.read_bytes()))}")
+            check("the unused half of the hash union stays zero", (packed >> 32) == 0,
+                  hex(packed))
+
+        # One changed file goes to the journal, which is appended to in place - any
+        # record of its bytes would be stale on the next append, so it gets none.
+        (src / "in0.txt").write_text("payload 0 v2 longer")
+        run(args + [playlist])
+        jrnl = journal_path(cache)
+        check("the journal carries no such record",
+              jrnl is not None and STORE_XATTR_NAME not in xattr_names(jrnl),
+              str(xattr_names(jrnl)) if jrnl is not None else "no journal")
+        check("and a journal-only run leaves the index's record alone",
+              read_store_checksum_xattr(table) == record, str(read_store_checksum_xattr(table)))
+
+        # A rewrite must produce a record for the image it actually wrote. Removing the
+        # index is the cheapest way to force one - small changes deliberately do not,
+        # which is what the journal is for and why this cannot be provoked by editing
+        # files. The stale journal is dropped with it, since it names an image that is
+        # gone.
+        table.unlink()
+        run(args + [playlist])
+        if not check("the index was rebuilt", table.exists(), str(sorted(cache.iterdir()))):
+            return
+        rewritten = read_store_checksum_xattr(table)
+        check("a rebuilt index carries a record of its own", rewritten is not None,
+              str(xattr_names(table)))
+        check("the record is not the one describing the old image", rewritten != record,
+              f"{rewritten} vs {record}")
+        if rewritten is not None:
+            check("and its checksum matches the rebuilt bytes",
+                  (rewritten[3] & 0xFFFFFFFF) == crc32c(table.read_bytes()),
+                  f"{hex(rewritten[3] & 0xFFFFFFFF)} vs {hex(crc32c(table.read_bytes()))}")
+
+        # THE point of the scenario. Rot one bit and put mtime back, so the mirrored
+        # record still "matches" by its own rules. replay must ignore it entirely and
+        # fall back on the trailer, which is inside the file and covers the bytes.
+        st = table.stat()
+        raw = bytearray(table.read_bytes())
+        raw[FP_HEADER.size + 40] ^= 0x40
+        table.write_bytes(bytes(raw))
+        os.utime(table, ns=(st.st_atime_ns, st.st_mtime_ns))
+        stale = read_store_checksum_xattr(table)
+        check("the stale record still matches the rotted file's inode, size and mtime",
+              stale is not None and stale[0] == table.stat().st_ino
+              and stale[1] == table.stat().st_size and stale[2] == table.stat().st_mtime_ns,
+              str(stale))
+        check("but it no longer describes the bytes",
+              stale is not None and (stale[3] & 0xFFFFFFFF) != crc32c(table.read_bytes()),
+              str(stale))
+
+        r = run(args + [playlist])
+        check("replay catches the rot anyway: the trailer is what it trusts",
+              memo(r)[0] == 0, f"{memo(r)} in: {r.stderr}")
+        check("it says so", "integrity check" in r.stderr, r.stderr)
+        check("the cache verdict is unaffected", summary(r) == (3, 0, 0), r.stderr)
+        check("and the index was rebuilt with a fresh record",
+              (read_store_checksum_xattr(table) or (0, 0, 0, 0))[3] & 0xFFFFFFFF
+                  == crc32c(table.read_bytes()),
+              str(read_store_checksum_xattr(table)))
+
+
 def main() -> int:
     if not REPLAY.exists():
         print(f"error: replay not found at {REPLAY}")
@@ -1315,6 +1432,7 @@ def main() -> int:
     test_unusable_journal_is_only_removed()
     test_pre_nonce_table_upgrades_once()
     test_changed_existing_files_stay_in_journal()
+    test_checksum_xattr_mirror()
 
     print("\n========================================")
     print(f"  Passed: {_pass}  Failed: {_fail}")

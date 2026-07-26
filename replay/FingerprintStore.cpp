@@ -42,6 +42,11 @@ constexpr uint32_t kFormatVersion = 1;
 constexpr uint32_t kAlgoCrc32c = 0;
 constexpr uint32_t kAlgoBlake3 = 1;
 
+// Where the published image records its own checksum. replay's own name, not one of the
+// public.fingerprint.* names the gate and fingerprint tools memoize from - see
+// mirror_checksum_xattr for why that distinction is the whole point.
+inline constexpr const char *kStoreChecksumXattrName = "public.replay.store-crc32c";
+
 struct FpHeader
 {
 	uint64_t magic;
@@ -69,6 +74,33 @@ struct FpSlot
 	uint32_t flags;       // reserved
 };
 
+// crc32c rather than blake3, and not because blake3 would not fit - the trailer has 4
+// spare bytes, so a 64-bit digest would sit in the same 16.
+//
+// Neither is keyed, so neither resists tampering: anyone who can write this file can
+// rewrite these 16 bytes, and blake3's preimage resistance buys nothing against someone
+// who is not being asked to find a preimage. What is left is accidental corruption, and
+// there the two differ less than they look. This generator (0x11EDC6F41) has (x+1) as a
+// factor and a nonzero constant term, which GUARANTEES detection of every single-bit
+// error, every odd number of flipped bits, and every burst up to 32 bits - the shapes bit
+// rot actually takes. It also catches every 2-bit error up to 2^31-1 bits between the two
+// flips, which is 256 MB, so that guarantee is total for any store of a realistic size
+// even though kMaxCapacity would permit a larger one.
+//
+// blake3 is stronger for damage outside those classes - a scattered even number of flips,
+// two separate bursts, a zeroed block - at 2^-64 against 2^-32, truncated to 64 bits as
+// everything else here stores it. That margin is spent on an event that has to happen
+// first, though: unlike a content-hash collision, which gets a fresh trial for every file
+// on every run, a trailer collision needs the file to be corrupt before it can matter.
+//
+// The cost is not close. Measured on this machine, hashing warm memory: crc32c ~50 GB/s
+// (a hardware instruction, folded three ways), blake3 ~1.8 GB/s. As a verify pass over a
+// 32 MB store, faulting the mapping in included, that is ~2.8 ms against ~21 ms - on a
+// pass that runs before any useful work on every single run. Cheap enough to be
+// unconditional is the property worth keeping, because an integrity check behind a flag
+// is worse than a slightly weaker one that always runs; and at 50 GB/s the pass is fast
+// enough to be worth it for pre-faulting the mapping alone, which stops being true once
+// the hash is slower than the memory it reads.
 struct FpTrailer
 {
 	uint64_t magic;
@@ -722,6 +754,57 @@ void read_journal(const std::string &path, uint32_t wantAlgo, const uint8_t *wan
 			out.needsReset = true;
 		}
 		offset += (size_t)batchBytes;
+	}
+}
+
+// A record of what was in the store file at the moment it was published: the same
+// 32-byte layout the gate and fingerprint tools use, so it can be read back with the
+// same tools, but under replay's own name.
+//
+// Deliberately NOT "public.fingerprint.crc32c". That name has a trust rule attached -
+// if inode, size and mtime still match, use the recorded hash instead of reading the
+// file - and it is the default in both of those tools. Bit rot moves none of those
+// three, so a record under that name would answer a question about the store's current
+// contents with a value from before the rot. That is the silent wrong answer the
+// trailer exists to prevent, reintroduced beside the file for a different reader; and
+// it would be wrong precisely when someone is looking, because the reason to point
+// fingerprint at this file is to investigate corruption. Under our own name nothing
+// treats it as a memo, and it stays inspectable with `xattr -p`.
+//
+// So: this says "at publication the bytes hashed to X", never "the bytes hash to X".
+// Nothing in replay reads it back, and nothing should ever skip the trailer because of
+// it. The trailer is inside the file and covers the bytes; this sits beside them.
+//
+// Written to the temp descriptor before the rename, so it is published atomically with
+// the bytes it describes and travels with the inode rather than the name. setxattr moves
+// ctime, not mtime, so the record does not invalidate itself, and the temp is created
+// O_EXCL on a fresh inode so a stale record can never survive onto a new image.
+//
+// Always crc32c, whatever --cache-hash selected for the hashes stored INSIDE the table:
+// this describes the store file's own bytes, and crc32c is what the trailer already
+// computed. Hashing a megabyte again with blake3 to fill in a diagnostic is not worth
+// it. And only the table gets one - the journal is appended to in place, so any record
+// of its bytes would go stale on the very next append.
+//
+// Best effort throughout: a filesystem with no xattr support returns ENOTSUP, which is
+// exactly the case the trailer-not-xattr decision was made for, and is not worth a word.
+void mirror_checksum_xattr(int fd, uint32_t wholeFileCrc32c, const std::string &path, bool verbose)
+{
+	struct stat st;
+	if(fstat(fd, &st) != 0)
+		return;
+
+	FileInfoCore record;
+	memset(&record, 0, sizeof(record));
+	record.inode = st.st_ino;
+	record.size = st.st_size;
+	record.mtime_ns = (int64_t)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
+	record.hash.crc32c = wholeFileCrc32c;
+
+	if(fsetxattr(fd, kStoreChecksumXattrName, &record, sizeof(record), 0, 0) != 0)
+	{
+		if((errno != ENOTSUP) && (errno != EPERM) && (errno != EACCES))
+			report(verbose, "cannot record the store checksum in an xattr", path);
 	}
 }
 
@@ -1455,6 +1538,15 @@ FingerprintStore::save_internal()
 		}
 		cursor += count;
 		remaining -= (size_t)count;
+	}
+	if(written)
+	{
+		// Continue the trailer's own checksum over the trailer bytes to get one over the
+		// whole file. crc32_impl complements on entry and on exit, so passing a previous
+		// result back in resumes exactly where it left off.
+		mirror_checksum_xattr(tempFd,
+			crc32_impl(trailer.crc32c, (const char *)(image.data() + bodySize), sizeof(FpTrailer)),
+			tempPath, mVerbose);
 	}
 	close(tempFd);
 

@@ -235,6 +235,16 @@ Incremental execution cache:
   entries no recent run has mentioned are evicted. Every journal batch carries its own checksum, so a
   batch left half-written by a crash costs that batch and nothing else.
 
+  When the index is written it usually also records its own crc32c, and the file's inode, size and
+  mtime at that moment, in a "public.replay.store-crc32c" attribute - readable with "xattr -px", and
+  skipped silently on a filesystem without xattr support. It says what the index contained when it was
+  published, which is not the same claim as what it contains now: an attribute cannot notice bit rot,
+  since rot moves neither size nor mtime. Deliberately NOT one of the public.fingerprint.* names, whose
+  documented rule is to trust a recorded hash whenever inode, size and mtime still match - under that
+  name a corrupted index would report its pre-corruption hash to gate and fingerprint, and would do so
+  exactly when someone was investigating the corruption. What protects the index is the checksum in its
+  trailer, inside the file and covering the bytes, which replay verifies on every run.
+
   --dry-run reads the sidecar and never writes it, so a dry run leaves the memo byte-identical. With
   "xattr" the memoization is turned off for the run instead: that backend has no read-only mode, so any
   file that missed would have its record written (and a read-only file briefly chmod-ed) as part of the
