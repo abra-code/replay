@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_replay_cache.py — the cache wrapper: check, skip, store (default engine).
+test_replay_cache.py - the cache wrapper: check, skip, store (default engine).
 
 Scenarios:
   1.  execute miss/hit: run 1 executes, run 2 skips (undeclared side-effect log proves it)
@@ -31,8 +31,16 @@ Scenarios:
   20. serial mode (-s --cache): miss/hit, edit fixed point, dry-run reporting,
       cross-engine manifest sharing with the concurrent engine
   21. help text documents the incremental execution cache
+  22. a symlink inside a declared input directory
+  23. a partly expanded declaration is never cached
+  24. an unreadable subtree never reads as an absent one
+  25. a created directory replaced by a symlink re-runs
+  26. moving an env name between --cache-env and a step's "env"
   28. a glob whose walk failed (unreadable directory) must not reproduce the
       "matched nothing" fixed point and hit
+  29. per-step keys: "cache": false opts out and stores nothing, "cache": true on a
+      non-cacheable action is ignored with a verbose note, and a string "cache", a
+      string "env" or an undefined "env" name are all hard errors
 
 Usage: python3 test_replay_cache.py [/path/to/replay]
 Exit:  0 = all checks passed, 1 = one or more failures
@@ -94,9 +102,17 @@ def summary(proc: subprocess.CompletedProcess) -> tuple:
     return (-1, -1, -1)
 
 
+def manifest_files(cache_dir: Path) -> list:
+    if not cache_dir.is_dir():
+        return []
+    return [p for p in cache_dir.iterdir()
+            if p.name.endswith(".replay-cache.json") or p.name.endswith(".replay-cache.plist")]
+
+
 def manifest_entries(cache_dir: Path) -> dict:
-    files = [p for p in cache_dir.iterdir()
-             if p.name.endswith(".replay-cache.json") or p.name.endswith(".replay-cache.plist")]
+    # Returns {} for "no manifest" as well as "manifest with no tasks", so a caller that
+    # means the second one should assert manifest_files() separately.
+    files = manifest_files(cache_dir)
     if len(files) != 1:
         return {}
     data = json.loads(files[0].read_text())
@@ -1093,6 +1109,159 @@ def test_unreadable_dir_under_glob_is_not_no_matches():
         check("and the match is gone again", not (src / "sub" / "a.txt").exists())
 
 
+def test_per_step_cache_and_env_keys():
+    print("\n=== Scenario 29: per-step \"cache\" override and malformed \"env\"/\"cache\" ===")
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        log = d / "log.txt"
+
+        # "cache": false opts a cacheable action out. It must never hit, and it must
+        # leave no entry behind - an entry would silently start hitting the day the
+        # override is removed, using a world nobody checked.
+        opted_out = d / "off.json"
+        opted_out.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh",
+             "arguments": ["-c", f"echo ran >> {log}; echo v1 > {d}/out.txt"],
+             "outputs": [str(d / "out.txt")], "cache": False},
+        ]))
+        cache_off = d / "cache_off"
+        r1 = cached(opted_out, cache_off)
+        r2 = cached(opted_out, cache_off)
+        check("opted-out run 1 exits 0", r1.returncode == 0, r1.stderr)
+        check("opted-out run 2 exits 0", r2.returncode == 0, r2.stderr)
+        check("opted-out action never hits", summary(r2)[0] == 0, r2.stderr)
+        check("opted-out action really ran twice", log.read_text().count("ran") == 2, log.read_text())
+        off_entries = manifest_entries(cache_off)
+        check("the opted-out run still wrote a manifest",
+              len(manifest_files(cache_off)) == 1, str(manifest_files(cache_off)))
+        check("opted-out action stores no manifest entry", off_entries == {}, str(off_entries))
+
+        # The same step without the override caches, which is what says the opt-out
+        # above did the work rather than the action being uncacheable anyway.
+        log2 = d / "log2.txt"
+        normal = d / "on.json"
+        normal.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh",
+             "arguments": ["-c", f"echo ran >> {log2}; echo v1 > {d}/out2.txt"],
+             "outputs": [str(d / "out2.txt")]},
+        ]))
+        cache_on = d / "cache_on"
+        cached(normal, cache_on)
+        r4 = cached(normal, cache_on)
+        check("the same step without the override hits", summary(r4) == (1, 0, 0), r4.stderr)
+        check("and ran only once", log2.read_text().count("ran") == 1, log2.read_text())
+
+        # Storing nothing matters because a leftover entry would start hitting the day the
+        # override is removed, certifying a world no run ever checked. So toggle it: cache
+        # the step first, then opt it out, and the entry already on disk must be pruned.
+        log3 = d / "log3.txt"
+        out3 = d / "out3.txt"
+        step = {"action": "execute", "tool": "/bin/sh",
+                "arguments": ["-c", f"echo ran >> {log3}; echo v1 > {out3}"],
+                "outputs": [str(out3)]}
+        toggled = d / "toggled.json"
+        cache_toggle = d / "cache_toggle"
+        toggled.write_text(json.dumps([step]))
+        cached(toggled, cache_toggle)
+        before = manifest_entries(cache_toggle)
+        check("the step cached while the override was absent", len(before) == 1, str(before))
+
+        opted = dict(step)
+        opted["cache"] = False
+        toggled.write_text(json.dumps([opted]))
+        cached(toggled, cache_toggle)
+        toggle_entries = manifest_entries(cache_toggle)
+        check("adding the override prunes the entry already stored",
+              toggle_entries == {}, str(toggle_entries))
+
+        # Removing the override must re-execute. The world is deliberately left EXACTLY as
+        # the first run recorded it - the opted-out run reproduced the same output - so an
+        # entry that had survived would hit here. Only a pruned one produces a miss, which
+        # is what makes this a test of the pruning rather than of the world check.
+        toggled.write_text(json.dumps([step]))
+        r_restored = cached(toggled, cache_toggle)
+        check("removing the override re-executes instead of hitting a stale entry",
+              summary(r_restored) == (0, 1, 0), r_restored.stderr)
+
+        # And the miss above is the pruning, not the playlist rewrite changing the task's
+        # identity: the manifest keys ARE the signatures, so an unchanged key set proves the
+        # signature survived both rewrites intact.
+        #
+        # This check is load-bearing for BOTH assertions above, not just the last one. An
+        # opted-out action never creates a record at all, so its signature is never marked
+        # as seen and the generic "not seen for this playlist key" rule erases run 1's entry
+        # regardless of why. Without the key comparison, neither assertion could tell the
+        # opt-out apart from a rewrite that changed the task's identity.
+        after = manifest_entries(cache_toggle)
+        check("the task signature is unchanged across the rewrites, so the miss was the prune",
+              set(after.keys()) == set(before.keys()),
+              f"before={sorted(before.keys())} after={sorted(after.keys())}")
+
+        r_settled = cached(toggled, cache_toggle)
+        check("and the restored step hits again once stored", summary(r_settled) == (1, 0, 0),
+              r_settled.stderr)
+
+        # "cache": true on an action that cannot be cached is accepted and ignored,
+        # with a note under --verbose only.
+        noncacheable = d / "echo.json"
+        noncacheable.write_text(json.dumps([
+            {"action": "echo", "text": "hello", "cache": True},
+        ]))
+        r5 = cached(noncacheable, d / "cache_echo", "--verbose")
+        check("\"cache\": true on a non-cacheable action still runs", r5.returncode == 0, r5.stderr)
+        check("verbose notes that \"cache\": true was ignored",
+              "is ignored" in r5.stderr and "not cacheable" in r5.stderr, r5.stderr)
+        r6 = cached(noncacheable, d / "cache_echo2")
+        check("the note is verbose-only", "is ignored" not in r6.stderr, r6.stderr)
+
+        # A string where a boolean belongs would survive both bool lookups and leave
+        # caching quietly ENABLED, so it is rejected rather than guessed at.
+        bad_cache = d / "bad_cache.json"
+        bad_cache.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh",
+             "arguments": ["-c", f"echo nope > {d}/never.txt"],
+             "outputs": [str(d / "never.txt")], "cache": "false"},
+        ]))
+        r7 = cached(bad_cache, d / "cache_bad")
+        check("\"cache\" as a string fails the run", r7.returncode != 0, r7.stderr)
+        check("and says so", "\"cache\" is expected to be a boolean" in r7.stderr, r7.stderr)
+        check("and does not execute the action", not (d / "never.txt").exists())
+
+        # Same reasoning for "env": a lone string is a typo for the array form, and
+        # ignoring it would mean silently not folding the variable into the signature.
+        bad_env = d / "bad_env.json"
+        bad_env.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh",
+             "arguments": ["-c", f"echo nope > {d}/never2.txt"],
+             "outputs": [str(d / "never2.txt")], "env": "HOME"},
+        ]))
+        r8 = cached(bad_env, d / "cache_badenv")
+        check("\"env\" as a string fails the run", r8.returncode != 0, r8.stderr)
+        check("and says an array was expected",
+              "\"env\" is expected to be an array" in r8.stderr, r8.stderr)
+        check("and does not execute the action", not (d / "never2.txt").exists())
+
+        # An undefined declared variable is an error, not an empty value folded into
+        # the fingerprint - and it is checked whether or not caching is on.
+        missing_env = d / "missing_env.json"
+        missing_env.write_text(json.dumps([
+            {"action": "execute", "tool": "/bin/sh",
+             "arguments": ["-c", f"echo nope > {d}/never3.txt"],
+             "outputs": [str(d / "never3.txt")], "env": ["NO_SUCH_VAR_FOR_REPLAY_TEST"]},
+        ]))
+        env = {k: v for k, v in os.environ.items() if k != "NO_SUCH_VAR_FOR_REPLAY_TEST"}
+        r9 = cached(missing_env, d / "cache_missingenv", env=env)
+        check("an undefined declared env var fails the run", r9.returncode != 0, r9.stderr)
+        check("and names the variable",
+              "NO_SUCH_VAR_FOR_REPLAY_TEST" in r9.stderr and "not defined" in r9.stderr, r9.stderr)
+        check("and does not execute the action", not (d / "never3.txt").exists())
+
+        r10 = run([missing_env], env=env)
+        check("the same check applies without --cache", r10.returncode != 0, r10.stderr)
+        check("with the same message",
+              "NO_SUCH_VAR_FOR_REPLAY_TEST" in r10.stderr and "not defined" in r10.stderr, r10.stderr)
+
+
 if not REPLAY.exists():
     print(f"error: replay binary not found at {REPLAY}")
     sys.exit(1)
@@ -1128,6 +1297,7 @@ test_unreadable_subtree_is_not_absence()
 test_created_directory_replaced_by_symlink()
 test_env_name_group_move_is_not_a_miss()
 test_unreadable_dir_under_glob_is_not_no_matches()
+test_per_step_cache_and_env_keys()
 
 print(f"\n{'='*40}")
 print(f"  Passed: {_pass}  Failed: {_fail}")

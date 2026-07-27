@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_replay_cache_manifest.py — cache manifest lifecycle and --cache-* option plumbing.
+test_replay_cache_manifest.py - cache manifest lifecycle and --cache-* option plumbing.
 
 At this stage no task is wrapped by the cache yet, so execution behavior must be
 completely unchanged; only the manifest file and the new verbose/warning lines are new.

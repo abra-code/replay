@@ -41,7 +41,6 @@ https://github.com/abra-code/DeltaApp
 The content of `replay --help`:
 
 ```
-
 replay -- execute a declarative script of actions, aka a playlist
 
 Usage:
@@ -99,7 +98,7 @@ Options:
                      auto-discovers declared paths from the playlist and adds them to the policy.
                      Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.
                      Tool paths in "execute" actions must be absolute (e.g. /usr/bin/python3),
-                     not bare names — $PATH lookup happens after the sandbox is active.
+                     not bare names - $PATH lookup happens after the sandbox is active.
                      Violations return EPERM to the caller;
                      To discover path requirements, use sandbox/sandbox-discover.py
                      To stream violations in real time run:
@@ -228,22 +227,24 @@ Incremental execution cache:
              cause a wrong skip. Use --cache-memo-refresh (or off) when inputs are rewritten with
              restored modification times.
 
-  The sidecar is two files: the index, and a small append-only journal beside it. A run that changes
-  nothing writes neither. A run that changes a few files appends only those records to the journal, so
-  an incremental build does not rewrite an index that may be tens of megabytes. The first run whose
-  changes no longer fit the journal folds it back into the index and clears it, which is also when
-  entries no recent run has mentioned are evicted. Every journal batch carries its own checksum, so a
-  batch left half-written by a crash costs that batch and nothing else.
+  The sidecar keeps its data in two files, the index and a small append-only journal beside it, with a
+  lock file alongside. A run that changes nothing writes neither of the two. A run that changes a few
+  files appends only those records to the journal, so an incremental build does not rewrite an index
+  that may be tens of megabytes. The first run whose changes no longer fit the journal folds it back
+  into the index and clears it, which is also when entries no recent run has mentioned are evicted.
+  Every journal batch carries its own checksum, so a batch left half-written by a crash costs that
+  batch and nothing else.
 
   When the index is written it usually also records its own crc32c, and the file's inode, size and
-  mtime at that moment, in a "public.replay.store-crc32c" attribute - readable with "xattr -px", and
-  skipped silently on a filesystem without xattr support. It says what the index contained when it was
-  published, which is not the same claim as what it contains now: an attribute cannot notice bit rot,
-  since rot moves neither size nor mtime. Deliberately NOT one of the public.fingerprint.* names, whose
-  documented rule is to trust a recorded hash whenever inode, size and mtime still match - under that
-  name a corrupted index would report its pre-corruption hash to gate and fingerprint, and would do so
-  exactly when someone was investigating the corruption. What protects the index is the checksum in its
-  trailer, inside the file and covering the bytes, which replay verifies on every run.
+  mtime at that moment, in a "public.replay.store-crc32c" attribute, readable with "xattr -px". A
+  failure to record it is silent without -v, since it is a diagnostic and nothing depends on it. It
+  says what the index contained when it was published, which is not the same claim as what it contains
+  now: an attribute cannot notice bit rot, since rot moves neither size nor mtime. Deliberately NOT one
+  of the public.fingerprint.* names, whose documented rule is to trust a recorded hash whenever inode,
+  size and mtime still match - under that name a corrupted index would report its pre-corruption hash
+  to gate and fingerprint, and would do so exactly when someone was investigating the corruption. What
+  protects the index is the checksum in its trailer, inside the file and covering the index body, which
+  replay verifies every time it opens the sidecar.
 
   --dry-run reads the sidecar and never writes it, so a dry run leaves the memo byte-identical. With
   "xattr" the memoization is turned off for the run instead: that backend has no read-only mode, so any
@@ -698,7 +699,6 @@ the combination of lightweight crc32c and xattr caching provides excellent perfo
 The content of `gate --help`:
 
 ```
-
 Usage: gate [OPTIONS] -- COMMAND [ARGS...]
 Execute COMMAND only if inputs have changed or outputs are missing.
 
@@ -729,7 +729,7 @@ OPTIONS:
   --dry-run              Report hit/miss without executing
   --sandbox             Enable hard sandbox. Use --allow-read, --allow-write, --sandbox-profile
                          for additional paths. The wrapped command (after --) must use an
-                         absolute path (e.g. /usr/bin/clang), not a bare name — $PATH lookup
+                         absolute path (e.g. /usr/bin/clang), not a bare name - $PATH lookup
                          happens after the sandbox is active. Violations return EPERM to
                          the caller; to discover path requirements, use
                          sandbox/sandbox-discover.py. To stream violations in real time run:
@@ -766,5 +766,4 @@ Sandbox profile JSON schema (--sandbox-profile=FILE):
   process-exec* covers launching them and bsd.sb covers their system dylibs.
   Third-party tools (Homebrew, Python frameworks) need their prefix in read_only
   because dyld must open their framework or library files at startup.
-
 ```
