@@ -1496,6 +1496,69 @@ def test_tools_list_schema(tmpdir: str) -> None:
                   str(schema.get("required")))
 
 
+def test_tools_list_annotations(tmpdir: str) -> None:
+    print("=== MCP: tools/list annotations ===")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    ], [tmpdir])
+
+    tools = by_id[1].get("result", {}).get("tools", [])
+    # A host decides whether to prompt the user from readOnlyHint, so this table is a
+    # security contract, not documentation: a tool on the wrong side either writes
+    # without asking or nags on every read. Compared WHOLE, so flipping any single
+    # hint fails - a type check would let destructiveHint or openWorldHint drift.
+    # destructiveHint/idempotentHint are absent on read-only tools by design: the
+    # spec defines both as meaningful only when readOnlyHint is false.
+    ro = {"readOnlyHint": True, "openWorldHint": False}
+    expected = {
+        "read_file":                ro,
+        "read_multiple_files":      ro,
+        "list_directory":           ro,
+        "directory_tree":           ro,
+        "search_files":             ro,
+        "grep_files":               ro,
+        "get_file_info":            ro,
+        "list_allowed_directories": ro,
+        "glob_search":              ro,
+        # Overwrites a file; writing the same bytes twice lands on the same state.
+        "write_file":       {"readOnlyHint": False, "destructiveHint": True,
+                             "idempotentHint": True,  "openWorldHint": False},
+        # An edit re-applied may fail or double-apply, so it is not idempotent.
+        "edit_file":        {"readOnlyHint": False, "destructiveHint": True,
+                             "idempotentHint": False, "openWorldHint": False},
+        "edit_files":       {"readOnlyHint": False, "destructiveHint": True,
+                             "idempotentHint": False, "openWorldHint": False},
+        # mkdir -p: purely additive, and repeating it is a no-op.
+        "create_directory": {"readOnlyHint": False, "destructiveHint": False,
+                             "idempotentHint": True,  "openWorldHint": False},
+        # The source is gone after the first move, so a repeat is not a no-op.
+        "move_file":        {"readOnlyHint": False, "destructiveHint": True,
+                             "idempotentHint": False, "openWorldHint": False},
+        # Deleting an already-deleted path succeeds and changes nothing.
+        "delete_file":      {"readOnlyHint": False, "destructiveHint": True,
+                             "idempotentHint": True,  "openWorldHint": False},
+        # Arbitrary shell: anything the sandbox permits, including the network.
+        "execute_command":  {"readOnlyHint": False, "destructiveHint": True,
+                             "idempotentHint": False, "openWorldHint": True},
+    }
+    seen = set()
+    for tool in tools:
+        name = tool.get("name", "?")
+        seen.add(name)
+        check(f"tool {name}: annotations exactly as classified",
+              tool.get("annotations") == expected.get(name),
+              f"{tool.get('annotations')} != {expected.get(name)}")
+
+    # A tool nobody classified would otherwise sail through: expected.get() returns
+    # None, and None == None would have passed had the check above been written as a
+    # presence test. Assert the two sets agree in both directions instead.
+    check("every advertised tool is classified above",
+          not (seen - set(expected)), f"unclassified: {seen - set(expected)}")
+    check("every classified tool is advertised",
+          not (set(expected) - seen), f"missing: {set(expected) - seen}")
+
+
 def test_edit_default_limit_unique(tmpdir: str) -> None:
     print("=== MCP: edit_file (default limit=1 requires a unique literal match) ===")
 
@@ -2268,6 +2331,7 @@ def main() -> int:
         test_handshake(tmpdir)
         test_tools_list(tmpdir)
         test_tools_list_schema(tmpdir)
+        test_tools_list_annotations(tmpdir)
         test_write_read(tmpdir)
         test_edit_literal(tmpdir)
         test_edit_regex(tmpdir)

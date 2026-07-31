@@ -42,7 +42,17 @@
 #include <limits.h>
 #include <regex>
 
+// The revision answered when a client asks for one we do not speak (or asks for
+// nothing). kSupportedProtocolVersions is what initialize will echo back verbatim:
+// 2025-03-26 is listed because that is the revision defining the tool annotations
+// emitted below, so a client asking for it gets an answer that entitles it to read
+// them. Note replay does not parse JSON-RPC batches, which 2025-03-26 requires an
+// implementation to accept; add that before claiming the revision more loudly than
+// this (advertising it in the startup banner, say).
 static constexpr const char *kProtocolVersion = "2024-11-05";
+static constexpr std::string_view kSupportedProtocolVersions[] = {
+    "2024-11-05", "2025-03-26",
+};
 static constexpr const char *kServerName      = "replay-mcp";
 static constexpr const char *kServerVersion   = "1.0.0";
 static constexpr size_t kMaxFileSize          = 10u * 1024u * 1024u;
@@ -1112,13 +1122,63 @@ static Json::MutableVal make_req(Json::MutableDoc &doc,
     return a;
 }
 
+// MCP tool annotations (spec revision 2025-03-26). These are behavior hints the
+// client uses to decide how hard to gate a tool, and they are load-bearing, not
+// documentation: a host that derives its permission prompts from readOnlyHint asks
+// the user before every tool that does not positively claim to be read-only. A
+// wrong hint here is a missing prompt (or a pointless one), so keep them honest.
+//
+// destructiveHint and idempotentHint are only meaningful for a mutating tool, so
+// they are emitted only when read_only is false - exactly as the spec describes
+// them. Every tool must state its hints: add_tool takes them as a required
+// argument so a new tool cannot be added without deciding what it does.
+struct ToolHints {
+    bool read_only;
+    bool destructive;
+    bool idempotent;
+    bool open_world;
+};
+
+// Observes the sandbox it is already confined to; changes nothing.
+static constexpr ToolHints kObserves     { .read_only = true,  .destructive = false, .idempotent = false, .open_world = false };
+// Adds something that was not there; repeating it lands on the same state.
+static constexpr ToolHints kCreates      { .read_only = false, .destructive = false, .idempotent = true,  .open_world = false };
+// Replaces a file's contents wholesale; the same call twice leaves the same bytes.
+static constexpr ToolHints kOverwrites   { .read_only = false, .destructive = true,  .idempotent = true,  .open_world = false };
+// Changes or removes what is already there, and a repeat is not a no-op.
+static constexpr ToolHints kMutates      { .read_only = false, .destructive = true,  .idempotent = false, .open_world = false };
+// Destroys what is there, but deleting an already-deleted path succeeds and changes
+// nothing (DeleteItem reports success when the path is already gone), so a repeat
+// call has no additional effect - destructive and idempotent, like HTTP DELETE.
+static constexpr ToolHints kRemoves      { .read_only = false, .destructive = true,  .idempotent = true,  .open_world = false };
+// Arbitrary shell: anything the kernel sandbox permits, including the network.
+static constexpr ToolHints kRunsCommands { .read_only = false, .destructive = true,  .idempotent = false, .open_world = true  };
+
+// Must build a FRESH object per tool: yyjson_mut_val nodes are intrusive list
+// nodes carrying their own sibling pointer, so hoisting one shared annotations
+// object onto several tools would splice the member chains and silently corrupt
+// the document rather than duplicating a subtree.
+static Json::MutableVal make_annotations(Json::MutableDoc &doc, const ToolHints &hints)
+{
+    auto annotations = doc.new_obj();
+    doc.obj_add(annotations, "readOnlyHint", doc.new_bool(hints.read_only));
+    if (!hints.read_only) {
+        doc.obj_add(annotations, "destructiveHint", doc.new_bool(hints.destructive));
+        doc.obj_add(annotations, "idempotentHint",  doc.new_bool(hints.idempotent));
+    }
+    doc.obj_add(annotations, "openWorldHint", doc.new_bool(hints.open_world));
+    return annotations;
+}
+
 static Json::MutableVal add_tool(Json::MutableDoc &doc, std::string_view name,
-                                  std::string_view desc, Json::MutableVal schema)
+                                  std::string_view desc, Json::MutableVal schema,
+                                  const ToolHints &hints)
 {
     auto tool = doc.new_obj();
     doc.obj_add(tool, "name",        doc.new_str(name));
     doc.obj_add(tool, "description", doc.new_str(desc));
     doc.obj_add(tool, "inputSchema", schema);
+    doc.obj_add(tool, "annotations", make_annotations(doc, hints));
     return tool;
 }
 
@@ -1137,7 +1197,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "required", make_req(doc, {"path"}));
         doc.arr_append(tools, add_tool(doc, "read_file",
             "Read the complete contents of a file. Returns UTF-8 text or "
-            "base64-encoded blob for binary files. Maximum 10 MB.", schema));
+            "base64-encoded blob for binary files. Maximum 10 MB.", schema, kObserves));
     }
 
     // read_multiple_files
@@ -1159,7 +1219,7 @@ static std::string build_tools_list_json()
         doc.arr_append(tools, add_tool(doc, "read_multiple_files",
             "Read multiple files simultaneously. Each result is prefixed with its path. "
             "Errors are included inline rather than failing the whole call. Maximum 50 files.",
-            schema));
+            schema, kObserves));
     }
 
     // write_file
@@ -1173,7 +1233,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "required", make_req(doc, {"path", "content"}));
         doc.arr_append(tools, add_tool(doc, "write_file",
             "Create or overwrite a file with the given content. Creates parent directories as needed.",
-            schema));
+            schema, kOverwrites));
     }
 
     // edit_file
@@ -1241,7 +1301,7 @@ static std::string build_tools_list_json()
             "idempotent; reserve isRegex for variable text or patterns spanning many lines. "
             "IMPORTANT: when using isRegex, preview with dryRun=true and verify the returned diff "
             "before applying — a wrong regex can destroy content, and the change is not auto-undoable.",
-            schema));
+            schema, kMutates));
     }
 
     // edit_files (extended — multi-file via literal paths and/or glob patterns)
@@ -1320,7 +1380,7 @@ static std::string build_tools_list_json()
             "IMPORTANT: this edits MANY files at once and is destructive — for regex edits (and any "
             "limit=0 or glob edit) run with dryRun=true first and verify every per-file diff before "
             "re-issuing with dryRun=false. The change cannot be auto-undone.",
-            schema));
+            schema, kMutates));
     }
 
     // execute_command (extended — hard-sandboxed shell execution)
@@ -1348,7 +1408,7 @@ static std::string build_tools_list_json()
             "the command exits non-zero or times out."
             "macOS kernel sandbox enforces filesystem access limits on the child process - "
             "making shell execution safer than soft path-checking.",
-            schema));
+            schema, kRunsCommands));
     }
 
     // create_directory
@@ -1361,7 +1421,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "required", make_req(doc, {"path"}));
         doc.arr_append(tools, add_tool(doc, "create_directory",
             "Create a directory and all intermediate parent directories (mkdir -p semantics).",
-            schema));
+            schema, kCreates));
     }
 
     // list_directory
@@ -1374,7 +1434,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "required", make_req(doc, {"path"}));
         doc.arr_append(tools, add_tool(doc, "list_directory",
             "List the immediate children of a directory. Each entry is prefixed with [FILE] or [DIR].",
-            schema));
+            schema, kObserves));
     }
 
     // directory_tree
@@ -1393,7 +1453,7 @@ static std::string build_tools_list_json()
             "Recursively list a directory as a JSON tree. Each node has name, type, and children. "
             "Returns the full tree by default (no depth limit). "
             "[Extended] Optional depth param: 0 = root only, N = N levels (find -maxdepth semantics).",
-            schema));
+            schema, kObserves));
     }
 
     // move_file
@@ -1406,7 +1466,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "properties", props);
         doc.obj_add(schema, "required", make_req(doc, {"source", "destination"}));
         doc.arr_append(tools, add_tool(doc, "move_file",
-            "Move or rename a file or directory.", schema));
+            "Move or rename a file or directory.", schema, kMutates));
     }
 
     // delete_file
@@ -1418,7 +1478,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "properties", props);
         doc.obj_add(schema, "required", make_req(doc, {"path"}));
         doc.arr_append(tools, add_tool(doc, "delete_file",
-            "Delete a file or directory (recursively). No confirmation requested.", schema));
+            "Delete a file or directory (recursively). No confirmation requested.", schema, kRemoves));
     }
 
     // search_files — standard MCP: case-insensitive filename substring match
@@ -1445,7 +1505,7 @@ static std::string build_tools_list_json()
             "Find files and directories whose NAME contains a literal substring "
             "(case-insensitive; not a glob or regex). Returns one absolute path per line, "
             "searching recursively under 'directory'. To match by glob use glob_search; "
-            "to search file contents use grep_files.", schema));
+            "to search file contents use grep_files.", schema, kObserves));
     }
 
     // grep_files — [ext] content search (grep-style)
@@ -1499,7 +1559,7 @@ static std::string build_tools_list_json()
             "project directory when 'directory' is omitted). "
             "Example: {\"regex\": \"TODO\", \"directory\": \"/src/app\", \"globs\": [\"**/*.swift\"]}. "
             "To find files by NAME use glob_search (by glob) or search_files (by name substring), "
-            "not this tool. Binary files are skipped.", schema));
+            "not this tool. Binary files are skipped.", schema, kObserves));
     }
 
     // get_file_info
@@ -1512,7 +1572,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "required", make_req(doc, {"path"}));
         doc.arr_append(tools, add_tool(doc, "get_file_info",
             "Get metadata for a file or directory: type, size, timestamps, and permissions.",
-            schema));
+            schema, kObserves));
     }
 
     // list_allowed_directories
@@ -1522,7 +1582,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "properties", doc.new_obj());
         doc.arr_append(tools, add_tool(doc, "list_allowed_directories",
             "List the directories this MCP server is allowed to access, "
-            "with their access mode (read-only or read-write).", schema));
+            "with their access mode (read-only or read-write).", schema, kObserves));
     }
 
     // glob_search (extended)
@@ -1555,7 +1615,7 @@ static std::string build_tools_list_json()
             "Returns matching files only (not directories). Supports "
             "** (recursive), ? (single char), {a,b} (alternation). "
             "Globs are relative to 'directory'. To search file CONTENTS use grep_files; "
-            "to match a literal name substring use search_files.", schema));
+            "to match a literal name substring use search_files.", schema, kObserves));
     }
 
     doc.set_root(tools);
@@ -1611,7 +1671,25 @@ static void handle_message(const std::string &line,
         initialized = true;
         Json::MutableDoc resp;
         auto result = resp.new_obj();
-        resp.obj_add(result, "protocolVersion", resp.new_str(kProtocolVersion));
+        // Negotiate rather than assert: echo the client's requested revision when it
+        // is one we speak, otherwise answer with our default and let the client
+        // decide. This matters for the tool annotations below - `annotations` is a
+        // 2025-03-26 field, so a client that asked for 2025-03-26 and was answered
+        // "2024-11-05" would be entitled to decode tools with the older type and drop
+        // the hints, which is how a host loses the read-only/mutating distinction.
+        std::string_view negotiated = kProtocolVersion;
+        if (auto requested = root.obj_get("params").obj_get("protocolVersion").get_str())
+        {
+            for (auto supported : kSupportedProtocolVersions)
+            {
+                if (*requested == supported)
+                {
+                    negotiated = supported;
+                    break;
+                }
+            }
+        }
+        resp.obj_add(result, "protocolVersion", resp.new_str(negotiated));
         auto caps = resp.new_obj();
         resp.obj_add(caps, "tools", resp.new_obj());
         resp.obj_add(result, "capabilities", caps);
