@@ -226,6 +226,30 @@ def text_of(resp: dict) -> str:
     """Extract content[0].text from a tools/call result response."""
     return resp.get("result", {}).get("content", [{}])[0].get("text", "")
 
+def structured_of(resp: dict) -> dict:
+    """Extract structuredContent from a tools/call result response."""
+    return resp.get("result", {}).get("structuredContent", {})
+
+def links_of(resp: dict) -> list:
+    """The resource_link content blocks of a result, in order."""
+    return [c for c in resp.get("result", {}).get("content", [])
+            if c.get("type") == "resource_link"]
+
+def paths_of(resp: dict) -> list:
+    """Matched absolute paths from search_files / glob_search.
+
+    These tools answer with a count in content[0].text plus one resource_link per
+    hit, so the paths live in structuredContent.matches rather than in the text.
+    """
+    return structured_of(resp).get("matches", [])
+
+def paths_text(resp: dict) -> str:
+    """paths_of() joined by newline - the shape search results used to arrive in.
+
+    Lets a substring assertion stay readable without re-encoding the old text format.
+    """
+    return "\n".join(paths_of(resp))
+
 def is_error(resp: dict, code: int | None = None) -> bool:
     if "error" not in resp:
         return False
@@ -335,6 +359,8 @@ def test_protocol_negotiation(tmpdir: str) -> None:
         ("object protocolVersion",  {"protocolVersion": {"v": "2025-11-25"}}),
         ("empty params",            {}),
         ("no params at all",        None),
+        ("params is a string",      "hello"),
+        ("params is an array",      ["2025-11-25"]),
     ]:
         got, err = negotiated(params)
         check(f"tolerant fallback: {label} -> latest, no error",
@@ -358,8 +384,368 @@ def test_protocol_batch_rejected(tmpdir: str) -> None:
     check("batch produces exactly one reply", len(replies) == 1, str(replies))
     check("batch is rejected with -32600 Invalid Request",
           replies and replies[0].get("error", {}).get("code") == -32600, str(replies))
-    check("2025-03-26 absent from the supported set (it is what would require batching)",
-          "2025-03-26" not in SUPPORTED_PROTOCOLS, str(SUPPORTED_PROTOCOLS))
+
+    # Cross-check the Python mirror of the supported set against what the server itself
+    # announces, so the two cannot drift. Asserting "2025-03-26 not in
+    # SUPPORTED_PROTOCOLS" would only compare a literal with itself.
+    banner = proc.stderr
+    check("startup banner announces the full supported set",
+          f"supported: {', '.join(SUPPORTED_PROTOCOLS)}" in banner, banner.splitlines()[:2])
+    check("startup banner announces the latest as the default protocol",
+          f"protocol {LATEST_PROTOCOL};" in banner, banner.splitlines()[:2])
+    check("2025-03-26 is not announced (it is what would require batching)",
+          "2025-03-26" not in banner, banner.splitlines()[:2])
+
+
+# Tools that declare an outputSchema, and therefore MUST return conforming
+# structuredContent. Compared with set-equality in both directions below, so adding a
+# schema without a handler (or a handler without a schema) fails rather than passing
+# unnoticed.
+STRUCTURED_TOOLS = {
+    "get_file_info", "list_directory", "directory_tree", "list_allowed_directories",
+    "glob_search", "search_files", "grep_files", "execute_command",
+}
+
+
+def test_tools_list_output_schemas(tmpdir: str) -> None:
+    print("=== MCP: tools/list outputSchema coverage ===")
+
+    by_id = run_mcp([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}], [tmpdir])
+    tools = by_id[1].get("result", {}).get("tools", [])
+
+    declared = {t["name"] for t in tools if "outputSchema" in t}
+    check("exactly the intended tools declare an outputSchema",
+          declared == STRUCTURED_TOOLS,
+          f"unexpected: {declared - STRUCTURED_TOOLS}, missing: {STRUCTURED_TOOLS - declared}")
+
+    for tool in tools:
+        schema = tool.get("outputSchema")
+        if schema is None:
+            continue
+        # An outputSchema must be a usable object schema, not just any JSON.
+        check(f"{tool['name']}: outputSchema is an object schema",
+              schema.get("type") == "object", str(schema)[:160])
+        check(f"{tool['name']}: outputSchema declares properties",
+              isinstance(schema.get("properties"), dict) and schema["properties"],
+              str(schema)[:160])
+        check(f"{tool['name']}: outputSchema is valid JSON Schema 2020-12",
+              _schema_is_valid(schema), str(schema)[:200])
+
+
+def _schema_is_valid(schema: dict) -> bool:
+    try:
+        import jsonschema
+    except ImportError:
+        return True  # absence is reported as a failure by test_structured_content_conforms
+    try:
+        jsonschema.Draft202012Validator.check_schema(schema)
+        return True
+    except Exception:
+        return False
+
+
+def test_structured_content_conforms(tmpdir: str) -> None:
+    """The spec MUST: a tool declaring outputSchema must return conforming
+    structuredContent. Validated with a real JSON Schema validator rather than by
+    eyeballing field names, because the schema and the handler are written in
+    different places and drift silently."""
+    print("=== MCP: structuredContent conforms to outputSchema ===")
+
+    # A hard failure, not a skip. This is the only check that proves the schemas and the
+    # handlers agree, and they are written in different files; silently passing without
+    # it would mean a green suite that verified nothing about the spec's central MUST.
+    try:
+        import jsonschema
+    except ImportError:
+        check("jsonschema is available to validate structuredContent", False,
+              "pip install jsonschema - the outputSchema conformance check cannot run without it")
+        return
+
+    d = f"{tmpdir}/structured"
+    os.makedirs(f"{d}/sub", exist_ok=True)
+    with open(f"{d}/a.txt", "w") as f:
+        f.write("hello needle\nsecond line\n")
+    with open(f"{d}/b.cpp", "w") as f:
+        f.write("int main() { return 0; }\n")
+
+    calls = {
+        "get_file_info":            {"path": f"{d}/a.txt"},
+        "list_directory":           {"path": d},
+        "directory_tree":           {"path": d},
+        "list_allowed_directories": {},
+        "glob_search":              {"directory": d, "globs": ["**/*"]},
+        "search_files":             {"directory": d, "nameContains": "a"},
+        "grep_files":               {"regex": "needle", "directory": d, "globs": ["**/*.txt"]},
+        "execute_command":          {"command": "echo hi"},
+    }
+    check("every schema-declaring tool is exercised here",
+          set(calls) == STRUCTURED_TOOLS,
+          f"untested: {STRUCTURED_TOOLS - set(calls)}, extra: {set(calls) - STRUCTURED_TOOLS}")
+
+    messages = [{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}]
+    ids = {}
+    for i, (name, args) in enumerate(calls.items(), start=2):
+        ids[i] = name
+        messages.append({"jsonrpc": "2.0", "id": i, "method": "tools/call",
+                         "params": {"name": name, "arguments": args}})
+    by_id = run_mcp(messages, [tmpdir], sequential=True)
+
+    schemas = {t["name"]: t["outputSchema"]
+               for t in by_id[1].get("result", {}).get("tools", [])
+               if "outputSchema" in t}
+
+    for i, name in ids.items():
+        structured = structured_of(by_id[i])
+        check(f"{name}: returns structuredContent",
+              "structuredContent" in by_id[i].get("result", {}), str(by_id[i])[:200])
+        try:
+            jsonschema.validate(instance=structured,
+                                schema=schemas[name],
+                                cls=jsonschema.Draft202012Validator)
+            conforms, why = True, ""
+        except Exception as exc:
+            conforms, why = False, str(exc).splitlines()[0]
+        check(f"{name}: structuredContent conforms to its outputSchema", conforms,
+              f"{why} | got {str(structured)[:160]}")
+
+
+def test_structured_content_values(tmpdir: str) -> None:
+    """Conformance proves the shape; this proves the values are actually right.
+    A handler returning a correctly-typed but empty object would pass the schema."""
+    print("=== MCP: structuredContent carries the real values ===")
+
+    d = f"{tmpdir}/values"
+    os.makedirs(f"{d}/sub", exist_ok=True)
+    with open(f"{d}/a.txt", "w") as f:
+        f.write("hello needle\nsecond line\n")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "get_file_info", "arguments": {"path": f"{d}/a.txt"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "list_directory", "arguments": {"path": d}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"regex": "needle", "directory": d, "globs": ["**/*.txt"]}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "execute_command", "arguments": {"command": "echo out; exit 3"}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+         "params": {"name": "list_allowed_directories", "arguments": {}}},
+    ], [tmpdir], sequential=True)
+
+    info = structured_of(by_id[1])
+    check("get_file_info: size is a number, not a string",
+          isinstance(info.get("size"), int) and info["size"] == 25, str(info))
+    check("get_file_info: type is 'file'", info.get("type") == "file", str(info))
+    check("get_file_info: path is the canonical path",
+          info.get("path") == os.path.realpath(f"{d}/a.txt"), str(info))
+
+    entries = {e["name"]: e["type"] for e in structured_of(by_id[2]).get("entries", [])}
+    check("list_directory: file typed as 'file'", entries.get("a.txt") == "file", str(entries))
+    check("list_directory: dir typed as 'directory'",
+          entries.get("sub") == "directory", str(entries))
+
+    grep = structured_of(by_id[3])
+    check("grep_files: one match", grep.get("count") == 1, str(grep))
+    check("grep_files: match carries a 1-based line number",
+          grep.get("matches", [{}])[0].get("line") == 1, str(grep))
+    check("grep_files: match carries the line text without the newline",
+          grep.get("matches", [{}])[0].get("text") == "hello needle", str(grep))
+    check("grep_files: match is flagged isMatch",
+          grep.get("matches", [{}])[0].get("isMatch") is True, str(grep))
+    check("grep_files: not truncated", grep.get("truncated") is False, str(grep))
+
+    ran = structured_of(by_id[4])
+    check("execute_command: stdout is raw, with no [exit code] footer",
+          ran.get("stdout") == "out\n", repr(ran.get("stdout")))
+    check("execute_command: exitCode is the real status",
+          ran.get("exitCode") == 3, str(ran))
+    check("execute_command: timedOut false", ran.get("timedOut") is False, str(ran))
+    check("execute_command: text block still carries the footer",
+          "[exit code: 3]" in text_of(by_id[4]), text_of(by_id[4]))
+
+    dirs = structured_of(by_id[5]).get("directories", [])
+    check("list_allowed_directories: reports the writable root",
+          any(e["path"] == os.path.realpath(tmpdir) and e["writable"] is True for e in dirs),
+          str(dirs))
+
+
+def test_resource_links(tmpdir: str) -> None:
+    print("=== MCP: resource_link results (search_files / glob_search) ===")
+
+    d = f"{tmpdir}/links"
+    os.makedirs(d, exist_ok=True)
+    for name in ("one.swift", "two.swift", "three.txt"):
+        with open(f"{d}/{name}", "w") as f:
+            f.write("x")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "glob_search", "arguments": {"directory": d, "globs": ["**/*.swift"]}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "search_files", "arguments": {"directory": d, "nameContains": "one"}}},
+    ], [tmpdir], sequential=True)
+
+    links = links_of(by_id[1])
+    check("glob_search: one resource_link per match",
+          len(links) == 2, f"{len(links)}: {links}")
+    check("glob_search: links agree with structuredContent.matches",
+          [unquote(urlparse(l["uri"]).path) for l in links] == paths_of(by_id[1]),
+          f"{links} vs {paths_of(by_id[1])}")
+    check("glob_search: every link uri is absolute file://",
+          all(l["uri"].startswith("file:///") for l in links), str(links))
+    check("glob_search: link name is the basename",
+          {l["name"] for l in links} == {"one.swift", "two.swift"}, str(links))
+    check("glob_search: known extension gets a mimeType",
+          all(l.get("mimeType") == "text/x-swift" for l in links), str(links))
+    check("glob_search: content[0] is the summary text",
+          by_id[1]["result"]["content"][0]["type"] == "text",
+          str(by_id[1]["result"]["content"][0]))
+    check("glob_search: summary reports the count",
+          "2 matches" in text_of(by_id[1]), text_of(by_id[1]))
+    check("glob_search: not truncated at the default cap",
+          structured_of(by_id[1]).get("truncated") is False, str(structured_of(by_id[1])))
+
+    links2 = links_of(by_id[2])
+    check("search_files: one resource_link for the single hit",
+          len(links2) == 1, str(links2))
+    check("search_files: link points at the matched file",
+          links2 and links2[0]["name"] == "one.swift", str(links2))
+
+
+def test_glob_search_truncation_reported(tmpdir: str) -> None:
+    """glob_search used to cap its result set silently - a caller could not tell a
+    complete answer from a cut-off one. The cap is now reported."""
+    print("=== MCP: glob_search reports truncation ===")
+
+    d = f"{tmpdir}/trunc"
+    os.makedirs(d, exist_ok=True)
+    for i in range(10):
+        with open(f"{d}/f{i}.txt", "w") as f:
+            f.write("x")
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "glob_search",
+                    "arguments": {"directory": d, "globs": ["**/*.txt"], "max": 4}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "glob_search",
+                    "arguments": {"directory": d, "globs": ["**/*.txt"]}}},
+    ], [tmpdir], sequential=True)
+
+    capped = structured_of(by_id[1])
+    check("glob_search max=4: returns 4 matches", capped.get("count") == 4, str(capped))
+    check("glob_search max=4: truncated is true", capped.get("truncated") is True, str(capped))
+    check("glob_search max=4: truncation is visible in the summary text",
+          "truncated" in text_of(by_id[1]).lower(), text_of(by_id[1]))
+
+    full = structured_of(by_id[2])
+    check("glob_search uncapped: returns all 10", full.get("count") == 10, str(full))
+    check("glob_search uncapped: truncated is false",
+          full.get("truncated") is False, str(full))
+
+
+def test_grep_files_structured_empty_and_truncated(tmpdir: str) -> None:
+    """The two grep paths that return early. A declared outputSchema obliges the server
+    to return conforming structuredContent on every success result, and an early return
+    is exactly where that gets forgotten."""
+    print("=== MCP: grep_files structuredContent on the early-return paths ===")
+
+    d = f"{tmpdir}/grepstruct"
+    os.makedirs(d, exist_ok=True)
+    with open(f"{d}/hits.txt", "w") as f:
+        f.write("needle\n" * 6)
+    with open(f"{d}/other.log", "w") as f:
+        f.write("nothing here\n")
+
+    by_id = run_mcp([
+        # No candidate files at all: the globs match nothing.
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"regex": "needle", "directory": d, "globs": ["**/*.nosuchext"]}}},
+        # Files searched, but zero content matches.
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"regex": "needle", "directory": d, "globs": ["**/*.log"]}}},
+        # Capped below the number of available matches.
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"regex": "needle", "directory": d, "globs": ["**/*.txt"],
+                                  "maxResults": 2}}},
+    ], [tmpdir], sequential=True)
+
+    empty = {"matches": [], "count": 0, "truncated": False, "skipped": 0}
+
+    check("grep_files no candidate files: text says so",
+          "no files to search" in text_of(by_id[1]).lower(), text_of(by_id[1]))
+    check("grep_files no candidate files: structuredContent present and conforming",
+          structured_of(by_id[1]) == empty, str(by_id[1])[:220])
+
+    check("grep_files no content matches: text says so",
+          "no match" in text_of(by_id[2]).lower(), text_of(by_id[2]))
+    check("grep_files no content matches: structuredContent present and conforming",
+          structured_of(by_id[2]) == empty, str(by_id[2])[:220])
+
+    capped = structured_of(by_id[3])
+    check("grep_files maxResults=2: count is capped", capped.get("count") == 2, str(capped))
+    check("grep_files maxResults=2: truncated is true",
+          capped.get("truncated") is True, str(capped))
+    check("grep_files maxResults=2: truncation visible in text",
+          "truncated" in text_of(by_id[3]).lower(), text_of(by_id[3]))
+
+
+def test_legacy_client_gets_no_2025_surface(tmpdir: str) -> None:
+    """structuredContent, resource_link and outputSchema are all 2025-06-18 additions.
+    The lifecycle spec says both parties may only use what was negotiated, so a client
+    that agreed on 2024-11-05 must not receive any of them - and critically, must still
+    receive the search_files/glob_search paths, which moved out of the text block."""
+    print("=== MCP: a 2024-11-05 client gets the pre-2025-06-18 shape ===")
+
+    d = f"{tmpdir}/legacy"
+    os.makedirs(d, exist_ok=True)
+    for name in ("one.swift", "two.swift"):
+        with open(f"{d}/{name}", "w") as f:
+            f.write("x")
+
+    def session(version: str) -> dict:
+        return run_mcp([
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": {"protocolVersion": version, "capabilities": {}}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+             "params": {"name": "glob_search",
+                        "arguments": {"directory": d, "globs": ["**/*.swift"]}}},
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+             "params": {"name": "get_file_info", "arguments": {"path": f"{d}/one.swift"}}},
+        ], [tmpdir], sequential=True)
+
+    old = session("2024-11-05")
+    check("2024-11-05: negotiated as asked",
+          old[1]["result"]["protocolVersion"] == "2024-11-05", str(old[1]))
+    check("2024-11-05: no tool declares an outputSchema",
+          not any("outputSchema" in t for t in old[2]["result"]["tools"]),
+          str([t["name"] for t in old[2]["result"]["tools"] if "outputSchema" in t]))
+    check("2024-11-05: glob_search emits no resource_link blocks",
+          links_of(old[3]) == [], str(old[3]["result"]["content"])[:200])
+    check("2024-11-05: glob_search returns no structuredContent",
+          "structuredContent" not in old[3]["result"], str(old[3]["result"])[:200])
+    # The point of the whole gate: the answer must still be readable.
+    check("2024-11-05: glob_search still returns the paths in the text block",
+          "one.swift" in text_of(old[3]) and "two.swift" in text_of(old[3]),
+          text_of(old[3]))
+    check("2024-11-05: get_file_info returns no structuredContent",
+          "structuredContent" not in old[4]["result"], str(old[4]["result"])[:200])
+    check("2024-11-05: get_file_info text is unchanged",
+          "size:" in text_of(old[4]) and "permissions:" in text_of(old[4]), text_of(old[4]))
+
+    new = session("2025-06-18")
+    check("2025-06-18: outputSchemas are advertised",
+          len([t for t in new[2]["result"]["tools"] if "outputSchema" in t]) == len(STRUCTURED_TOOLS),
+          str([t["name"] for t in new[2]["result"]["tools"] if "outputSchema" in t]))
+    check("2025-06-18: glob_search emits resource_link blocks",
+          len(links_of(new[3])) == 2, str(new[3]["result"]["content"])[:200])
+    check("2025-06-18: glob_search returns structuredContent",
+          "structuredContent" in new[3]["result"], str(new[3]["result"])[:200])
 
 
 def test_tools_list(tmpdir: str) -> None:
@@ -763,7 +1149,7 @@ def test_search_files(tmpdir: str) -> None:
                     "arguments": {"directory": d, "nameContains": "ALPHA"}}},
     ], [tmpdir], sequential=True)
 
-    text = text_of(by_id[4])
+    text = paths_text(by_id[4])
     check("search_files name: alpha.txt matched", "alpha.txt" in text, text)
     check("search_files name: alphabet_soup.conf matched", "alphabet_soup.conf" in text, text)
     check("search_files name: beta.log not matched", "beta.log" not in text, text)
@@ -782,9 +1168,16 @@ def test_search_files_no_match(tmpdir: str) -> None:
                     "arguments": {"directory": d, "nameContains": "xyzzy_no_such_file"}}},
     ], [tmpdir], sequential=True)
 
-    text = text_of(by_id[2])
+    # The no-match answer is carried by the summary text block; the structured half
+    # must still be present and well-formed, because a declared outputSchema obliges
+    # the server to return conforming structuredContent even when the answer is empty.
     check("search_files no match: returns no-matches message",
-          "no match" in text.lower(), text)
+          "no match" in text_of(by_id[2]).lower(), text_of(by_id[2]))
+    check("search_files no match: no resource_link blocks",
+          links_of(by_id[2]) == [], str(links_of(by_id[2])))
+    check("search_files no match: structuredContent still conforms",
+          structured_of(by_id[2]) == {"matches": [], "count": 0},
+          str(structured_of(by_id[2])))
 
 
 def test_search_files_exclude_globs(tmpdir: str) -> None:
@@ -804,7 +1197,7 @@ def test_search_files_exclude_globs(tmpdir: str) -> None:
                                   "excludeGlobs": ["vendor/**"]}}},
     ], [tmpdir], sequential=True)
 
-    text = text_of(by_id[3])
+    text = paths_text(by_id[3])
     check("search_files excludeGlobs: src/helper.c matched", "src" in text, text)
     check("search_files excludeGlobs: vendor/helper.c excluded", "vendor" not in text, text)
 
@@ -828,7 +1221,7 @@ def test_search_files_legacy_aliases(tmpdir: str) -> None:
                                   "excludePatterns": ["vendor/**"]}}},
     ], [tmpdir], sequential=True)
 
-    text = text_of(by_id[3])
+    text = paths_text(by_id[3])
     check("search_files legacy aliases: src/widget.c matched", "src" in text, text)
     check("search_files legacy aliases: vendor excluded via excludePatterns",
           "vendor" not in text, text)
@@ -876,7 +1269,7 @@ def test_search_files_literal_pattern(tmpdir: str) -> None:
                     "arguments": {"directory": d, "nameContains": "foo.s"}}},
     ], [tmpdir], sequential=True)
 
-    text = text_of(by_id[3])
+    text = paths_text(by_id[3])
     check("search_files literal: foo.star.txt matched (contains 'foo.s')",
           "foo.star.txt" in text, text)
     check("search_files literal: foobar.txt not matched (no 'foo.s' substring)",
@@ -902,7 +1295,7 @@ def test_search_files_matches_directories(tmpdir: str) -> None:
                     "arguments": {"directory": d, "nameContains": "get"}}},
     ], [tmpdir], sequential=True)
 
-    text = text_of(by_id[3])
+    text = paths_text(by_id[3])
     check("search_files dirs: gadgets.txt (file) matched", "gadgets.txt" in text, text)
     check("search_files dirs: widgets (directory) matched", "widgets" in text, text)
 
@@ -927,7 +1320,7 @@ def test_glob_search_files_only(tmpdir: str) -> None:
                     "arguments": {"directory": d, "globs": ["src*"]}}},
     ], [tmpdir], sequential=True)
 
-    text = text_of(by_id[3])
+    text = paths_text(by_id[3])
     check("glob_search files only: srcfile.c present", "srcfile.c" in text, text)
     # The directory "src" itself must not appear as a result entry (files only)
     # We check that no line in the result is the bare directory path (ends with /src or is /src)
@@ -1286,13 +1679,13 @@ def test_glob_search(tmpdir: str) -> None:
                     "arguments": {"directory": d, "globs": ["src/*.cpp"]}}},
     ], [tmpdir], sequential=True)
 
-    text4 = text_of(by_id[4])
+    text4 = paths_text(by_id[4])
     check("glob_search multiple globs: cpp files present",
           "main.cpp" in text4 and "util.cpp" in text4, text4)
     check("glob_search multiple globs: header present",
           "util.h" in text4, text4)
 
-    text5 = text_of(by_id[5])
+    text5 = paths_text(by_id[5])
     check("glob_search single glob: cpp files present",
           "main.cpp" in text5 and "util.cpp" in text5, text5)
     check("glob_search single glob: header excluded",
@@ -1860,8 +2253,15 @@ def test_read_binary_file_uri_encoding(tmpdir: str) -> None:
          "params": {"name": "read_file", "arguments": {"path": path}}},
     ], [tmpdir])
 
-    resource = by_id[1].get("result", {}).get("content", [{}])[0].get("resource", {})
+    item = by_id[1].get("result", {}).get("content", [{}])[0]
+    resource = item.get("resource", {})
     uri = resource.get("uri", "")
+    # Guard first: without it the three "character is absent" checks below all pass
+    # vacuously on an empty string, which is exactly what a shape regression produces.
+    check("hostile filename: content[0].type == resource", item.get("type") == "resource", str(item)[:160])
+    check("hostile filename: got a file:// URI to inspect", uri.startswith("file:///"), repr(uri))
+    check("hostile filename: blob decodes to the exact bytes written",
+          base64.b64decode(resource.get("blob", "")) == payload, str(resource)[:160])
     check("hostile filename: no raw space in URI", " " not in uri, uri)
     check("hostile filename: '#' is percent-encoded", "#" not in uri, uri)
     check("hostile filename: '?' is percent-encoded", "?" not in uri, uri)
@@ -1999,7 +2399,7 @@ def test_glob_search_exclude_globs(tmpdir: str) -> None:
                                   "excludeGlobs": ["vendor/**"]}}},
     ], [tmpdir], sequential=True)
 
-    text3 = text_of(by_id[3])
+    text3 = paths_text(by_id[3])
     check("glob_search excludeGlobs: src/main.cpp included",
           "main.cpp" in text3, text3)
     check("glob_search excludeGlobs: vendor/lib.cpp excluded",
@@ -2025,7 +2425,7 @@ def test_glob_search_brace(tmpdir: str) -> None:
                     "arguments": {"directory": d, "globs": ["**/*.{cpp,h}"]}}},
     ], [tmpdir], sequential=True)
 
-    text = text_of(by_id[4])
+    text = paths_text(by_id[4])
     check("brace alternation: .cpp file matched",
           "main.cpp" in text, text)
     check("brace alternation: .h file matched",
@@ -2461,6 +2861,13 @@ def main() -> int:
         test_protocol_negotiation(tmpdir)
         test_protocol_batch_rejected(tmpdir)
         test_tools_list(tmpdir)
+        test_tools_list_output_schemas(tmpdir)
+        test_structured_content_conforms(tmpdir)
+        test_structured_content_values(tmpdir)
+        test_resource_links(tmpdir)
+        test_glob_search_truncation_reported(tmpdir)
+        test_grep_files_structured_empty_and_truncated(tmpdir)
+        test_legacy_client_gets_no_2025_surface(tmpdir)
         test_tools_list_schema(tmpdir)
         test_tools_list_annotations(tmpdir)
         test_write_read(tmpdir)

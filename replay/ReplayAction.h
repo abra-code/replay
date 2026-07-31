@@ -72,12 +72,23 @@ struct MCPExecuteResult {
     std::string launch_error; // non-empty when !launched
 };
 
+// One line of grep output, as structured data. Carried alongside the formatted text
+// because the text form cannot be parsed back reliably: the "path:line:text" layout is
+// ambiguous when a path or the matched line itself contains a colon.
+struct MCPGrepMatch {
+    std::string path;
+    int64_t     line     = 0;      // 1-based
+    std::string text;              // the line's contents, without the newline
+    bool        is_match = false;  // false for a surrounding context line
+};
+
 // Returned by GrepFileMCPCore — grep-style content search results for one file.
 struct MCPGrepResult {
     std::string text;         // formatted grep-style output; empty when no matches
     int         match_count = 0;
     bool        is_binary   = false; // file contains null bytes — skipped
     std::string error;        // non-empty on I/O failure
+    std::vector<MCPGrepMatch> matches; // same lines as `text`, structured
 };
 
 struct FileEdit {

@@ -9,6 +9,37 @@ Each parameter is marked with one of:
 
 ---
 
+## Structured output
+
+These tools declare an `outputSchema` and return a matching `structuredContent` object next to
+their text content. Fetch the authoritative schema from `tools/list`; the shapes below are a
+summary.
+
+| Tool | `structuredContent` |
+|------|---------------------|
+| `get_file_info` | `{path, type, size, created, modified, permissions}` — `size` is a number, `type` is one of `file`/`directory`/`symlink`/`other` |
+| `list_directory` | `{entries: [{name, type}]}` — `type` is `file` or `directory` |
+| `directory_tree` | recursive `{name, type, children?}`; `children` is present on directories only, `[]` when empty or depth-limited |
+| `list_allowed_directories` | `{directories: [{path, writable}]}` |
+| `glob_search` | `{matches: [<path>], count, truncated}` |
+| `search_files` | `{matches: [<path>], count}` |
+| `grep_files` | `{matches: [{path, line, text, isMatch}], count, truncated, skipped}` — `line` is 1-based, `isMatch` is false for context lines |
+| `execute_command` | `{stdout, stderr, exitCode, timedOut}` — raw streams, without the `[exit code: N]` footer or `[stderr]` prefix the text blocks carry |
+
+These fields require a negotiated revision of `2025-06-18` or later. A client on `2024-11-05` gets
+no `outputSchema`, no `structuredContent`, and the original text-only shapes throughout.
+
+The text content block keeps its existing human-readable form rather than mirroring the serialized
+JSON, except for `directory_tree`, where the two are identical because that tool already answered
+in JSON.
+
+`search_files` and `glob_search` are the two whose text content **changed**: they now return a
+short summary (the match count, plus a truncation notice for `glob_search`) followed by one
+`resource_link` block per hit. The path list is in `structuredContent.matches`; it is no longer
+newline-joined into `content[0].text`.
+
+---
+
 ## `read_file`
 
 ```json
@@ -17,9 +48,9 @@ Each parameter is marked with one of:
 }
 ```
 
-**Response:** `result.content[0]` is a `text` item (UTF-8) or a `blob` item (base64 + `mimeType`) for binary.  
+**Response:** `result.content[0]` is a `text` item (UTF-8), or for binary an embedded `resource` item: `{"type":"resource","resource":{"uri":"file://...","mimeType":...,"blob":<base64>}}`.  
 **Standard:** Returns text content.  
-**[ext]:** Binary files return `blob` type instead of an error.  
+**[ext]:** Binary files return an embedded resource instead of an error. (Before the 2025-11-25 protocol bump this was a `{"type":"blob"}` item, which is not a content type in any MCP revision.)  
 **Errors:** `-32001` path not allowed · `-32002` not found · `-32603` read failed
 
 ---
@@ -132,7 +163,7 @@ Each parameter is marked with one of:
 }
 ```
 
-**Response:** Multi-line text: `type: file|directory`, `size: <bytes>`, `modified: <ISO8601>`, `permissions: <octal>`.  
+**Response:** Multi-line text: `path:`, `type: file|directory|symlink|other`, `size: <bytes>`, `created: <ISO8601>`, `modified: <ISO8601>`, `permissions: <ls-style, e.g. -rw-r--r-->`. Same six fields, typed, in `structuredContent`.  
 **Errors:** `-32001` · `-32002`
 
 ---
@@ -226,13 +257,14 @@ Standard MCP tool: case-insensitive filename/dirname substring match.
 }
 ```
 
+**Response:** a summary `text` item with the match count, then one `resource_link` item per hit. Paths are in `structuredContent.matches` (they are no longer newline-joined into `content[0].text`).
+
 `nameContains` is a **plain literal string** — not a glob, not a regex. It is matched as a case-insensitive substring against each entry's basename (`strcasestr` semantics). To search by glob pattern, use `glob_search`. To search file contents, use `grep_files`.
 
 Walks `directory` recursively. Returns the absolute path of every file or directory whose basename contains `nameContains`. No result cap — all matches are returned.
 
 **Legacy aliases:** the MCP-spec names `path` / `pattern` / `excludePatterns` are accepted silently (not advertised in the schema) so agents that construct them from pre-training still work. Canonical names win when both are supplied.
 
-**Output:** one absolute path per line, or `(no matches found)`.
 
 **Errors:** `-32001` · `-32602` missing `directory` or `nameContains`
 
@@ -254,6 +286,8 @@ query is an ECMAScript (JavaScript) regex matched against file contents.
   "maxResults":      <integer>      // [ext] Total match cap (default 500, max 10000)
 }
 ```
+
+**Response:** grep-style `path:line:text` text (context lines use `-` delimiters), with `[N matches]` and any `[truncated at N matches]` footer. `structuredContent.matches` carries the same lines as `{path, line, text, isMatch}` records - the text form is ambiguous when a path or matched line contains a colon.
 
 `regex` is required, plus at least one of `directory` / `globs`.
 
@@ -300,11 +334,13 @@ Binary files (containing null bytes in the first 4 KB) are skipped silently.
   "directory":    "<string>",        // [ext] Root directory (required)
   "globs":        ["<string>", ...], // [ext] Glob patterns relative to directory (required)
   "excludeGlobs": ["<string>", ...], // [ext] Exclusion globs
-  "max":          <integer>          // [ext] Result cap (default 1000; 0 = unlimited)
+  "max":          <integer>          // [ext] Result cap (default 1000; 0 or omitted = the 1000 default, NOT unlimited)
 }
 ```
 
 Finds **files** by filename glob (directories are not returned). Glob syntax: `**` (recursive), `?` (single char), `{a,b}` (alternation). Case-insensitive on APFS. `globs` are relative to `directory`. To search file contents use `grep_files`; to match a literal name substring use `search_files`.
+
+**Response:** a summary `text` item with the match count (and a truncation notice when the `max` cap was reached), then one `resource_link` item per hit. Paths are in `structuredContent.matches`, with `structuredContent.truncated` flagging the cap.
 
 **Errors:** `-32001` · `-32602` missing `directory` or `globs`
 
@@ -322,6 +358,7 @@ Finds **files** by filename glob (directories are not returned). Glob syntax: `*
 
 **Response:**
 - `result.content[0]` — stdout (or `(no output)`) with `[exit code: N]` footer.
+- `result.structuredContent` — `{stdout, stderr, exitCode, timedOut}` with the raw streams, no footer or prefix.
 - `result.content[1]` — stderr prefixed `[stderr]\n`, present only when non-empty.
 - `result.isError: true` — set on non-zero exit or timeout.
 

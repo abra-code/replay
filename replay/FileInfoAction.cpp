@@ -1,6 +1,7 @@
 
 #include "ReplayAction.h"
 #include "ReplayActionPrivate.h"
+#include "yyjson.hpp"
 #include <sys/stat.h>
 #include <time.h>
 #include <cerrno>
@@ -84,7 +85,20 @@ GetFileInfo(const std::string &path, ReplayContext *context, ActionContext *acti
 		output += "\nmodified: ";    output += modified;
 		output += "\npermissions: "; output += perms;
 		output += "\n";
-		PrintMCPTextResult(context, actionContext, std::move(output));
+
+		// Same six fields as the text above, typed: size as a number rather than a
+		// decimal string, so a caller does not have to re-parse the label block.
+		Json::MutableDoc doc;
+		auto structured = doc.new_obj();
+		doc.obj_add(structured, "path",        doc.new_str(path));
+		doc.obj_add(structured, "type",        doc.new_str(typeStr));
+		doc.obj_add(structured, "size",        doc.new_sint((int64_t)st.st_size));
+		doc.obj_add(structured, "created",     doc.new_str(created));
+		doc.obj_add(structured, "modified",    doc.new_str(modified));
+		doc.obj_add(structured, "permissions", doc.new_str(perms));
+		doc.set_root(structured);
+
+		PrintMCPStructuredResult(context, actionContext, std::move(output), doc.to_string());
 		return true;
 	}
 

@@ -1,6 +1,39 @@
 # replay MCP Tools Reference
 
-Describes the 15 tools exposed by `replay --mcp-server`, design choices, and error codes.
+Describes the 16 tools exposed by `replay --mcp-server`, design choices, and error codes.
+
+---
+
+## Protocol revision
+
+`replay --mcp-server` speaks MCP `2025-11-25`, `2025-06-18` and `2024-11-05`. `initialize` echoes
+the client's requested revision when it is one of those, and otherwise answers `2025-11-25` - the
+latest replay supports - without erroring, whatever the client sent (including nothing at all).
+
+`2025-03-26` is deliberately not supported. It is the only revision that requires an
+implementation to accept JSON-RPC batches, and `2025-06-18` removed that requirement again;
+replay reads one JSON object per line and rejects a top-level array with `-32600`. A client that
+asks for `2025-03-26` is answered `2025-11-25`.
+
+## Structured output
+
+Eight tools declare an `outputSchema` and return a matching `structuredContent` object alongside
+their human-readable text: `get_file_info`, `list_directory`, `directory_tree`,
+`list_allowed_directories`, `glob_search`, `search_files`, `grep_files`, `execute_command`.
+
+The text block is kept in its existing human-readable form rather than replaced by a JSON dump.
+The spec suggests mirroring the serialized JSON into the text block; replay's text already carries
+the same fields in the form a model reads, so the data is present either way.
+
+`search_files` and `glob_search` additionally answer with one `resource_link` content block per
+hit, preceded by a short summary text block carrying the match count. The full path list is in
+`structuredContent.matches` - it is no longer newline-joined into `content[0].text`.
+
+**All of this is gated on the negotiated revision.** `structuredContent`, `resource_link` and
+`outputSchema` are `2025-06-18` additions, and the lifecycle spec says both parties may use only
+what was negotiated. A client that negotiates `2024-11-05` sees none of them: no `outputSchema` in
+`tools/list`, no `structuredContent`, and `search_files` / `glob_search` revert to the newline-joined
+path list in `content[0].text`. Negotiate `2025-06-18` or later to get the structured surface.
 
 ---
 
@@ -8,7 +41,7 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 
 | Tool | Required params | Extended? | Notes |
 |------|----------------|:---------:|-------|
-| `read_file` | `path` | | Returns UTF-8 text or `blob` (base64) for binary. Max 10 MB. |
+| `read_file` | `path` | | Returns UTF-8 text, or an embedded `resource` item (base64 in `resource.blob`) for binary. Max 10 MB. |
 | `read_multiple_files` | `paths` | | Up to 50 files; literal paths only (globs not expanded). Errors inline per file. |
 | `write_file` | `path`, `content` | | Creates parent dirs automatically. |
 | `create_directory` | `path` | | `mkdir -p` semantics. |
@@ -16,12 +49,12 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 | `directory_tree` | `path` | ✓ | JSON tree. Optional `depth` (omit = unlimited; 0 = root only; `find -maxdepth` semantics). |
 | `move_file` | `source`, `destination` | | Creates destination parent dirs. |
 | `delete_file` | `path` | | Recursive for directories. |
-| `get_file_info` | `path` | | type, size, modified timestamp, permissions. |
+| `get_file_info` | `path` | | path, type, size, created/modified timestamps, permissions. Also as typed `structuredContent`. |
 | `list_allowed_directories` | — | | Lists configured dirs with access mode. |
-| `search_files` | `directory`, `nameContains` | | Case-insensitive literal substring match against basenames. No result cap. `nameContains` is not a glob or regex. Legacy `path`/`pattern`/`excludePatterns` accepted as silent aliases. |
+| `search_files` | `directory`, `nameContains` | | Case-insensitive literal substring match against basenames. No result cap. Returns `resource_link` items; paths in `structuredContent.matches`. `nameContains` is not a glob or regex. Legacy `path`/`pattern`/`excludePatterns` accepted as silent aliases. |
 | `edit_file` | `path`, `edits` | ✓ | Structured edits: literal/regex, backrefs, limit, caseInsensitive. |
 | `edit_files` | `paths`, `edits` | ✓ | Multi-file edit with glob expansion. |
-| `glob_search` | `directory`, `globs` | ✓ | Filename-glob search; `globs` array, brace alternation `{a,b}`, `excludeGlobs`. Returns files only (not directories). |
+| `glob_search` | `directory`, `globs` | ✓ | Filename-glob search; `globs` array, brace alternation `{a,b}`, `excludeGlobs`. Returns files only (not directories), as `resource_link` items; paths in `structuredContent.matches`, with `truncated` when the `max` cap was hit. |
 | `grep_files` | `regex` | ✓ | Content search (grep), always ECMAScript regex. Requires `directory` and/or `globs`. Case-insensitive, context lines. |
 | `execute_command` | `command` | ✓ | Shell execution, hard-sandboxed via Seatbelt when `--sandbox` is active. |
 
@@ -32,7 +65,6 @@ Describes the 15 tools exposed by `replay --mcp-server`, design choices, and err
 ### Divergences from the MCP filesystem spec
 
 - **`edit_file`**: the MCP spec takes `oldText`/`newText` structured edits (same as replay). replay adds `isRegex`, `caseInsensitive`, `limit`, and back-references on top. `dryRun` returns a unified diff (standard behavior). Whitespace-normalized matching (standard MCP behavior) is used as a fallback for literal edits when exact match fails.
-- **`read_file`**: binary files are returned as a `blob` content item (base64 + mimeType) rather than an error or escaped text, which is an extension beyond the spec.
 - **`search_files`**: standard MCP defines filename pattern matching (case-insensitive substring match against basenames). replay implements this, but renames the params to `directory`/`nameContains`/`excludeGlobs` for clarity (the spec names `path`/`pattern`/`excludePatterns` are still accepted as silent aliases). The content-search capability is provided as the separate `grep_files` extension tool.
 
 ---

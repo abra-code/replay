@@ -31,6 +31,7 @@
 #include <set>
 #include <memory>
 #include <mutex>
+#include <atomic>
 #include <fstream>
 #include <iostream>
 
@@ -66,10 +67,43 @@ static constexpr const char *kProtocolVersion = "2025-11-25";
 static constexpr std::string_view kSupportedProtocolVersions[] = {
     "2025-11-25", "2025-06-18", "2024-11-05",
 };
+// Two halves of one invariant: the list is sorted newest-first, and the default is its
+// head. Checking only the second would still let a newer revision be appended at the
+// tail, which is precisely the shape of the bug this replaces - a default that is not
+// actually the latest. Revisions are ISO-8601 dates, so lexicographic order is
+// chronological order and a plain string compare is the real test.
 static_assert(kSupportedProtocolVersions[0] == std::string_view(kProtocolVersion),
               "kProtocolVersion must be the newest supported revision - the lifecycle "
               "spec says an unrecognized request SHOULD fall back to the server's latest, "
               "and answering the oldest silently strips features the client asked for");
+static_assert([] {
+                  for (size_t i = 1; i < std::size(kSupportedProtocolVersions); ++i)
+                      if (!(kSupportedProtocolVersions[i - 1] > kSupportedProtocolVersions[i]))
+                          return false;
+                  return true;
+              }(),
+              "kSupportedProtocolVersions must be sorted newest-first with no duplicates, "
+              "so that element 0 is genuinely the latest revision replay speaks");
+// Whether the negotiated revision entitles the client to the 2025-06-18 result surface:
+// `structuredContent`, `resource_link` content blocks, and `outputSchema` in tools/list.
+//
+// This is not caution, it is the lifecycle spec's Operation rule - both parties MUST
+// "only use capabilities that were successfully negotiated". Sending a resource_link to
+// a client that agreed on 2024-11-05 hands it a content type its schema does not define,
+// and for search_files/glob_search that is the entire answer: the paths moved out of the
+// text block, so an old client would decode a match count and nothing else.
+//
+// Default true because kProtocolVersion is the latest: a client that never sends
+// initialize (or sends a malformed one) is answered the newest revision, so the two
+// stay consistent. Set once from initialize, read from the async tool threads, hence
+// atomic - stdio is one connection per process, so a single flag is the whole story.
+static std::atomic<bool> g_structuredOutputNegotiated{true};
+
+static bool structured_output_negotiated()
+{
+    return g_structuredOutputNegotiated.load(std::memory_order_relaxed);
+}
+
 static constexpr const char *kServerName      = "replay-mcp";
 static constexpr const char *kServerVersion   = "1.0.0";
 static constexpr size_t kMaxFileSize          = 10u * 1024u * 1024u;
@@ -161,7 +195,7 @@ static PathResult validate_path(const std::string &requested,
 }
 
 // ============================================================================
-// file:// URIs — for resource and resource_link content blocks
+// file:// URIs - for resource and resource_link content blocks
 // ============================================================================
 
 // RFC 8089 file URI for an absolute POSIX path. Percent-encodes byte by byte so
@@ -173,7 +207,13 @@ static std::string make_file_uri(std::string_view path)
 {
     static constexpr char kHexDigits[] = "0123456789ABCDEF";
     std::string uri = "file://";
-    uri.reserve(uri.size() + path.size());
+    // Guard, not decoration: without a leading '/', the first path segment is parsed as
+    // the URI *authority* - "relative/x" becomes host "relative". Every path replay
+    // hands out is canonicalized and absolute, but this function is now also fed
+    // tool-produced path lists, so make the invariant local instead of assumed.
+    if (path.empty() || path.front() != '/')
+        uri.push_back('/');
+    uri.reserve(uri.size() + path.size() + 16);
     for (unsigned char ch : path)
     {
         bool unreserved = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
@@ -297,6 +337,143 @@ std::string MakeMCPBlobResult(const std::string &request_id, const std::string &
 std::string MakeMCPError(const std::string &request_id, int code, std::string message)
 {
     return make_error_response(request_id, code, message);
+}
+
+// ============================================================================
+// Structured output (spec revision 2025-06-18)
+//
+// A tool that declares `outputSchema` MUST return `structuredContent` conforming to
+// it, so the two are added together, per tool, or not at all.
+//
+// The spec also says a tool returning structured content SHOULD mirror the serialized
+// JSON in a text block. replay deliberately keeps its existing human-readable text
+// instead. The purpose of that SHOULD is that a client which cannot read
+// structuredContent still receives the data - and replay's text already carries the
+// same fields, in the form a language model actually reads. Replacing it with a JSON
+// dump would satisfy the letter of the guidance while making every result harder for
+// the consumer it exists for. The deviation is confined to the shape of the mirror,
+// not to whether the data is present.
+// ============================================================================
+
+// Best-effort MIME type from a filename extension, for resource_link blocks. Only the
+// types replay is likely to hand back are listed; anything unknown gets no mimeType at
+// all, which is valid - the field is optional, and guessing wrong is worse than
+// omitting it, because a client may dispatch on it.
+static const char *guess_mime_type(std::string_view path)
+{
+    size_t dot = path.rfind('.');
+    if (dot == std::string_view::npos)
+        return nullptr;
+    // Lowercased before matching: the default macOS volume is case-insensitive, so
+    // IMG_0001.JPG and README.MD are ordinary filenames, not edge cases.
+    std::string ext;
+    for (char ch : path.substr(dot + 1))
+        ext.push_back((char)std::tolower((unsigned char)ch));
+
+    if (ext == "txt" || ext == "text")                      return "text/plain";
+    if (ext == "md" || ext == "markdown")                   return "text/markdown";
+    if (ext == "json")                                      return "application/json";
+    // .plist is deliberately absent: on macOS a plist is as often the binary bplist00
+    // format as XML, and this function's rule is that a wrong type is worse than none.
+    if (ext == "xml")                                       return "application/xml";
+    if (ext == "html" || ext == "htm")                      return "text/html";
+    if (ext == "css")                                       return "text/css";
+    if (ext == "js" || ext == "mjs")                        return "text/javascript";
+    if (ext == "py")                                        return "text/x-python";
+    if (ext == "swift")                                     return "text/x-swift";
+    if (ext == "c" || ext == "h")                           return "text/x-c";
+    if (ext == "cpp" || ext == "cc" || ext == "cxx" ||
+        ext == "hpp" || ext == "hh" || ext == "mm")         return "text/x-c++";
+    if (ext == "m")                                         return "text/x-objcsrc";
+    if (ext == "rs")                                        return "text/x-rust";
+    if (ext == "go")                                        return "text/x-go";
+    if (ext == "sh" || ext == "bash" || ext == "zsh")       return "application/x-sh";
+    if (ext == "yml" || ext == "yaml")                      return "application/yaml";
+    if (ext == "toml")                                      return "application/toml";
+    if (ext == "pdf")                                       return "application/pdf";
+    if (ext == "png")                                       return "image/png";
+    if (ext == "jpg" || ext == "jpeg")                      return "image/jpeg";
+    if (ext == "gif")                                       return "image/gif";
+    if (ext == "svg")                                       return "image/svg+xml";
+    return nullptr;
+}
+
+// Attaches structuredContent to an in-progress result object, if there is any. Raw
+// embedding rather than parse-and-rebuild: the caller already serialized a valid
+// object and re-parsing it would only add a failure mode.
+static void add_structured_content(Json::MutableDoc &doc, Json::MutableVal result,
+                                    const std::string &structuredJson)
+{
+    if (!structuredJson.empty() && structured_output_negotiated())
+        doc.obj_add(result, "structuredContent", doc.new_raw(structuredJson));
+}
+
+std::string MakeMCPStructuredResult(const std::string &request_id, std::string text,
+                                     std::string structuredJson)
+{
+    Json::MutableDoc doc;
+    auto content = doc.new_arr();
+    auto item = doc.new_obj();
+    doc.obj_add(item, "type", doc.new_str("text"));
+    doc.obj_add(item, "text", doc.new_str(text));
+    doc.arr_append(content, item);
+    auto result = doc.new_obj();
+    doc.obj_add(result, "content", content);
+    add_structured_content(doc, result, structuredJson);
+    return make_result_response(request_id, doc, result);
+}
+
+std::string MakeMCPResourceLinkResult(const std::string &request_id, std::string summaryText,
+                                       const std::vector<std::string> &paths,
+                                       std::string structuredJson)
+{
+    // A client on 2024-11-05 has neither resource_link nor structuredContent, and for
+    // these tools the paths live nowhere else - it would decode a match count and lose
+    // the answer entirely. Fall back to the pre-2025-06-18 shape: the whole list,
+    // newline-joined, in one text block. Not a degraded answer, just the older one.
+    if (!structured_output_negotiated())
+    {
+        std::string text;
+        for (const auto &path : paths)
+        {
+            text += path;
+            text += '\n';
+        }
+        return make_text_result(request_id, text.empty() ? std::move(summaryText)
+                                                         : std::move(text));
+    }
+
+    Json::MutableDoc doc;
+    auto content = doc.new_arr();
+
+    auto summary = doc.new_obj();
+    doc.obj_add(summary, "type", doc.new_str("text"));
+    doc.obj_add(summary, "text", doc.new_str(summaryText));
+    doc.arr_append(content, summary);
+
+    for (const auto &path : paths)
+    {
+        // `name` is the basename: the spec's example uses the filename, and a client
+        // rendering a list wants something shorter than the absolute path it already
+        // has in `uri`.
+        size_t slash = path.rfind('/');
+        std::string_view base = (slash == std::string::npos)
+                                    ? std::string_view(path)
+                                    : std::string_view(path).substr(slash + 1);
+
+        auto link = doc.new_obj();
+        doc.obj_add(link, "type", doc.new_str("resource_link"));
+        doc.obj_add(link, "uri",  doc.new_str(make_file_uri(path)));
+        doc.obj_add(link, "name", doc.new_str(base));
+        if (const char *mime = guess_mime_type(path))
+            doc.obj_add(link, "mimeType", doc.new_str(mime));
+        doc.arr_append(content, link);
+    }
+
+    auto result = doc.new_obj();
+    doc.obj_add(result, "content", content);
+    add_structured_content(doc, result, structuredJson);
+    return make_result_response(request_id, doc, result);
 }
 
 std::string MakeMCPMultiTextResult(const std::string &request_id,
@@ -438,8 +615,21 @@ std::string MakeMCPExecuteResult(const std::string &request_id,
         doc.arr_append(content, item);
     }
 
+    // structuredContent: the two streams and the status, unmangled. The text blocks
+    // above interleave stdout with a "[exit code: N]" footer and prefix stderr with
+    // "[stderr]", which is right for a reader and wrong for a parser - a caller that
+    // wants the raw stdout should not have to strip a footer off it.
     auto result = doc.new_obj();
     doc.obj_add(result, "content", content);
+    if (structured_output_negotiated())
+    {
+        auto structured = doc.new_obj();
+        doc.obj_add(structured, "stdout",   doc.new_str(r.stdout_text));
+        doc.obj_add(structured, "stderr",   doc.new_str(r.stderr_text));
+        doc.obj_add(structured, "exitCode", doc.new_sint(r.exit_code));
+        doc.obj_add(structured, "timedOut", doc.new_bool(r.timed_out));
+        doc.obj_add(result, "structuredContent", structured);
+    }
     if (r.timed_out || r.exit_code != 0)
         doc.obj_add(result, "isError", doc.new_bool(true));
     return make_result_response(request_id, doc, result);
@@ -798,9 +988,24 @@ static void dispatch_mcp_tool(const std::string &tool,
 
         auto matches = find_entries_by_name(directory_validation.canonical,
                                             std::string(*name_substring), exclude_globs, 0);
-        std::string text;
-        for (const auto &match_path : matches) { text += match_path; text += '\n'; }
-        PrintMCPTextResult(context, ac, text.empty() ? "(no matches found)" : std::move(text));
+
+        // The paths now travel as resource_link blocks and in structuredContent, so the
+        // text block carries only the count - repeating the whole list a third time
+        // would triple the payload for nothing.
+        Json::MutableDoc doc;
+        auto match_arr = doc.new_arr();
+        for (const auto &match_path : matches)
+            doc.arr_append(match_arr, doc.new_str(match_path));
+        auto structured = doc.new_obj();
+        doc.obj_add(structured, "matches", match_arr);
+        doc.obj_add(structured, "count",   doc.new_sint((int64_t)matches.size()));
+        doc.set_root(structured);
+
+        std::string summary = matches.empty()
+            ? std::string("(no matches found)")
+            : "[" + std::to_string(matches.size()) + " match" +
+              (matches.size() == 1 ? "" : "es") + "]";
+        PrintMCPResourceLinkResult(context, ac, std::move(summary), matches, doc.to_string());
     }
     else if (tool == "grep_files")
     {
@@ -984,16 +1189,45 @@ static void dispatch_mcp_tool(const std::string &tool,
                    " path(s) skipped: outside allowed directories]";
         };
 
-        if (files.empty())
-        {
-            PrintMCPTextResult(context, ac, "(no files to search)" + skipped_note(" "));
-            return;
-        }
-
         // Search each file and aggregate grep-style output
         std::string all_text;
         int total_matches = 0;
         bool truncated = false;
+        std::vector<MCPGrepMatch> all_matches;
+
+        // structuredContent is emitted on EVERY success path, including the two empty
+        // ones below. A tool that declares an outputSchema MUST return conforming
+        // structuredContent, and "nothing matched" is a valid answer with an empty
+        // array - not an excuse to omit the field. Declared before the files.empty()
+        // early return for exactly that reason: the first version of this sat below it
+        // and left that one path non-conforming.
+        auto build_grep_structured = [&]() -> std::string {
+            Json::MutableDoc doc;
+            auto match_arr = doc.new_arr();
+            for (const auto &match : all_matches)
+            {
+                auto entry = doc.new_obj();
+                doc.obj_add(entry, "path",    doc.new_str(match.path));
+                doc.obj_add(entry, "line",    doc.new_sint(match.line));
+                doc.obj_add(entry, "text",    doc.new_str(match.text));
+                doc.obj_add(entry, "isMatch", doc.new_bool(match.is_match));
+                doc.arr_append(match_arr, entry);
+            }
+            auto structured = doc.new_obj();
+            doc.obj_add(structured, "matches",   match_arr);
+            doc.obj_add(structured, "count",     doc.new_sint(total_matches));
+            doc.obj_add(structured, "truncated", doc.new_bool(truncated));
+            doc.obj_add(structured, "skipped",   doc.new_sint((int64_t)skipped_outside));
+            doc.set_root(structured);
+            return doc.to_string();
+        };
+
+        if (files.empty())
+        {
+            PrintMCPStructuredResult(context, ac, "(no files to search)" + skipped_note(" "),
+                                      build_grep_structured());
+            return;
+        }
 
         for (const auto &file_path : files)
         {
@@ -1009,11 +1243,23 @@ static void dispatch_mcp_tool(const std::string &tool,
                 continue;
             all_text += grep_result.text;
             total_matches += grep_result.match_count;
+            all_matches.insert(all_matches.end(),
+                               std::make_move_iterator(grep_result.matches.begin()),
+                               std::make_move_iterator(grep_result.matches.end()));
         }
+
+        // The loop above only notices truncation when a file is left unvisited, which
+        // misses the common case entirely: one file whose own matches hit the cap
+        // inside GrepFileMCPCore. Reaching the cap at all means there may be more, so
+        // report it - the same "err toward there-may-be-more" rule glob_search uses,
+        // and the same reason: a false negative silently hides matches.
+        if (total_matches >= max_results)
+            truncated = true;
 
         if (all_text.empty())
         {
-            PrintMCPTextResult(context, ac, "(no matches found)" + skipped_note("\n"));
+            PrintMCPStructuredResult(context, ac, "(no matches found)" + skipped_note("\n"),
+                                      build_grep_structured());
             return;
         }
 
@@ -1022,7 +1268,7 @@ static void dispatch_mcp_tool(const std::string &tool,
         all_text += "[" + std::to_string(total_matches) + " match"
                  + (total_matches == 1 ? "" : "es") + "]\n";
         all_text += skipped_note("");
-        PrintMCPTextResult(context, ac, std::move(all_text));
+        PrintMCPStructuredResult(context, ac, std::move(all_text), build_grep_structured());
     }
     else if (tool == "glob_search")
     {
@@ -1119,6 +1365,14 @@ static void dispatch_mcp_tool(const std::string &tool,
                 std::vector<unsigned char> enc(enc_size + 1, 0);
                 unsigned long written = EncodeBase64(fr.data.data(), (unsigned long)fr.data.size(),
                                                       enc.data(), enc_size);
+                // Deliberately NOT the embedded-resource block that read_file now uses.
+                // This tool's contract is one text block per path, concatenated, and a
+                // resource block cannot be concatenated into a string. Inlining base64
+                // in text is legal - a text block may hold anything - unlike the old
+                // {"type":"blob"}, which was not a content type at all. Switching this
+                // tool would mean returning an interleaved content array (text,
+                // resource, text, ...) and re-cutting the per-file error reporting that
+                // rides on the same string; that is a separate change, not a fix.
                 entry += "[binary, base64]\n";
                 entry.append(reinterpret_cast<const char *>(enc.data()), written);
             }
@@ -1129,11 +1383,24 @@ static void dispatch_mcp_tool(const std::string &tool,
     else if (tool == "list_allowed_directories")
     {
         std::string text;
+        Json::MutableDoc doc;
+        auto dirs = doc.new_arr();
         for (const auto &dir : opts->allowedDirs)
+        {
             text += dir.path + (dir.writable ? " (read-write)\n" : " (read-only)\n");
-        PrintMCPTextResult(context, ac,
-                            text.empty() ? "(no directories configured — all filesystem access denied)"
-                                         : text);
+            auto entry = doc.new_obj();
+            doc.obj_add(entry, "path",     doc.new_str(dir.path));
+            doc.obj_add(entry, "writable", doc.new_bool(dir.writable));
+            doc.arr_append(dirs, entry);
+        }
+        auto structured = doc.new_obj();
+        doc.obj_add(structured, "directories", dirs);
+        doc.set_root(structured);
+
+        PrintMCPStructuredResult(context, ac,
+                                  text.empty() ? "(no directories configured — all filesystem access denied)"
+                                               : text,
+                                  doc.to_string());
     }
     else
     {
@@ -1231,22 +1498,261 @@ static Json::MutableVal make_annotations(Json::MutableDoc &doc, const ToolHints 
     return annotations;
 }
 
+// outputSchema is optional and defaults to absent. Declaring one is a promise: the
+// spec says a server that publishes an output schema MUST return conforming
+// structuredContent, so a tool only gets a schema here if its handler also builds the
+// matching object. The two are reviewed as a pair.
 static Json::MutableVal add_tool(Json::MutableDoc &doc, std::string_view name,
                                   std::string_view desc, Json::MutableVal schema,
-                                  const ToolHints &hints)
+                                  const ToolHints &hints,
+                                  Json::MutableVal outputSchema = {})
 {
     auto tool = doc.new_obj();
     doc.obj_add(tool, "name",        doc.new_str(name));
     doc.obj_add(tool, "description", doc.new_str(desc));
     doc.obj_add(tool, "inputSchema", schema);
+    if (outputSchema.valid())
+        doc.obj_add(tool, "outputSchema", outputSchema);
     doc.obj_add(tool, "annotations", make_annotations(doc, hints));
     return tool;
 }
 
-static std::string build_tools_list_json()
+// ---------------------------------------------------------------------------
+// outputSchema builders - one per tool that declares one.
+//
+// Kept next to each other rather than inline in build_tools_list_json so the shapes
+// can be compared at a glance against the structuredContent the handlers actually
+// emit. A drift between the two is a spec violation, not a cosmetic mismatch.
+//
+// NEVER attach one MutableVal to two parents. yyjson_mut_val nodes are intrusive list
+// nodes carrying their own sibling pointer, so obj_add writes val->next every time:
+// adding the same node twice silently REPLACES whatever followed it in the first
+// parent. It stays well-formed JSON and still validates, which is why it survives
+// review - the loss is a sibling key, not a parse error. Two identical-looking
+// subtrees must each be built fresh. (Same hazard as make_annotations above.)
+// ---------------------------------------------------------------------------
+
+// A property that is a plain typed scalar, with a description.
+static void add_typed_prop(Json::MutableDoc &doc, Json::MutableVal props,
+                            std::string_view name, std::string_view type,
+                            std::string_view desc)
+{
+    auto prop = doc.new_obj();
+    doc.obj_add(prop, "type",        doc.new_str(type));
+    doc.obj_add(prop, "description", doc.new_str(desc));
+    doc.obj_add(props, name, prop);
+}
+
+// An array-of-strings property.
+static void add_string_array_prop(Json::MutableDoc &doc, Json::MutableVal props,
+                                   std::string_view name, std::string_view desc)
+{
+    auto items = doc.new_obj();
+    doc.obj_add(items, "type", doc.new_str("string"));
+    auto prop = doc.new_obj();
+    doc.obj_add(prop, "type",        doc.new_str("array"));
+    doc.obj_add(prop, "items",       items);
+    doc.obj_add(prop, "description", doc.new_str(desc));
+    doc.obj_add(props, name, prop);
+}
+
+// Wraps a properties object into a closed object schema with the given required keys.
+static Json::MutableVal make_object_schema(Json::MutableDoc &doc, Json::MutableVal props,
+                                            std::initializer_list<std::string_view> required)
+{
+    auto schema = doc.new_obj();
+    doc.obj_add(schema, "type",       doc.new_str("object"));
+    doc.obj_add(schema, "properties", props);
+    doc.obj_add(schema, "required",   make_req(doc, required));
+    return schema;
+}
+
+// The shared shape of the two path-listing tools: the matches, how many, and whether
+// the list was cut short. `truncated` exists because glob_search caps its result set
+// and used to do so silently - a caller could not tell a complete answer of exactly
+// `max` entries from a truncated one.
+static Json::MutableVal make_matches_schema(Json::MutableDoc &doc, bool with_truncated)
+{
+    auto props = doc.new_obj();
+    add_string_array_prop(doc, props, "matches", "Absolute paths of the matching entries");
+    add_typed_prop(doc, props, "count", "integer", "Number of matches returned");
+    if (!with_truncated)
+        return make_object_schema(doc, props, {"matches", "count"});
+    add_typed_prop(doc, props, "truncated", "boolean",
+        "True when the result set hit the 'max' cap and more matches may exist");
+    return make_object_schema(doc, props, {"matches", "count", "truncated"});
+}
+
+static Json::MutableVal make_get_file_info_output(Json::MutableDoc &doc)
+{
+    auto type_prop = doc.new_obj();
+    doc.obj_add(type_prop, "type", doc.new_str("string"));
+    auto type_enum = doc.new_arr();
+    for (auto v : {"file", "directory", "symlink", "other"})
+        doc.arr_append(type_enum, doc.new_str(v));
+    doc.obj_add(type_prop, "enum", type_enum);
+    doc.obj_add(type_prop, "description", doc.new_str(
+        "Entry kind. Symlinks are reported as 'symlink' rather than followed."));
+
+    auto props = doc.new_obj();
+    add_typed_prop(doc, props, "path", "string", "Canonical absolute path");
+    doc.obj_add(props, "type", type_prop);
+    add_typed_prop(doc, props, "size", "integer", "Size in bytes");
+    add_typed_prop(doc, props, "created", "string",
+        "Creation time, ISO-8601 UTC (birth time, falling back to ctime)");
+    add_typed_prop(doc, props, "modified", "string", "Modification time, ISO-8601 UTC");
+    add_typed_prop(doc, props, "permissions", "string",
+        "Ten-character ls-style mode string, e.g. -rw-r--r--");
+    return make_object_schema(doc, props,
+        {"path", "type", "size", "created", "modified", "permissions"});
+}
+
+static Json::MutableVal make_list_directory_output(Json::MutableDoc &doc)
+{
+    auto entry_type = doc.new_obj();
+    doc.obj_add(entry_type, "type", doc.new_str("string"));
+    auto entry_enum = doc.new_arr();
+    doc.arr_append(entry_enum, doc.new_str("file"));
+    doc.arr_append(entry_enum, doc.new_str("directory"));
+    doc.obj_add(entry_type, "enum", entry_enum);
+
+    auto entry_props = doc.new_obj();
+    add_typed_prop(doc, entry_props, "name", "string", "Entry name, not a full path");
+    doc.obj_add(entry_props, "type", entry_type);
+
+    auto entries = doc.new_obj();
+    doc.obj_add(entries, "type",  doc.new_str("array"));
+    doc.obj_add(entries, "items", make_object_schema(doc, entry_props, {"name", "type"}));
+    doc.obj_add(entries, "description", doc.new_str("Directory entries, alphabetically sorted"));
+
+    auto props = doc.new_obj();
+    doc.obj_add(props, "entries", entries);
+    return make_object_schema(doc, props, {"entries"});
+}
+
+// Recursive, so it needs $defs plus a $ref - the node type contains an array of
+// itself. JSON Schema 2020-12 is the default dialect from 2025-11-25 on, so no
+// $schema keyword is needed to select it.
+static Json::MutableVal make_directory_tree_output(Json::MutableDoc &doc)
+{
+    // Built per call, not hoisted: the node schema and the root schema each need their
+    // own "type" property object. Sharing one would splice the member chains and drop a
+    // sibling key from whichever parent got it first - see the warning above.
+    auto make_node_type = [&doc] {
+        auto node_type = doc.new_obj();
+        doc.obj_add(node_type, "type", doc.new_str("string"));
+        auto node_enum = doc.new_arr();
+        doc.arr_append(node_enum, doc.new_str("file"));
+        doc.arr_append(node_enum, doc.new_str("directory"));
+        doc.obj_add(node_type, "enum", node_enum);
+        return node_type;
+    };
+
+    auto self_ref = doc.new_obj();
+    doc.obj_add(self_ref, "$ref", doc.new_str("#/$defs/node"));
+    auto children = doc.new_obj();
+    doc.obj_add(children, "type",  doc.new_str("array"));
+    doc.obj_add(children, "items", self_ref);
+    doc.obj_add(children, "description", doc.new_str(
+        "Present on directories only. Empty when the directory is empty or the depth "
+        "limit was reached."));
+
+    auto node_props = doc.new_obj();
+    add_typed_prop(doc, node_props, "name", "string", "Entry name, not a full path");
+    doc.obj_add(node_props, "type", make_node_type());
+    doc.obj_add(node_props, "children", children);
+    auto node = make_object_schema(doc, node_props, {"name", "type"});
+
+    auto defs = doc.new_obj();
+    doc.obj_add(defs, "node", node);
+
+    // The root IS a node; restate its shape rather than $ref-ing the root at itself,
+    // which some validators reject.
+    auto root_props = doc.new_obj();
+    add_typed_prop(doc, root_props, "name", "string", "Name of the root directory");
+    doc.obj_add(root_props, "type", make_node_type());
+    auto root_children = doc.new_obj();
+    doc.obj_add(root_children, "type", doc.new_str("array"));
+    auto root_ref = doc.new_obj();
+    doc.obj_add(root_ref, "$ref", doc.new_str("#/$defs/node"));
+    doc.obj_add(root_children, "items", root_ref);
+    doc.obj_add(root_props, "children", root_children);
+
+    auto schema = make_object_schema(doc, root_props, {"name", "type"});
+    doc.obj_add(schema, "$defs", defs);
+    return schema;
+}
+
+static Json::MutableVal make_list_allowed_directories_output(Json::MutableDoc &doc)
+{
+    auto dir_props = doc.new_obj();
+    add_typed_prop(doc, dir_props, "path", "string", "Canonical absolute path");
+    add_typed_prop(doc, dir_props, "writable", "boolean",
+        "True for read-write roots, false for read-only");
+
+    auto dirs = doc.new_obj();
+    doc.obj_add(dirs, "type",  doc.new_str("array"));
+    doc.obj_add(dirs, "items", make_object_schema(doc, dir_props, {"path", "writable"}));
+    doc.obj_add(dirs, "description", doc.new_str(
+        "Allowed roots. Empty means all filesystem access is denied."));
+
+    auto props = doc.new_obj();
+    doc.obj_add(props, "directories", dirs);
+    return make_object_schema(doc, props, {"directories"});
+}
+
+static Json::MutableVal make_grep_files_output(Json::MutableDoc &doc)
+{
+    auto match_props = doc.new_obj();
+    add_typed_prop(doc, match_props, "path", "string", "Absolute path of the file");
+    add_typed_prop(doc, match_props, "line", "integer", "1-based line number");
+    add_typed_prop(doc, match_props, "text", "string", "The line's contents, without the newline");
+    add_typed_prop(doc, match_props, "isMatch", "boolean",
+        "True for a matching line, false for a surrounding context line");
+
+    auto matches = doc.new_obj();
+    doc.obj_add(matches, "type",  doc.new_str("array"));
+    doc.obj_add(matches, "items",
+        make_object_schema(doc, match_props, {"path", "line", "text", "isMatch"}));
+    doc.obj_add(matches, "description", doc.new_str(
+        "Matching lines, plus context lines when contextLines > 0"));
+
+    auto props = doc.new_obj();
+    doc.obj_add(props, "matches", matches);
+    add_typed_prop(doc, props, "count", "integer",
+        "Number of matching lines, excluding context lines");
+    add_typed_prop(doc, props, "truncated", "boolean",
+        "True when the search stopped at the 'max' cap");
+    add_typed_prop(doc, props, "skipped", "integer",
+        "Paths skipped because they fall outside the allowed directories");
+    return make_object_schema(doc, props, {"matches", "count", "truncated", "skipped"});
+}
+
+static Json::MutableVal make_execute_command_output(Json::MutableDoc &doc)
+{
+    auto props = doc.new_obj();
+    add_typed_prop(doc, props, "stdout", "string", "Captured standard output, up to 512 KB");
+    add_typed_prop(doc, props, "stderr", "string", "Captured standard error, up to 512 KB");
+    add_typed_prop(doc, props, "exitCode", "integer", "Process exit status");
+    add_typed_prop(doc, props, "timedOut", "boolean",
+        "True when the command was killed at the timeout; exitCode is then not meaningful");
+    return make_object_schema(doc, props, {"stdout", "stderr", "exitCode", "timedOut"});
+}
+
+// with_output_schemas is false for a 2024-11-05 client. outputSchema is a 2025-06-18
+// field, and declaring one is what obliges the server to return conforming
+// structuredContent - which that client is not being sent. Advertising the schema while
+// withholding the data would be the mismatch, so both are gated on the same flag.
+static std::string build_tools_list_json(bool with_output_schemas)
 {
     Json::MutableDoc doc;
     auto tools = doc.new_arr();
+    // Threaded into every add_tool call below via this lambda so a tool cannot opt out
+    // of the gate by accident.
+    auto out_schema = [&](Json::MutableVal schema) {
+        return with_output_schemas ? schema : Json::MutableVal{};
+    };
+    (void)out_schema;
 
     // read_file
     {
@@ -1257,8 +1763,9 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "properties", props);
         doc.obj_add(schema, "required", make_req(doc, {"path"}));
         doc.arr_append(tools, add_tool(doc, "read_file",
-            "Read the complete contents of a file. Returns UTF-8 text or "
-            "base64-encoded blob for binary files. Maximum 10 MB.", schema, kObserves));
+            "Read the complete contents of a file. Returns UTF-8 text, or for a binary "
+            "file an embedded resource content block with the bytes base64-encoded in "
+            "resource.blob. Maximum 10 MB.", schema, kObserves));
     }
 
     // read_multiple_files
@@ -1469,7 +1976,8 @@ static std::string build_tools_list_json()
             "the command exits non-zero or times out."
             "macOS kernel sandbox enforces filesystem access limits on the child process - "
             "making shell execution safer than soft path-checking.",
-            schema, kRunsCommands));
+            schema, kRunsCommands,
+            out_schema(make_execute_command_output(doc))));
     }
 
     // create_directory
@@ -1495,7 +2003,8 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "required", make_req(doc, {"path"}));
         doc.arr_append(tools, add_tool(doc, "list_directory",
             "List the immediate children of a directory. Each entry is prefixed with [FILE] or [DIR].",
-            schema, kObserves));
+            schema, kObserves,
+            out_schema(make_list_directory_output(doc))));
     }
 
     // directory_tree
@@ -1514,7 +2023,8 @@ static std::string build_tools_list_json()
             "Recursively list a directory as a JSON tree. Each node has name, type, and children. "
             "Returns the full tree by default (no depth limit). "
             "[Extended] Optional depth param: 0 = root only, N = N levels (find -maxdepth semantics).",
-            schema, kObserves));
+            schema, kObserves,
+            out_schema(make_directory_tree_output(doc))));
     }
 
     // move_file
@@ -1564,9 +2074,11 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "required", make_req(doc, {"directory", "nameContains"}));
         doc.arr_append(tools, add_tool(doc, "search_files",
             "Find files and directories whose NAME contains a literal substring "
-            "(case-insensitive; not a glob or regex). Returns one absolute path per line, "
-            "searching recursively under 'directory'. To match by glob use glob_search; "
-            "to search file contents use grep_files.", schema, kObserves));
+            "(case-insensitive; not a glob or regex), searching recursively under "
+            "'directory'. Returns a match count followed by one resource_link per hit; "
+            "the same paths are in structuredContent.matches. To match by glob use "
+            "glob_search; to search file contents use grep_files.",
+            schema, kObserves, out_schema(make_matches_schema(doc, /*with_truncated*/ false))));
     }
 
     // grep_files — [ext] content search (grep-style)
@@ -1620,7 +2132,8 @@ static std::string build_tools_list_json()
             "project directory when 'directory' is omitted). "
             "Example: {\"regex\": \"TODO\", \"directory\": \"/src/app\", \"globs\": [\"**/*.swift\"]}. "
             "To find files by NAME use glob_search (by glob) or search_files (by name substring), "
-            "not this tool. Binary files are skipped.", schema, kObserves));
+            "not this tool. Binary files are skipped.", schema, kObserves,
+            out_schema(make_grep_files_output(doc))));
     }
 
     // get_file_info
@@ -1633,7 +2146,7 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "required", make_req(doc, {"path"}));
         doc.arr_append(tools, add_tool(doc, "get_file_info",
             "Get metadata for a file or directory: type, size, timestamps, and permissions.",
-            schema, kObserves));
+            schema, kObserves, out_schema(make_get_file_info_output(doc))));
     }
 
     // list_allowed_directories
@@ -1643,7 +2156,8 @@ static std::string build_tools_list_json()
         doc.obj_add(schema, "properties", doc.new_obj());
         doc.arr_append(tools, add_tool(doc, "list_allowed_directories",
             "List the directories this MCP server is allowed to access, "
-            "with their access mode (read-only or read-write).", schema, kObserves));
+            "with their access mode (read-only or read-write).", schema, kObserves,
+            out_schema(make_list_allowed_directories_output(doc))));
     }
 
     // glob_search (extended)
@@ -1666,7 +2180,10 @@ static std::string build_tools_list_json()
         add_str_prop(doc, props, "directory", "Absolute root directory to search");
         doc.obj_add(props, "globs",        globs_prop);
         doc.obj_add(props, "excludeGlobs", excl_prop);
-        add_int_prop(doc, props, "max", "Maximum results (default 1000; 0 = unlimited)");
+        add_int_prop(doc, props, "max",
+            "Maximum results (default 1000). 0 or omitted means the 1000 default, not "
+            "unlimited; raise it explicitly to go past 1000. structuredContent.truncated "
+            "reports when the cap was reached.");
         auto schema = doc.new_obj();
         doc.obj_add(schema, "type", doc.new_str("object"));
         doc.obj_add(schema, "properties", props);
@@ -1675,8 +2192,12 @@ static std::string build_tools_list_json()
             "[Extended] Find files by filename GLOB using replay's glob engine. "
             "Returns matching files only (not directories). Supports "
             "** (recursive), ? (single char), {a,b} (alternation). "
-            "Globs are relative to 'directory'. To search file CONTENTS use grep_files; "
-            "to match a literal name substring use search_files.", schema, kObserves));
+            "Globs are relative to 'directory'. Returns a match count followed by one "
+            "resource_link per hit; the same paths are in structuredContent.matches, "
+            "with structuredContent.truncated set when the 'max' cap was reached. "
+            "To search file CONTENTS use grep_files; "
+            "to match a literal name substring use search_files.",
+            schema, kObserves, out_schema(make_matches_schema(doc, /*with_truncated*/ true))));
     }
 
     doc.set_root(tools);
@@ -1756,6 +2277,12 @@ static void handle_message(const std::string &line,
                 }
             }
         }
+        // Record what was agreed, so the result builders can honour it. Everything
+        // replay supports above 2024-11-05 has the 2025-06-18 result surface, so the
+        // question is just whether the client landed on the oldest revision.
+        g_structuredOutputNegotiated.store(negotiated != std::string_view("2024-11-05"),
+                                           std::memory_order_relaxed);
+
         resp.obj_add(result, "protocolVersion", resp.new_str(negotiated));
         auto caps = resp.new_obj();
         resp.obj_add(caps, "tools", resp.new_obj());
@@ -1784,7 +2311,13 @@ static void handle_message(const std::string &line,
 
     if (method == "tools/list")
     {
-        static const std::string kToolsJson = build_tools_list_json();
+        // Two cached variants rather than one: which is correct depends on the
+        // negotiated revision, and building it per request would re-serialize 16 tool
+        // schemas on every call.
+        static const std::string kToolsJsonModern = build_tools_list_json(true);
+        static const std::string kToolsJsonLegacy = build_tools_list_json(false);
+        const std::string &kToolsJson = structured_output_negotiated()
+                                            ? kToolsJsonModern : kToolsJsonLegacy;
         Json::MutableDoc resp;
         auto result = resp.new_obj();
         resp.obj_add(result, "tools", resp.new_raw(kToolsJson));

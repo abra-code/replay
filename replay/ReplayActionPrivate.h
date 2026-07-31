@@ -74,6 +74,29 @@ static inline void PrintMCPMultiTextResult(ReplayContext *context, ActionContext
     context->outputSerializer->scheduleString(std::move(response), -1);
 }
 
+// Text block plus structuredContent. structuredJson must be a serialized JSON object
+// conforming to the tool's declared outputSchema, or empty to omit it.
+static inline void PrintMCPStructuredResult(ReplayContext *context, ActionContext *actionContext,
+                                             std::string text, std::string structuredJson)
+{
+    assert(context->mcpServer);
+    std::string response = MakeMCPStructuredResult(actionContext->mcpRequestID,
+                                                    std::move(text), std::move(structuredJson));
+    context->outputSerializer->scheduleString(std::move(response), -1);
+}
+
+static inline void PrintMCPResourceLinkResult(ReplayContext *context, ActionContext *actionContext,
+                                               std::string summaryText,
+                                               const std::vector<std::string> &paths,
+                                               std::string structuredJson)
+{
+    assert(context->mcpServer);
+    std::string response = MakeMCPResourceLinkResult(actionContext->mcpRequestID,
+                                                      std::move(summaryText), paths,
+                                                      std::move(structuredJson));
+    context->outputSerializer->scheduleString(std::move(response), -1);
+}
+
 static inline void PrintMCPExecuteResult(ReplayContext *context, ActionContext *actionContext,
                                           const MCPExecuteResult &r)
 {

@@ -836,6 +836,13 @@ GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
         out += delim;
         out.append(content.data() + s, e - s);
         out += '\n';
+
+        // Same line, structured. Recorded here rather than parsed back out of `out`,
+        // because a path or a matched line containing a colon makes the text form
+        // ambiguous.
+        result.matches.push_back(MCPGrepMatch{
+            filePath, (int64_t)(i + 1), std::string(content.data() + s, e - s), is_match});
+
         last_printed = i;
     };
 

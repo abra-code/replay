@@ -21,13 +21,26 @@ ListDirectory(const std::string &dirPath, ReplayContext *context, ActionContext 
 			return false;
 		}
 		std::string text;
+		Json::MutableDoc doc;
+		auto entryArray = doc.new_arr();
 		for(const auto &e : entries)
 		{
 			text += e.isDirectory ? "[DIR]  " : "[FILE] ";
 			text += e.name;
 			text += "\n";
+
+			// The [DIR]/[FILE] prefix as a field, so a caller does not have to match on
+			// the padding - the markers are deliberately different widths for alignment.
+			auto entry = doc.new_obj();
+			doc.obj_add(entry, "name", doc.new_str(e.name));
+			doc.obj_add(entry, "type", doc.new_str(e.isDirectory ? "directory" : "file"));
+			doc.arr_append(entryArray, entry);
 		}
-		PrintMCPTextResult(context, actionContext, std::move(text));
+		auto structured = doc.new_obj();
+		doc.obj_add(structured, "entries", entryArray);
+		doc.set_root(structured);
+
+		PrintMCPStructuredResult(context, actionContext, std::move(text), doc.to_string());
 		return true;
 	}
 
@@ -106,8 +119,20 @@ DirectoryTree(const std::string &dirPath, intptr_t maxDepth, ReplayContext *cont
 		doc.set_root(TreeNodeToVal(doc, root));
 		std::string jsonStr = doc.to_string();
 		if(jsonStr.empty())
-			jsonStr = "{}";
-		PrintMCPTextResult(context, actionContext, std::move(jsonStr));
+		{
+			// Was "{}", which is not a tree - it satisfies neither the caller nor the
+			// declared outputSchema, whose required keys are name and type. Serializing
+			// a tree we just built should not fail, so if it does, say so rather than
+			// hand back a well-formed lie.
+			PrintMCPError(context, actionContext, -32603,
+			              std::string("failed to serialize directory tree for \"") + dirPath + "\"");
+			return false;
+		}
+		// This tool already answered in JSON, just wrapped in a text block. The same
+		// document now also goes in structuredContent, so a client no longer has to
+		// know that content[0].text happens to be parseable. The text block keeps the
+		// identical bytes, which is exactly the mirror the spec asks for here.
+		PrintMCPStructuredResult(context, actionContext, jsonStr, jsonStr);
 		return true;
 	}
 
