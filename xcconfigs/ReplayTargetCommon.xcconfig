@@ -7,3 +7,9 @@ PRODUCT_BUNDLE_IDENTIFIER = com.abracode.replay
 // Previously auto-linked via Foundation when .mm files were present; now explicit.
 OTHER_LDFLAGS = $(inherited) -framework CoreFoundation
 
+// The fingerprint engine, blake3 and fast-crc32 sources are compiled directly into
+// replay (see TaskFingerprint.cpp). These mirror the settings the standalone
+// Blake3TargetCommon / FastCrc32TargetCommon library targets use.
+GCC_PREPROCESSOR_DEFINITIONS = $(inherited) BLAKE3_NO_SSE41=1 BLAKE3_NO_AVX512=1 BLAKE3_NO_AVX2=1
+OTHER_CFLAGS[arch=x86_64] = $(inherited) -mcrc32 -mpclmul
+

@@ -41,7 +41,6 @@ https://github.com/abra-code/DeltaApp
 The content of `replay --help`:
 
 ```
-
 replay -- execute a declarative script of actions, aka a playlist
 
 Usage:
@@ -76,11 +75,30 @@ Options:
                      but it is possible if needed.
   -l, --stdout PATH  log standard output to provided file path.
   -m, --stderr PATH  log standard error to provided file path.
+  --cache            Enable the incremental execution cache: skip actions whose declared inputs,
+                     owned paths and declared environment are unchanged since the last run.
+                     Off by default. Requires a playlist file; works in the default concurrent
+                     mode and in --serial mode. See "Incremental execution cache" below.
+  --cache-dir DIR    Directory holding the cache manifest. Default ".replay-cache". Implies --cache.
+  --cache-format json|plist   Manifest format. Default "json". Implies --cache.
+  --cache-hash crc32c|blake3   Per-file content hash algorithm. Default "crc32c". Implies --cache.
+  --cache-refresh    Execute everything, ignoring stored entries, but record fresh ones. Implies --cache.
+  --cache-env NAME   Fold the value of this environment variable into every task's input fingerprint.
+                     May be repeated. Implies --cache.
+  --cache-memo sidecar|xattr|off   Where per-file content hashes are memoized between runs, so that
+                     unchanged files are not re-read. "sidecar" (default) keeps them in a compact index
+                     in --cache-dir: it works when the source tree is read-only, which is the usual case
+                     under --sandbox, and costs about a tenth of what "xattr" costs per fingerprinted
+                     file. "xattr" stores them in each file's public.fingerprint.* attribute, shared
+                     with the gate and fingerprint tools, and needs the files to be writable.
+                     Implies --cache.
+  --cache-memo-refresh   Ignore what is memoized, recompute every file hash and rewrite the memo.
+                     Implies --cache.
   --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay
                      auto-discovers declared paths from the playlist and adds them to the policy.
                      Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.
                      Tool paths in "execute" actions must be absolute (e.g. /usr/bin/python3),
-                     not bare names — $PATH lookup happens after the sandbox is active.
+                     not bare names - $PATH lookup happens after the sandbox is active.
                      Violations return EPERM to the caller;
                      To discover path requirements, use sandbox/sandbox-discover.py
                      To stream violations in real time run:
@@ -151,6 +169,111 @@ Dependency analysis:
      consumers of given input paths and cannot share their inputs with other actions. Producing additional items under
      such exclusive input paths is also not allowed. "replay" will report an error during dependency analysis
      and will not execute an action graph with exclusive input violations.
+
+Incremental execution cache:
+
+  With --cache, "replay" records a fingerprint of each cacheable action's declared world in a manifest
+  (one per playlist file, in --cache-dir) and skips the action on later runs while that world is unchanged.
+  The check is metadata-only: file content hashes of declared inputs, declared environment variable values,
+  and the state of the action's owned paths (outputs, moved/deleted sources, edited files). Nothing about
+  the action's stdout is stored or replayed; skipped actions print nothing.
+
+  Cacheable actions: execute with at least one declared output, clone/copy, hardlink, symlink,
+  create file, create directory (checked for existence and type only, since later actions may write into it),
+  move, delete, and edit (except with "dry-run": true). Never cached: read, list, tree, info, glob, echo,
+  and execute without declared outputs - their product is their stdout or their side effects are unknown.
+
+  Per-step playlist keys:
+    env       Array of environment variable names whose values are folded into this action's fingerprint.
+              A change in any of them re-runs the action; a missing variable is an error.
+    cache     Boolean override: false opts a cacheable action out of caching.
+
+  The owned-path snapshot is taken at the END of a run, so playlists that mutate earlier products
+  downstream (an edit of a generated file, a delete of a temporary, a move) reach a fixed point:
+  when nothing changed since the last run finished, every action skips, including the mutators.
+  The cache trusts declarations: an undeclared input does not invalidate anything, exactly as it does
+  not order execution in dependency analysis. Declare what an action reads and writes.
+  That includes the "execute" tool itself: an action's identity covers the expanded command line, not the
+  bytes of the binary or script it names, so rebuilding the tool alone does not re-run the action. List the
+  tool in "inputs" whenever a new build of it must invalidate what it produced.
+  Prefer absolute or environment-anchored paths in cached playlists; relative paths resolve against
+  the current directory on every run and a directory change looks like a changed world.
+  After restructuring a playlist (especially removing a step that mutated earlier products),
+  run once with --cache-refresh to re-execute everything and rebuild the manifest.
+
+  The per-file hash memoization (--cache-memo) records a content hash per file so that unchanged
+  files are not read again. The two backends answer the same question but trust different things,
+  because one of them writes to the very file it is memoizing and the other does not:
+
+    sidecar  A compact index in the cache directory, keyed by device and inode and validated against
+             size, modification time, CHANGE time and file type. Nothing is written to the inputs, so
+             it works on a read-only tree. Not touching the files is also what lets it check ctime,
+             which closes the wrong skip described under "xattr" below wherever the filesystem keeps
+             a real one (APFS and HFS+ do): utimes() is an inode metadata change, so a tool that
+             restores mtime cannot restore ctime. On a filesystem that carries no true change time
+             and derives it from the modification time, that guarantee degrades to the "xattr" one.
+             The index is machine-local, because inode numbers are, while the manifest beside it
+             is shareable; --cache-hash selects a separate index file, so switching algorithms does
+             not invalidate the other. It carries a checksum and is rebuilt from scratch if it fails
+             - that detects accidental corruption, NOT tampering: there is no key, so anyone who can
+             write the cache directory can write a matching checksum, and can also crash a concurrent
+             replay by truncating the index while it is mapped. Protect the cache directory with
+             filesystem permissions.
+
+    xattr    The public.fingerprint.* attribute on each file, the format shared with the gate and
+             fingerprint tools. Needs the files to be writable and briefly chmods read-only ones. It
+             trusts a file's inode, size and mtime only: a rewrite that restores all three (a tool
+             preserving timestamps, touch -r) is invisible to it, so the file can look unchanged and
+             cause a wrong skip. Use --cache-memo-refresh (or off) when inputs are rewritten with
+             restored modification times.
+
+  The sidecar keeps its data in two files, the index and a small append-only journal beside it, with a
+  lock file alongside. A run that changes nothing writes neither of the two. A run that changes a few
+  files appends only those records to the journal, so an incremental build does not rewrite an index
+  that may be tens of megabytes. The first run whose changes no longer fit the journal folds it back
+  into the index and clears it, which is also when entries no recent run has mentioned are evicted.
+  Every journal batch carries its own checksum, so a batch left half-written by a crash costs that
+  batch and nothing else.
+
+  When the index is written it usually also records its own crc32c, and the file's inode, size and
+  mtime at that moment, in a "public.replay.store-crc32c" attribute, readable with "xattr -px". A
+  failure to record it is silent without -v, since it is a diagnostic and nothing depends on it. It
+  says what the index contained when it was published, which is not the same claim as what it contains
+  now: an attribute cannot notice bit rot, since rot moves neither size nor mtime. Deliberately NOT one
+  of the public.fingerprint.* names, whose documented rule is to trust a recorded hash whenever inode,
+  size and mtime still match - under that name a corrupted index would report its pre-corruption hash
+  to gate and fingerprint, and would do so exactly when someone was investigating the corruption. What
+  protects the index is the checksum in its trailer, inside the file and covering the index body, which
+  replay verifies every time it opens the sidecar.
+
+  --dry-run reads the sidecar and never writes it, so a dry run leaves the memo byte-identical. With
+  "xattr" the memoization is turned off for the run instead: that backend has no read-only mode, so any
+  file that missed would have its record written (and a read-only file briefly chmod-ed) as part of the
+  same pass. Turning it off costs a re-hash and keeps the dry run's promise to write nothing.
+
+  Cost, measured on a warm run whose declared world is one directory of 20000 files: sidecar 1.9 us per
+  file, xattr 18.6 us (a getxattr syscall each), off 20.8 us (every file read and re-hashed). How much
+  of that a run notices depends on how much of it is fingerprinting - a playlist dominated by process
+  spawning sees no difference between the three.
+
+  With --sandbox, the cache directory is granted read-write in the sandbox automatically. The default
+  sidecar memoization lives there, so it keeps working when the input trees are read-only. Choosing
+  --cache-memo xattr under a sandbox means every memoization write to an input is denied and logged
+  as a kernel sandbox violation; the run stays correct, just noisier and slower.
+
+  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action on stdout
+  without executing or writing anything - a "what would rebuild" query (no summary line, since
+  nothing runs). During a real run, --verbose reports the same hits and miss reasons on stderr as
+  "cache: HIT/MISS ..." lines, so stdout stays exactly what the playlist would print without --cache.
+  A task that misses with the reason "missing input" on every run has a declared path that cannot be
+  read - a nonexistent input, or an unreadable file inside a declared directory. Such a task can never
+  be cached, because an unread path and a deleted one are indistinguishable in the fingerprint.
+  Every run that actually executes with --cache ends with a summary line on stderr:
+  cache: N hits, M executed, K failed, manifest <path>.
+
+  A failed action's previous entry is kept. It can only produce a hit later if the declared world
+  returns to the exact state a SUCCESSFUL run recorded, so the skip is correct - but note that a run
+  which fails and is then reverted comes back green without re-executing the action.
 
 Actions and parameters:
 
@@ -410,7 +533,6 @@ Sandbox profile JSON schema (--sandbox-profile FILE):
 See also:
 
   dispatch --help
-
 ```
 
 # dispatch
@@ -577,7 +699,6 @@ the combination of lightweight crc32c and xattr caching provides excellent perfo
 The content of `gate --help`:
 
 ```
-
 Usage: gate [OPTIONS] -- COMMAND [ARGS...]
 Execute COMMAND only if inputs have changed or outputs are missing.
 
@@ -608,7 +729,7 @@ OPTIONS:
   --dry-run              Report hit/miss without executing
   --sandbox             Enable hard sandbox. Use --allow-read, --allow-write, --sandbox-profile
                          for additional paths. The wrapped command (after --) must use an
-                         absolute path (e.g. /usr/bin/clang), not a bare name — $PATH lookup
+                         absolute path (e.g. /usr/bin/clang), not a bare name - $PATH lookup
                          happens after the sandbox is active. Violations return EPERM to
                          the caller; to discover path requirements, use
                          sandbox/sandbox-discover.py. To stream violations in real time run:
@@ -645,5 +766,4 @@ Sandbox profile JSON schema (--sandbox-profile=FILE):
   process-exec* covers launching them and bsd.sb covers their system dylibs.
   Third-party tools (Homebrew, Python frameworks) need their prefix in read_only
   because dyld must open their framework or library files at startup.
-
 ```

@@ -74,7 +74,7 @@ static void print_usage(std::ostream& stream)
     stream << "  --dry-run              Report hit/miss without executing\n";
     stream << "  --sandbox             Enable hard sandbox. Use --allow-read, --allow-write, --sandbox-profile\n";
     stream << "                         for additional paths. The wrapped command (after --) must use an\n";
-    stream << "                         absolute path (e.g. /usr/bin/clang), not a bare name — $PATH lookup\n";
+    stream << "                         absolute path (e.g. /usr/bin/clang), not a bare name - $PATH lookup\n";
     stream << "                         happens after the sandbox is active. Violations return EPERM to\n";
     stream << "                         the caller; to discover path requirements, use\n";
     stream << "                         sandbox/sandbox-discover.py. To stream violations in real time run:\n";

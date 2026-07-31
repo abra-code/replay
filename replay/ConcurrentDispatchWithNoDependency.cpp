@@ -26,14 +26,15 @@ DispatchTasksConcurrentlyWithNoDependency(const std::vector<ActionStep>& playlis
 	for (const auto& step : playlist)
 	{
 		HandleActionStep(step, context,
-			[](std::function<void()> action,
+			[](std::function<bool()> action,
 			__unused std::vector<std::string> inputs,
 			__unused std::vector<std::string> mutatingInputs,
 			__unused std::vector<std::string> exclusiveInputs,
-			__unused std::vector<std::string> outputs)
+			__unused std::vector<std::string> outputs,
+			__unused ActionCacheInfo cacheInfo)
 			{
 				if(action)
-					AsyncDispatch(std::move(action));
+					AsyncDispatch([inner = std::move(action)]() { (void)inner(); });
 			});
 	}
 
@@ -48,13 +49,14 @@ void
 DispatchTaskConcurrentlyWithNoDependency(ActionStep step, ReplayContext *context)
 {
 	HandleActionStep(std::move(step), context,
-		[](std::function<void()> action,
+		[](std::function<bool()> action,
 		__unused std::vector<std::string> inputs,
 		__unused std::vector<std::string> mutatingInputs,
 		__unused std::vector<std::string> exclusiveInputs,
-		__unused std::vector<std::string> outputs)
+		__unused std::vector<std::string> outputs,
+		__unused ActionCacheInfo cacheInfo)
 		{
 			if(action)
-				AsyncDispatch(std::move(action));
+				AsyncDispatch([inner = std::move(action)]() { (void)inner(); });
 		});
 }

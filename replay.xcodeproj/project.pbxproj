@@ -56,6 +56,29 @@
 			);
 			target = 1D19043324DE9EE900276D83 /* replay */;
 		};
+		1DCA0E042FC0A10100AA0004 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				main.cpp,
+			);
+			target = 1D19043324DE9EE900276D83 /* replay */;
+		};
+		1DCA0E052FC0A10100AA0005 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				blake3_neon.c,
+				blake3_sse2.c,
+			);
+			target = 1D19043324DE9EE900276D83 /* replay */;
+		};
+		1DCA0E062FC0A10100AA0006 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ab_neon_eor3_crc32c_v9s3x2e_s3.c,
+				ab_sse_crc32c_v4s3x3k4096e.c,
+			);
+			target = 1D19043324DE9EE900276D83 /* replay */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -72,6 +95,9 @@
 		1DDC258F2FB2F9C5004B4724 /* yyjson-cpp */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "yyjson-cpp"; sourceTree = "<group>"; };
 		1DDD17A62F7B4E7800DB718A /* glob-overlap */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DA1C8FF2F7C3DF5000F2E31 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "glob-overlap"; sourceTree = "<group>"; };
 		1DDD17AF2F7B4EBA00DB718A /* glob-cpp */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "glob-cpp"; sourceTree = "<group>"; };
+		1DCA0E012FC0A10100AA0001 /* fingerprint */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DCA0E042FC0A10100AA0004 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = fingerprint; sourceTree = "<group>"; };
+		1DCA0E022FC0A10100AA0002 /* blake3 */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DCA0E052FC0A10100AA0005 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = blake3; sourceTree = "<group>"; };
+		1DCA0E032FC0A10100AA0003 /* fast-crc32 */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1DCA0E062FC0A10100AA0006 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "fast-crc32"; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -99,6 +125,9 @@
 				1DA1C8E72F7C3D9D000F2E31 /* common */,
 				1DDD17AF2F7B4EBA00DB718A /* glob-cpp */,
 				1DDD17A62F7B4E7800DB718A /* glob-overlap */,
+				1DCA0E012FC0A10100AA0001 /* fingerprint */,
+				1DCA0E022FC0A10100AA0002 /* blake3 */,
+				1DCA0E032FC0A10100AA0003 /* fast-crc32 */,
 				1DDC25132FAD644F004B4724 /* sandbox */,
 				1DDC25802FB2F61D004B4724 /* yyjson */,
 				1DDC258F2FB2F9C5004B4724 /* yyjson-cpp */,
@@ -163,6 +192,9 @@
 				1DDC258F2FB2F9C5004B4724 /* yyjson-cpp */,
 				1DDD17A62F7B4E7800DB718A /* glob-overlap */,
 				1DDD17AF2F7B4EBA00DB718A /* glob-cpp */,
+				1DCA0E012FC0A10100AA0001 /* fingerprint */,
+				1DCA0E022FC0A10100AA0002 /* blake3 */,
+				1DCA0E032FC0A10100AA0003 /* fast-crc32 */,
 			);
 			name = replay;
 			productName = replay;

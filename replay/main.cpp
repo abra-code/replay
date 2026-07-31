@@ -23,6 +23,9 @@
 #include "MCPServer.h"
 #include "EnvVarExpand.h"
 #include "PlaylistDoc.h"
+#include "TaskFingerprint.h"
+#include "FingerprintStore.h"
+#include "PosixFileOps.h"
 
 #include <limits.h>
 
@@ -40,6 +43,14 @@ enum
 	kOptAllowWrite,
 	kOptDenyNetwork,
 	kOptMCPServer,
+	kOptCache,
+	kOptCacheDir,
+	kOptCacheFormat,
+	kOptCacheHash,
+	kOptCacheRefresh,
+	kOptCacheEnv,
+	kOptCacheMemo,
+	kOptCacheMemoRefresh,
 };
 
 static struct option sLongOptions[] =
@@ -62,6 +73,14 @@ static struct option sLongOptions[] =
 	{"allow-write",			required_argument,	NULL, kOptAllowWrite},
 	{"deny-network",		no_argument,			NULL, kOptDenyNetwork},
 	{"mcp-server",			no_argument,			NULL, kOptMCPServer},
+	{"cache",				no_argument,			NULL, kOptCache},
+	{"cache-dir",			required_argument,	NULL, kOptCacheDir},
+	{"cache-format",		required_argument,	NULL, kOptCacheFormat},
+	{"cache-hash",			required_argument,	NULL, kOptCacheHash},
+	{"cache-refresh",		no_argument,			NULL, kOptCacheRefresh},
+	{"cache-env",			required_argument,	NULL, kOptCacheEnv},
+	{"cache-memo",			required_argument,	NULL, kOptCacheMemo},
+	{"cache-memo-refresh",	no_argument,			NULL, kOptCacheMemoRefresh},
 	{"version",				no_argument,		NULL, 'V'},
 	{"help",				no_argument,		NULL, 'h'},
 	{NULL, 					0,					NULL,  0 }
@@ -108,11 +127,30 @@ DisplayHelp(void)
 		"                     but it is possible if needed.\n"
 		"  -l, --stdout PATH  log standard output to provided file path.\n"
 		"  -m, --stderr PATH  log standard error to provided file path.\n"
+		"  --cache            Enable the incremental execution cache: skip actions whose declared inputs,\n"
+		"                     owned paths and declared environment are unchanged since the last run.\n"
+		"                     Off by default. Requires a playlist file; works in the default concurrent\n"
+		"                     mode and in --serial mode. See \"Incremental execution cache\" below.\n"
+		"  --cache-dir DIR    Directory holding the cache manifest. Default \".replay-cache\". Implies --cache.\n"
+		"  --cache-format json|plist   Manifest format. Default \"json\". Implies --cache.\n"
+		"  --cache-hash crc32c|blake3   Per-file content hash algorithm. Default \"crc32c\". Implies --cache.\n"
+		"  --cache-refresh    Execute everything, ignoring stored entries, but record fresh ones. Implies --cache.\n"
+		"  --cache-env NAME   Fold the value of this environment variable into every task's input fingerprint.\n"
+		"                     May be repeated. Implies --cache.\n"
+		"  --cache-memo sidecar|xattr|off   Where per-file content hashes are memoized between runs, so that\n"
+		"                     unchanged files are not re-read. \"sidecar\" (default) keeps them in a compact index\n"
+		"                     in --cache-dir: it works when the source tree is read-only, which is the usual case\n"
+		"                     under --sandbox, and costs about a tenth of what \"xattr\" costs per fingerprinted\n"
+		"                     file. \"xattr\" stores them in each file's public.fingerprint.* attribute, shared\n"
+		"                     with the gate and fingerprint tools, and needs the files to be writable.\n"
+		"                     Implies --cache.\n"
+		"  --cache-memo-refresh   Ignore what is memoized, recompute every file hash and rewrite the memo.\n"
+		"                     Implies --cache.\n"
 		"  --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay\n"
 		"                     auto-discovers declared paths from the playlist and adds them to the policy.\n"
 		"                     Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.\n"
 		"                     Tool paths in \"execute\" actions must be absolute (e.g. /usr/bin/python3),\n"
-		"                     not bare names — $PATH lookup happens after the sandbox is active.\n"
+		"                     not bare names - $PATH lookup happens after the sandbox is active.\n"
 		"                     Violations return EPERM to the caller;\n"
 		"                     To discover path requirements, use sandbox/sandbox-discover.py\n"
         "                     To stream violations in real time run:\n"
@@ -192,6 +230,114 @@ DisplayHelp(void)
 		"     consumers of given input paths and cannot share their inputs with other actions. Producing additional items under\n"
 		"     such exclusive input paths is also not allowed. \"replay\" will report an error during dependency analysis\n"
 		"     and will not execute an action graph with exclusive input violations.\n"
+		"\n"
+	);
+
+	printf(
+		"Incremental execution cache:\n"
+		"\n"
+		"  With --cache, \"replay\" records a fingerprint of each cacheable action's declared world in a manifest\n"
+		"  (one per playlist file, in --cache-dir) and skips the action on later runs while that world is unchanged.\n"
+		"  The check is metadata-only: file content hashes of declared inputs, declared environment variable values,\n"
+		"  and the state of the action's owned paths (outputs, moved/deleted sources, edited files). Nothing about\n"
+		"  the action's stdout is stored or replayed; skipped actions print nothing.\n"
+		"\n"
+		"  Cacheable actions: execute with at least one declared output, clone/copy, hardlink, symlink,\n"
+		"  create file, create directory (checked for existence and type only, since later actions may write into it),\n"
+		"  move, delete, and edit (except with \"dry-run\": true). Never cached: read, list, tree, info, glob, echo,\n"
+		"  and execute without declared outputs - their product is their stdout or their side effects are unknown.\n"
+		"\n"
+		"  Per-step playlist keys:\n"
+		"    env       Array of environment variable names whose values are folded into this action's fingerprint.\n"
+		"              A change in any of them re-runs the action; a missing variable is an error.\n"
+		"    cache     Boolean override: false opts a cacheable action out of caching.\n"
+		"\n"
+		"  The owned-path snapshot is taken at the END of a run, so playlists that mutate earlier products\n"
+		"  downstream (an edit of a generated file, a delete of a temporary, a move) reach a fixed point:\n"
+		"  when nothing changed since the last run finished, every action skips, including the mutators.\n"
+		"  The cache trusts declarations: an undeclared input does not invalidate anything, exactly as it does\n"
+		"  not order execution in dependency analysis. Declare what an action reads and writes.\n"
+		"  That includes the \"execute\" tool itself: an action's identity covers the expanded command line, not the\n"
+		"  bytes of the binary or script it names, so rebuilding the tool alone does not re-run the action. List the\n"
+		"  tool in \"inputs\" whenever a new build of it must invalidate what it produced.\n"
+		"  Prefer absolute or environment-anchored paths in cached playlists; relative paths resolve against\n"
+		"  the current directory on every run and a directory change looks like a changed world.\n"
+		"  After restructuring a playlist (especially removing a step that mutated earlier products),\n"
+		"  run once with --cache-refresh to re-execute everything and rebuild the manifest.\n"
+		"\n"
+		"  The per-file hash memoization (--cache-memo) records a content hash per file so that unchanged\n"
+		"  files are not read again. The two backends answer the same question but trust different things,\n"
+		"  because one of them writes to the very file it is memoizing and the other does not:\n"
+		"\n"
+		"    sidecar  A compact index in the cache directory, keyed by device and inode and validated against\n"
+		"             size, modification time, CHANGE time and file type. Nothing is written to the inputs, so\n"
+		"             it works on a read-only tree. Not touching the files is also what lets it check ctime,\n"
+		"             which closes the wrong skip described under \"xattr\" below wherever the filesystem keeps\n"
+		"             a real one (APFS and HFS+ do): utimes() is an inode metadata change, so a tool that\n"
+		"             restores mtime cannot restore ctime. On a filesystem that carries no true change time\n"
+		"             and derives it from the modification time, that guarantee degrades to the \"xattr\" one.\n"
+		"             The index is machine-local, because inode numbers are, while the manifest beside it\n"
+		"             is shareable; --cache-hash selects a separate index file, so switching algorithms does\n"
+		"             not invalidate the other. It carries a checksum and is rebuilt from scratch if it fails\n"
+		"             - that detects accidental corruption, NOT tampering: there is no key, so anyone who can\n"
+		"             write the cache directory can write a matching checksum, and can also crash a concurrent\n"
+		"             replay by truncating the index while it is mapped. Protect the cache directory with\n"
+		"             filesystem permissions.\n"
+		"\n"
+		"    xattr    The public.fingerprint.* attribute on each file, the format shared with the gate and\n"
+		"             fingerprint tools. Needs the files to be writable and briefly chmods read-only ones. It\n"
+		"             trusts a file's inode, size and mtime only: a rewrite that restores all three (a tool\n"
+		"             preserving timestamps, touch -r) is invisible to it, so the file can look unchanged and\n"
+		"             cause a wrong skip. Use --cache-memo-refresh (or off) when inputs are rewritten with\n"
+		"             restored modification times.\n"
+		"\n"
+		"  The sidecar keeps its data in two files, the index and a small append-only journal beside it, with a\n"
+		"  lock file alongside. A run that changes nothing writes neither of the two. A run that changes a few\n"
+		"  files appends only those records to the journal, so an incremental build does not rewrite an index\n"
+		"  that may be tens of megabytes. The first run whose changes no longer fit the journal folds it back\n"
+		"  into the index and clears it, which is also when entries no recent run has mentioned are evicted.\n"
+		"  Every journal batch carries its own checksum, so a batch left half-written by a crash costs that\n"
+		"  batch and nothing else.\n"
+		"\n"
+		"  When the index is written it usually also records its own crc32c, and the file's inode, size and\n"
+		"  mtime at that moment, in a \"public.replay.store-crc32c\" attribute, readable with \"xattr -px\". A\n"
+		"  failure to record it is silent without -v, since it is a diagnostic and nothing depends on it. It\n"
+		"  says what the index contained when it was published, which is not the same claim as what it contains\n"
+		"  now: an attribute cannot notice bit rot, since rot moves neither size nor mtime. Deliberately NOT one\n"
+		"  of the public.fingerprint.* names, whose documented rule is to trust a recorded hash whenever inode,\n"
+		"  size and mtime still match - under that name a corrupted index would report its pre-corruption hash\n"
+		"  to gate and fingerprint, and would do so exactly when someone was investigating the corruption. What\n"
+		"  protects the index is the checksum in its trailer, inside the file and covering the index body, which\n"
+		"  replay verifies every time it opens the sidecar.\n"
+		"\n"
+		"  --dry-run reads the sidecar and never writes it, so a dry run leaves the memo byte-identical. With\n"
+		"  \"xattr\" the memoization is turned off for the run instead: that backend has no read-only mode, so any\n"
+		"  file that missed would have its record written (and a read-only file briefly chmod-ed) as part of the\n"
+		"  same pass. Turning it off costs a re-hash and keeps the dry run's promise to write nothing.\n"
+		"\n"
+		"  Cost, measured on a warm run whose declared world is one directory of 20000 files: sidecar 1.9 us per\n"
+		"  file, xattr 18.6 us (a getxattr syscall each), off 20.8 us (every file read and re-hashed). How much\n"
+		"  of that a run notices depends on how much of it is fingerprinting - a playlist dominated by process\n"
+		"  spawning sees no difference between the three.\n"
+		"\n"
+		"  With --sandbox, the cache directory is granted read-write in the sandbox automatically. The default\n"
+		"  sidecar memoization lives there, so it keeps working when the input trees are read-only. Choosing\n"
+		"  --cache-memo xattr under a sandbox means every memoization write to an input is denied and logged\n"
+		"  as a kernel sandbox violation; the run stays correct, just noisier and slower.\n"
+		"\n"
+		"  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action on stdout\n"
+		"  without executing or writing anything - a \"what would rebuild\" query (no summary line, since\n"
+		"  nothing runs). During a real run, --verbose reports the same hits and miss reasons on stderr as\n"
+		"  \"cache: HIT/MISS ...\" lines, so stdout stays exactly what the playlist would print without --cache.\n"
+		"  A task that misses with the reason \"missing input\" on every run has a declared path that cannot be\n"
+		"  read - a nonexistent input, or an unreadable file inside a declared directory. Such a task can never\n"
+		"  be cached, because an unread path and a deleted one are indistinguishable in the fingerprint.\n"
+		"  Every run that actually executes with --cache ends with a summary line on stderr:\n"
+		"  cache: N hits, M executed, K failed, manifest <path>.\n"
+		"\n"
+		"  A failed action's previous entry is kept. It can only produce a hit later if the declared world\n"
+		"  returns to the exact state a SUCCESSFUL run recorded, so the skip is correct - but note that a run\n"
+		"  which fails and is then reverted comes back green without re-executing the action.\n"
 		"\n"
 	);
 
@@ -527,6 +673,14 @@ int main(int argc, const char * argv[])
 	context.force = false;
 	context.orderedOutput = false;
 	context.mcpServer = false;
+	context.cacheEnabled = false;
+	context.cacheRefresh = false;
+	context.cacheDir = ".replay-cache";
+	context.cacheFormat = CacheFormat::Json;
+	context.cacheHash = FileHashAlgorithm::CRC32C;
+	context.cacheMemo = CacheMemo::Sidecar;
+	context.cacheMemoRefresh = false;
+	context.cacheSession = nullptr;
 
 	std::vector<std::string> playlistKeys;
 
@@ -644,6 +798,82 @@ int main(int argc, const char * argv[])
 				mcpServerMode = true;
 			break;
 
+			// All --cache-* options imply --cache: passing one without the other is
+			// always a mistake, never a request to configure a disabled cache.
+			case kOptCache:
+				context.cacheEnabled = true;
+			break;
+
+			case kOptCacheDir:
+				context.cacheEnabled = true;
+				context.cacheDir = optarg;
+			break;
+
+			case kOptCacheFormat:
+			{
+				context.cacheEnabled = true;
+				std::string format(optarg);
+				if(format == "json")
+					context.cacheFormat = CacheFormat::Json;
+				else if(format == "plist")
+					context.cacheFormat = CacheFormat::Plist;
+				else
+				{
+					LogError("error: invalid --cache-format \"%s\". Expected \"json\" or \"plist\"\n", optarg);
+					return EXIT_FAILURE;
+				}
+			}
+			break;
+
+			case kOptCacheHash:
+			{
+				context.cacheEnabled = true;
+				std::string algorithm(optarg);
+				if(algorithm == "crc32c")
+					context.cacheHash = FileHashAlgorithm::CRC32C;
+				else if(algorithm == "blake3")
+					context.cacheHash = FileHashAlgorithm::BLAKE3;
+				else
+				{
+					LogError("error: invalid --cache-hash \"%s\". Expected \"crc32c\" or \"blake3\"\n", optarg);
+					return EXIT_FAILURE;
+				}
+			}
+			break;
+
+			case kOptCacheRefresh:
+				context.cacheEnabled = true;
+				context.cacheRefresh = true;
+			break;
+
+			case kOptCacheEnv:
+				context.cacheEnabled = true;
+				context.cacheGlobalEnvNames.emplace_back(optarg);
+			break;
+
+			case kOptCacheMemo:
+			{
+				context.cacheEnabled = true;
+				std::string backend(optarg);
+				if(backend == "sidecar")
+					context.cacheMemo = CacheMemo::Sidecar;
+				else if(backend == "xattr")
+					context.cacheMemo = CacheMemo::Xattr;
+				else if(backend == "off")
+					context.cacheMemo = CacheMemo::Off;
+				else
+				{
+					LogError("error: invalid --cache-memo \"%s\". Expected \"sidecar\", \"xattr\" or \"off\"\n", optarg);
+					return EXIT_FAILURE;
+				}
+			}
+			break;
+
+			case kOptCacheMemoRefresh:
+				context.cacheEnabled = true;
+				context.cacheMemoRefresh = true;
+			break;
+
 			case 'V':
 				printf( "replay %s\n", STRINGIFY_VALUE(REPLAY_VERSION) );
 				return EXIT_SUCCESS;
@@ -660,6 +890,105 @@ int main(int argc, const char * argv[])
 
 	// Determine playlist path (needed for both pre-sandbox extraction and execution).
 	const char* playlistPath = (optind < argc) ? argv[optind] : nullptr;
+
+	// The cache needs a complete dependency graph and a playlist file to key its
+	// manifest on. Modes that provide neither ignore --cache with a warning rather
+	// than silently pretending to cache.
+	if(context.cacheEnabled)
+	{
+		const char *unsupportedMode = nullptr;
+		if(mcpServerMode)
+			unsupportedMode = "--mcp-server";
+		else if(!context.batchName.empty())
+			unsupportedMode = "--start-server";
+		else if(playlistPath == nullptr)
+			unsupportedMode = "stdin streaming";
+		else if(context.concurrent && !context.analyzeDependencies)
+			unsupportedMode = "--no-dependency"; // serial dispatch never consults it, so -s -p caches fine
+
+		if(unsupportedMode != nullptr)
+		{
+			LogError("warning: --cache is ignored in %s mode\n", unsupportedMode);
+			context.cacheEnabled = false;
+		}
+	}
+
+	if(context.cacheEnabled)
+	{
+		// Same strict policy as the per-step "env" key: a declared variable that does
+		// not exist is an error, not an empty value silently folded into fingerprints.
+		for(const auto& oneName : context.cacheGlobalEnvNames)
+		{
+			if(context.environment.find(oneName) == context.environment.end())
+			{
+				LogError("error: --cache-env variable \"%s\" is not defined in the environment\n", oneName.c_str());
+				return EXIT_FAILURE;
+			}
+		}
+
+		// An empty --cache-dir resolves to an empty string, which would put the manifest
+		// at "/<hex>.replay-cache.json" and push "" into the sandbox write allow-list.
+		if(context.cacheDir.empty())
+		{
+			LogError("error: --cache-dir requires a non-empty directory path\n");
+			return EXIT_FAILURE;
+		}
+
+		// The cache directory is resolved now, while the CWD is still meaningful and
+		// before the sandbox is applied, so the manifest path cannot move under us.
+		context.cacheDir = file_helpers::resolve_literal_path(context.cacheDir);
+		context.playlistPath = file_helpers::resolve_literal_path(playlistPath);
+
+		if(sandboxRequested)
+		{
+			// The manifest lives in the cache directory, which no playlist ever
+			// declares, so auto-discovery cannot find it: grant it read-write
+			// explicitly. The directory is created now, before the sandbox is
+			// applied, so the grant anchors to a real directory and the end-of-run
+			// save never performs its first mkdir inside the sandbox. --dry-run
+			// writes nothing, so it must not create the directory either.
+			if(!context.dryRun && !posix_mkdir_p(context.cacheDir))
+			{
+				LogError("error: cannot create cache directory: %s\n", context.cacheDir.c_str());
+				return EXIT_FAILURE;
+			}
+			sandboxAllowWrite.push_back(context.cacheDir);
+			// No memoization special case here any more: the default sidecar backend
+			// lives in the cache directory that was just granted read-write, so it
+			// keeps working when the input trees are read-only. Only --cache-memo
+			// xattr writes to the inputs, and choosing it is now explicit.
+		}
+
+		// Configuration for the fingerprint code shared with gate/fingerprint.
+		g_hash = context.cacheHash;
+		g_verbose = context.verbose;
+		g_memo_backend = context.cacheMemo;
+		g_memo_refresh = context.cacheMemoRefresh;
+
+		// The xattr backend's own mode. --dry-run promises to write nothing, and this
+		// backend has no read-only mode: a hit is a pure getxattr, but every file that
+		// MISSES has its record written by the same pass, briefly chmod-ing read-only
+		// files to do it. So a dry run turns it off entirely and re-hashes instead.
+		// The sidecar has no such coupling: a dry run reads it and simply never saves.
+		if(context.cacheMemo != CacheMemo::Xattr)
+			g_xattr_mode = XattrMode::Off;
+		else if(context.dryRun)
+			g_xattr_mode = XattrMode::Off;
+		else
+			g_xattr_mode = context.cacheMemoRefresh ? XattrMode::Refresh : XattrMode::On;
+	}
+
+	// Opened here, after the cache directory is resolved and before the sandbox is
+	// applied: the mapping survives sandbox_init, and the cache directory is granted
+	// read-write anyway for the end-of-run save. One store per cache directory per
+	// PROCESS, not per playlist - it holds file metadata, not playlist state, so
+	// several --playlist-key runs share one load and one save.
+	std::unique_ptr<FingerprintStore> fingerprintStore;
+	if(context.cacheEnabled && (context.cacheMemo == CacheMemo::Sidecar))
+	{
+		fingerprintStore = FingerprintStore::Open(context.cacheDir, context.cacheHash, context.verbose);
+		g_fingerprint_store = fingerprintStore.get();
+	}
 
 	// Load the playlist once before the sandbox is applied so we can read the file freely.
 	// The same in-memory document is reused for sandbox extraction and for execution.
@@ -781,6 +1110,7 @@ int main(int argc, const char * argv[])
 					break;
 				continue;
 			}
+			context.playlistKey = key;
 			ProcessPlaylist(steps, &context);
 		}
 	}
@@ -798,6 +1128,26 @@ int main(int argc, const char * argv[])
 			safe_exit(EXIT_SUCCESS);
 		}
 		ProcessPlaylist(steps, &context);
+	}
+
+	// After every playlist has finished, so one process publishes the store once even
+	// when several --playlist-key runs contributed to it. --dry-run still READ the
+	// store - which is where most of its cost goes - it just never publishes, so a dry
+	// run leaves the memo byte-identical.
+	if(fingerprintStore != nullptr)
+	{
+		if(!context.dryRun)
+			fingerprintStore->save();
+		if(context.verbose)
+		{
+			// The journal count is how many of the entries available to this run came
+			// from the append log rather than the table, which is what makes "did the
+			// incremental path actually work" visible without parsing the files.
+			LogError("memo: %zu hits, %zu computed, store %s (%zu table, %zu journalled)\n",
+				fingerprintStore->hit_count(), fingerprintStore->computed_count(),
+				fingerprintStore->path().c_str(),
+				fingerprintStore->loaded_entry_count(), fingerprintStore->journal_entry_count());
+		}
 	}
 
 	// It looks like a lot of unnecessary Obj-C memory cleanup is happening at exit

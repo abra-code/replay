@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <set>
@@ -161,7 +162,7 @@ bool build_directory_tree(const char *path, TreeNode &out_root, int maxDepth)
 // Glob expansion
 // ============================================================================
 
-std::vector<std::string> expand_glob(const std::string &pattern)
+std::vector<std::string> expand_glob(const std::string &pattern, bool *outFailed)
 {
 	std::vector<std::string> results;
 
@@ -183,6 +184,8 @@ std::vector<std::string> expand_glob(const std::string &pattern)
 		struct stat st;
 		if (stat(pattern.c_str(), &st) == 0)
 			results.push_back(pattern);
+		else if ((outFailed != nullptr) && (errno != ENOENT) && (errno != ENOTDIR))
+			*outFailed = true; // could not look, which is not the same as not there
 		return results;
 	}
 
@@ -193,11 +196,24 @@ std::vector<std::string> expand_glob(const std::string &pattern)
 
 	char *paths[2] = { const_cast<char *>(base_dir.c_str()), nullptr };
 	FTSPtr fts(fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, nullptr), fts_close);
-	if (fts == nullptr)
+	if (fts == nullptr) {
+		if (outFailed != nullptr)
+			*outFailed = true;
 		return results;
+	}
 
 	FTSENT *ent;
-	while ((ent = fts_read(fts.get())) != nullptr) {
+	while (true) {
+		// fts_read returns NULL both at the end of the traversal and on an error, and
+		// only errno tells the two apart. Clearing it before every call keeps a stale
+		// errno from an earlier syscall out of the decision.
+		errno = 0;
+		ent = fts_read(fts.get());
+		if (ent == nullptr) {
+			if ((errno != 0) && (outFailed != nullptr))
+				*outFailed = true; // walk aborted early: the match list is truncated
+			break;
+		}
 		switch (ent->fts_info) {
 			case FTS_F:
 			case FTS_SL:
@@ -214,8 +230,12 @@ std::vector<std::string> expand_glob(const std::string &pattern)
 					results.emplace_back(ent->fts_path);
 				break;
 			}
-			case FTS_ERR:
-			case FTS_DNR:
+			case FTS_ERR: // read error
+			case FTS_DNR: // directory unreadable
+			case FTS_NS:  // stat failed
+			case FTS_DC:  // cycle
+				if (outFailed != nullptr)
+					*outFailed = true; // this subtree is missing from the results
 				break;
 			default:
 				break;

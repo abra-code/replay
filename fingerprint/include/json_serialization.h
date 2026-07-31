@@ -20,4 +20,7 @@ int write_json_doc_to_file(const Json::MutableDoc& doc, const char* path);
 // CFMutableDictionary hierarchy of CFString / CFNumber / CFBoolean /
 // CFMutableArray / CFMutableDictionary.
 // Returns an empty CFMutableDict on failure or when the root is not an object.
-CFMutableDict load_json_file_as_cfdict(const char* path);
+// quiet: suppress the stderr diagnostic on parse failure - for callers where an
+// unreadable file is an expected, recoverable state (e.g. a corrupt cache manifest,
+// which is disposable and must be silently treated as empty).
+CFMutableDict load_json_file_as_cfdict(const char* path, bool quiet = false);

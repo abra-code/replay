@@ -61,6 +61,11 @@ run_suite "$SCRIPT_DIR/test_mcp_server.py"         "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_errors.py"      "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_stress_playlist.py" "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_execute_stress.py"  "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_replay_cache_manifest.py"  "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_replay_cache.py"           "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_replay_cache_sandbox.py"   "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_replay_fingerprint_store.py" "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_readme_help_sync.py"       "$BUILD_DIR/replay"
 
 printf '\n'
 printf "${BOLD}========================================${NC}\n"

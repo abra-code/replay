@@ -2,6 +2,7 @@
 #include "FileTree.h"
 #include "LogStream.h"
 #include "ActionStep.h"
+#include "TaskCacheTypes.h"
 #include <CoreFoundation/CFMessagePort.h>
 #include <dispatch/dispatch.h>
 
@@ -52,6 +53,7 @@ private:
 };
 
 class OutputSerializer;
+class CacheSession;
 
 // Returned by EditFileMCPCore — decouples edit logic from MCP response emission.
 struct MCPEditResult {
@@ -105,6 +107,21 @@ typedef struct
 	bool force;
 	bool orderedOutput;
 	bool mcpServer;
+
+	// Incremental execution cache (see private/replay_caching_design.md).
+	// cacheEnabled is false unless --cache (or a --cache-* option) was passed and
+	// the execution mode supports it, so every other mode is untouched.
+	bool cacheEnabled;
+	bool cacheRefresh;              // execute everything, but still store fresh entries
+	std::string cacheDir;
+	CacheFormat cacheFormat;
+	FileHashAlgorithm cacheHash;
+	CacheMemo cacheMemo;            // --cache-memo: where per-file content hashes are memoized
+	bool cacheMemoRefresh;          // --cache-memo-refresh: recompute every hash and rewrite the memo
+	std::vector<std::string> cacheGlobalEnvNames; // --cache-env, folded into every task
+	CacheSession *cacheSession;     // owned by the dispatch function, null when not caching
+	std::string playlistPath;       // resolved absolute playlist path; keys the manifest
+	std::string playlistKey;        // playlist key currently being executed, empty for root arrays
 } ReplayContext;
 
 typedef struct
@@ -114,12 +131,18 @@ typedef struct
 	std::string mcpRequestID; // raw JSON of the JSON-RPC id field; empty when not in MCP mode
 } ActionContext;
 
+// Receives one resolved action from HandleActionStep: the bool-returning action
+// body (null when the step failed to resolve), the dependency declaration vectors
+// (inputs, mutatingInputs, exclusiveInputs, outputs), and the cache identity
+// material for the action. Consumers that do not cache simply invoke the action
+// and drop the result and the ActionCacheInfo.
 using action_handler_t = std::function<void(
-	std::function<void()>,
+	std::function<bool()>,
 	std::vector<std::string>,
 	std::vector<std::string>,
 	std::vector<std::string>,
-	std::vector<std::string>)>;
+	std::vector<std::string>,
+	ActionCacheInfo)>;
 
 void HandleActionStep(ActionStep step, ReplayContext *context, action_handler_t actionHandler);
 
