@@ -1,4 +1,4 @@
-#define REPLAY_VERSION 2.1
+#define REPLAY_VERSION 2.2
 
 #define STRINGIFY(x) #x
 #define STRINGIFY_VALUE(x) STRINGIFY(x)
