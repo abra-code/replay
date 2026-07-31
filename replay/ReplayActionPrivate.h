@@ -49,10 +49,11 @@ static inline void PrintMCPTextResult(ReplayContext *context, ActionContext *act
 }
 
 static inline void PrintMCPBlobResult(ReplayContext *context, ActionContext *actionContext,
+                                       const std::string &filePath,
                                        std::string base64Data, std::string mimeType)
 {
     assert(context->mcpServer);
-    std::string response = MakeMCPBlobResult(actionContext->mcpRequestID,
+    std::string response = MakeMCPBlobResult(actionContext->mcpRequestID, filePath,
                                               std::move(base64Data), std::move(mimeType));
     context->outputSerializer->scheduleString(std::move(response), -1);
 }

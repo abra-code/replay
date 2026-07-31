@@ -73,7 +73,8 @@ ReadFile(const std::string &filePath, ReplayContext *context, ActionContext *act
 			unsigned long written = EncodeBase64(data.data(), (unsigned long)data.size(),
 			                                     encoded.data(), encodedSize);
 			std::string b64(reinterpret_cast<const char *>(encoded.data()), written);
-			PrintMCPBlobResult(context, actionContext, std::move(b64), "application/octet-stream");
+			PrintMCPBlobResult(context, actionContext, filePath, std::move(b64),
+			                   "application/octet-stream");
 		}
 		return true;
 	}

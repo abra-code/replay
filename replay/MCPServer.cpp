@@ -42,17 +42,34 @@
 #include <limits.h>
 #include <regex>
 
-// The revision answered when a client asks for one we do not speak (or asks for
-// nothing). kSupportedProtocolVersions is what initialize will echo back verbatim:
-// 2025-03-26 is listed because that is the revision defining the tool annotations
-// emitted below, so a client asking for it gets an answer that entitles it to read
-// them. Note replay does not parse JSON-RPC batches, which 2025-03-26 requires an
-// implementation to accept; add that before claiming the revision more loudly than
-// this (advertising it in the startup banner, say).
-static constexpr const char *kProtocolVersion = "2024-11-05";
+// Revisions replay speaks, newest first. Element 0 is both the default - answered
+// when a client asks for nothing, asks with a non-string, or asks for a revision we
+// do not speak - and what the startup banner announces. The lifecycle spec requires
+// that fallback to be a revision the server supports and says it SHOULD be the
+// latest one, which is why it is the head of this list rather than the tail.
+//
+// 2025-03-26 is deliberately ABSENT, and that omission is the point rather than an
+// oversight. It is the only revision that obliges an implementation to accept
+// JSON-RPC batches ("MCP implementations MAY support sending JSON-RPC batches, but
+// MUST support receiving JSON-RPC batches"), and replay's read loop is one JSON
+// object per line. 2025-06-18 removed the batch requirement again, so skipping the
+// revision is the conformant way out; writing a batch parser would satisfy exactly
+// one dead revision and nothing before or after it. A client that asks for
+// 2025-03-26 is answered with the head of this list, which the spec explicitly
+// permits: "Otherwise, the server MUST respond with another protocol version it
+// supports."
+//
+// Dropping it costs nothing load-bearing. Tool annotations are a 2025-03-26 feature,
+// but they carry forward unchanged into 2025-06-18 and 2025-11-25, and replay emits
+// them regardless of which revision was negotiated.
+static constexpr const char *kProtocolVersion = "2025-11-25";
 static constexpr std::string_view kSupportedProtocolVersions[] = {
-    "2024-11-05", "2025-03-26",
+    "2025-11-25", "2025-06-18", "2024-11-05",
 };
+static_assert(kSupportedProtocolVersions[0] == std::string_view(kProtocolVersion),
+              "kProtocolVersion must be the newest supported revision - the lifecycle "
+              "spec says an unrecognized request SHOULD fall back to the server's latest, "
+              "and answering the oldest silently strips features the client asked for");
 static constexpr const char *kServerName      = "replay-mcp";
 static constexpr const char *kServerVersion   = "1.0.0";
 static constexpr size_t kMaxFileSize          = 10u * 1024u * 1024u;
@@ -144,6 +161,39 @@ static PathResult validate_path(const std::string &requested,
 }
 
 // ============================================================================
+// file:// URIs — for resource and resource_link content blocks
+// ============================================================================
+
+// RFC 8089 file URI for an absolute POSIX path. Percent-encodes byte by byte so
+// UTF-8 survives intact, keeping only the RFC 3986 unreserved set plus '/' as the
+// separator. A bare path is not a URI: a filename containing a space, '#', '?' or
+// '%' would otherwise yield something the client cannot parse back into the path it
+// was given, and these paths come from the filesystem, not from us.
+static std::string make_file_uri(std::string_view path)
+{
+    static constexpr char kHexDigits[] = "0123456789ABCDEF";
+    std::string uri = "file://";
+    uri.reserve(uri.size() + path.size());
+    for (unsigned char ch : path)
+    {
+        bool unreserved = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                          (ch >= '0' && ch <= '9') ||
+                          ch == '-' || ch == '.' || ch == '_' || ch == '~' || ch == '/';
+        if (unreserved)
+        {
+            uri.push_back((char)ch);
+        }
+        else
+        {
+            uri.push_back('%');
+            uri.push_back(kHexDigits[ch >> 4]);
+            uri.push_back(kHexDigits[ch & 0x0F]);
+        }
+    }
+    return uri;
+}
+
+// ============================================================================
 // JSON-RPC response builders (private)
 // ============================================================================
 
@@ -218,14 +268,25 @@ std::string MakeMCPTextResult(const std::string &request_id, std::string text)
     return make_text_result(request_id, std::move(text));
 }
 
-std::string MakeMCPBlobResult(const std::string &request_id, std::string base64Data,
-                               std::string mimeType)
+// Binary file contents, as an embedded resource content block.
+//
+// There is no "blob" content block in any MCP revision - the content types are text,
+// image, audio, resource_link (2025-06-18+) and resource - and `blob` is a FIELD of a
+// resource's contents holding the base64 payload. Emitting {"type":"blob",...} put a
+// block on the wire that no conforming client can decode; it typecheck-failed or was
+// dropped depending on how strict the client's schema was. The URI is what makes this
+// well-formed rather than merely renamed: an embedded resource is identified by it.
+std::string MakeMCPBlobResult(const std::string &request_id, const std::string &filePath,
+                               std::string base64Data, std::string mimeType)
 {
     Json::MutableDoc doc;
+    auto resource = doc.new_obj();
+    doc.obj_add(resource, "uri",      doc.new_str(make_file_uri(filePath)));
+    doc.obj_add(resource, "mimeType", doc.new_str(mimeType));
+    doc.obj_add(resource, "blob",     doc.new_str(base64Data));
     auto item = doc.new_obj();
-    doc.obj_add(item, "type",     doc.new_str("blob"));
-    doc.obj_add(item, "data",     doc.new_str(base64Data));
-    doc.obj_add(item, "mimeType", doc.new_str(mimeType));
+    doc.obj_add(item, "type",     doc.new_str("resource"));
+    doc.obj_add(item, "resource", resource);
     auto content = doc.new_arr();
     doc.arr_append(content, item);
     auto result = doc.new_obj();
@@ -1672,11 +1733,17 @@ static void handle_message(const std::string &line,
         Json::MutableDoc resp;
         auto result = resp.new_obj();
         // Negotiate rather than assert: echo the client's requested revision when it
-        // is one we speak, otherwise answer with our default and let the client
-        // decide. This matters for the tool annotations below - `annotations` is a
-        // 2025-03-26 field, so a client that asked for 2025-03-26 and was answered
+        // is one we speak, otherwise answer with our latest and let the client decide.
+        // Falling back to the latest rather than the oldest is what keeps newer
+        // clients whole - a client on a revision we do not list that was answered
         // "2024-11-05" would be entitled to decode tools with the older type and drop
-        // the hints, which is how a host loses the read-only/mutating distinction.
+        // `annotations`, which is how a host silently loses the read-only/mutating
+        // distinction its permission prompts are built from.
+        //
+        // Stay tolerant here: a missing protocolVersion, a non-string one, and an
+        // unknown revision all fall through to the default without erroring. Cadabra's
+        // launch probe drops any server whose handshake fails, so a hard error would
+        // not degrade replay's feature set - it would remove replay from the app.
         std::string_view negotiated = kProtocolVersion;
         if (auto requested = root.obj_get("params").obj_get("protocolVersion").get_str())
         {
@@ -1779,7 +1846,18 @@ int RunMCPServer(ReplayContext *context, const MCPServerOptions &opts)
 
     setvbuf(stdout, nullptr, _IONBF, 0);
 
-    fprintf(stderr, "replay-mcp: starting MCP server (protocol %s)\n", kProtocolVersion);
+    // Announce the whole set, not one constant: the banner is the only place an
+    // operator can see what replay will actually agree to, and the default alone
+    // hides the fact that older clients are still served.
+    std::string supportedList;
+    for (auto supported : kSupportedProtocolVersions)
+    {
+        if (!supportedList.empty())
+            supportedList += ", ";
+        supportedList.append(supported);
+    }
+    fprintf(stderr, "replay-mcp: starting MCP server (protocol %s; supported: %s)\n",
+            kProtocolVersion, supportedList.c_str());
     if (opts.allowedDirs.empty())
         fprintf(stderr, "replay-mcp: WARNING — no allowed directories configured\n");
     else

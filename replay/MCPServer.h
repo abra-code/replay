@@ -17,8 +17,12 @@ struct MCPServerOptions {
 // JSON-RPC result/error builders — implemented in MCPServer.mm.
 // Called from action files via the PrintMCP* helpers in ReplayActionPrivate.h.
 std::string MakeMCPTextResult(const std::string &id_raw, std::string text);
-std::string MakeMCPBlobResult(const std::string &id_raw, std::string base64Data,
-                               std::string mimeType);
+// Binary contents as an embedded resource content block. filePath is the absolute
+// path the bytes came from; it becomes the resource's file:// URI, which is what
+// identifies an embedded resource. (There is no "blob" content type in MCP - `blob`
+// is the base64 field inside a resource.)
+std::string MakeMCPBlobResult(const std::string &id_raw, const std::string &filePath,
+                               std::string base64Data, std::string mimeType);
 std::string MakeMCPError(const std::string &id_raw, int code, std::string message);
 std::string MakeMCPMultiTextResult(const std::string &id_raw,
                                     const std::vector<std::string> &texts);

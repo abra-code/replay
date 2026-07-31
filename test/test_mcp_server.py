@@ -6,12 +6,14 @@ Usage:  python3 test_mcp_server.py [/path/to/replay]
 Exit:   0 = all tests passed, 1 = one or more failures
 """
 
+import base64
 import json
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -280,6 +282,84 @@ def test_handshake(tmpdir: str) -> None:
           f"expected 2 responses, got {len(by_id)}")
     check("ping returns empty result",
           "result" in by_id[2] and "error" not in by_id[2])
+
+
+# The revision replay answers when it does not recognize what was asked for, and the
+# full set it will echo verbatim. Keep in sync with kSupportedProtocolVersions in
+# MCPServer.cpp, newest first.
+LATEST_PROTOCOL = "2025-11-25"
+SUPPORTED_PROTOCOLS = ["2025-11-25", "2025-06-18", "2024-11-05"]
+
+
+def test_protocol_negotiation(tmpdir: str) -> None:
+    # The previous handshake test asked for 2024-11-05 and asserted 2024-11-05, which
+    # passed just as well against an unconditional response - it proved nothing about
+    # negotiation. This walks the whole matrix instead.
+    print("=== MCP: initialize protocol negotiation ===")
+
+    def negotiated(params) -> tuple:
+        """Returns (version, error) for an initialize with the given params."""
+        msg = {"jsonrpc": "2.0", "id": 1, "method": "initialize"}
+        if params is not None:
+            msg["params"] = params
+        reply = run_mcp([msg], [tmpdir])[1]
+        return (reply.get("result", {}).get("protocolVersion"), reply.get("error"))
+
+    # A revision we speak is echoed back verbatim.
+    for version in SUPPORTED_PROTOCOLS:
+        got, err = negotiated({"protocolVersion": version, "capabilities": {}})
+        check(f"supported revision {version} is echoed verbatim",
+              got == version and err is None, f"got {got!r}, error {err!r}")
+
+    # 2025-03-26 is deliberately unsupported: it is the only revision requiring
+    # JSON-RPC batch receive, which replay's one-object-per-line reader does not do.
+    # Answering our latest is what the lifecycle spec prescribes.
+    got, err = negotiated({"protocolVersion": "2025-03-26", "capabilities": {}})
+    check("2025-03-26 (batching) is answered with the latest, not echoed",
+          got == LATEST_PROTOCOL and err is None, f"got {got!r}, error {err!r}")
+
+    # Newer than anything we know, and older than anything we know.
+    for version in ("2026-07-28", "2099-01-01", "1900-01-01", ""):
+        got, err = negotiated({"protocolVersion": version, "capabilities": {}})
+        check(f"unknown revision {version!r} falls back to the latest",
+              got == LATEST_PROTOCOL and err is None, f"got {got!r}, error {err!r}")
+
+    # Tolerance: malformed or absent protocolVersion must fall back, never error.
+    # Cadabra's launch probe drops any server whose handshake fails, so erroring here
+    # would remove replay from the app rather than degrade one feature.
+    for label, params in [
+        ("missing protocolVersion", {"capabilities": {}}),
+        ("null protocolVersion",    {"protocolVersion": None}),
+        ("numeric protocolVersion", {"protocolVersion": 7}),
+        ("array protocolVersion",   {"protocolVersion": ["2025-11-25"]}),
+        ("object protocolVersion",  {"protocolVersion": {"v": "2025-11-25"}}),
+        ("empty params",            {}),
+        ("no params at all",        None),
+    ]:
+        got, err = negotiated(params)
+        check(f"tolerant fallback: {label} -> latest, no error",
+              got == LATEST_PROTOCOL and err is None, f"got {got!r}, error {err!r}")
+
+
+def test_protocol_batch_rejected(tmpdir: str) -> None:
+    # Not a gap being papered over: batch receive is required by 2025-03-26 alone, and
+    # 2025-06-18 removed it again. replay skips that revision precisely so it never
+    # owes a batch parser. This test pins the rejection as intentional, so that if
+    # 2025-03-26 is ever added back to the supported list the omission is visible.
+    print("=== MCP: JSON-RPC batch is rejected (2025-03-26 not supported) ===")
+
+    proc = subprocess.run(
+        [str(REPLAY), "--allow-write", tmpdir, "--mcp-server"],
+        input='[{"jsonrpc":"2.0","id":1,"method":"ping"},'
+              '{"jsonrpc":"2.0","id":2,"method":"ping"}]\n',
+        capture_output=True, text=True, timeout=30)
+    replies = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+
+    check("batch produces exactly one reply", len(replies) == 1, str(replies))
+    check("batch is rejected with -32600 Invalid Request",
+          replies and replies[0].get("error", {}).get("code") == -32600, str(replies))
+    check("2025-03-26 absent from the supported set (it is what would require batching)",
+          "2025-03-26" not in SUPPORTED_PROTOCOLS, str(SUPPORTED_PROTOCOLS))
 
 
 def test_tools_list(tmpdir: str) -> None:
@@ -1723,11 +1803,16 @@ def test_read_file_not_found(tmpdir: str) -> None:
 
 
 def test_read_binary_file(tmpdir: str) -> None:
-    print("=== MCP: read_file (binary file -> blob) ===")
+    # MCP has no "blob" content type in any revision - the content types are text,
+    # image, audio, resource_link and resource. Binary payloads travel as an embedded
+    # resource, where `blob` is the base64 FIELD of resource contents. These assertions
+    # pin the shape by name so a regression back to {"type":"blob"} fails loudly.
+    print("=== MCP: read_file (binary file -> embedded resource) ===")
 
     path = os.path.join(tmpdir, "binary.bin")
+    payload = bytes(range(256))  # 256-byte binary with null bytes -> not valid UTF-8 text
     with open(path, "wb") as f:
-        f.write(bytes(range(256)))  # 256-byte binary with null bytes -> not valid UTF-8 text
+        f.write(payload)
 
     by_id = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -1735,12 +1820,56 @@ def test_read_binary_file(tmpdir: str) -> None:
     ], [tmpdir])
 
     items = by_id[1].get("result", {}).get("content", [{}])
-    check("binary file: content[0].type == blob",
-          items[0].get("type") == "blob", str(items[0]))
-    check("binary file: non-empty base64 data field",
-          len(items[0].get("data", "")) > 0, str(items[0]))
-    check("binary file: mimeType field present",
-          "mimeType" in items[0], str(items[0]))
+    check("binary file: content[0].type == resource",
+          items[0].get("type") == "resource", str(items[0]))
+    check("binary file: no bare 'blob' content type",
+          items[0].get("type") != "blob", str(items[0]))
+
+    resource = items[0].get("resource", {})
+    check("binary file: resource.mimeType present",
+          "mimeType" in resource, str(resource))
+    check("binary file: resource.blob decodes to the exact bytes written",
+          base64.b64decode(resource.get("blob", "")) == payload, str(resource)[:200])
+
+    # The URI is what identifies an embedded resource, and it must be a real URI:
+    # percent-encoded, absolute, and reversible back into the path we asked for.
+    uri = resource.get("uri", "")
+    # Compare against the realpath: replay canonicalizes every path it accepts, so the
+    # URI names the resolved file (/private/var/... on macOS), not the string we sent.
+    check("binary file: resource.uri is a file:// URI",
+          uri.startswith("file:///"), uri)
+    check("binary file: resource.uri round-trips to the canonical path",
+          unquote(urlparse(uri).path) == os.path.realpath(path),
+          f"{uri} != {os.path.realpath(path)}")
+
+
+def test_read_binary_file_uri_encoding(tmpdir: str) -> None:
+    # Filenames come from the filesystem, not from us. A name holding a space, '#',
+    # '?', '%' or non-ASCII must still yield a URI the client can parse back, so this
+    # asserts the round trip rather than one hand-written encoding.
+    print("=== MCP: read_file (binary -> resource URI percent-encoding) ===")
+
+    name = "we ird#name?x%y&z-ü.bin"
+    path = os.path.join(tmpdir, name)
+    payload = b"\x00\xff\xfe\x01"
+    with open(path, "wb") as f:
+        f.write(payload)
+
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": path}}},
+    ], [tmpdir])
+
+    resource = by_id[1].get("result", {}).get("content", [{}])[0].get("resource", {})
+    uri = resource.get("uri", "")
+    check("hostile filename: no raw space in URI", " " not in uri, uri)
+    check("hostile filename: '#' is percent-encoded", "#" not in uri, uri)
+    check("hostile filename: '?' is percent-encoded", "?" not in uri, uri)
+    check("hostile filename: non-ASCII is percent-encoded as UTF-8",
+          "%C3%BC" in uri, uri)
+    check("hostile filename: URI round-trips to the canonical path",
+          unquote(urlparse(uri).path) == os.path.realpath(path),
+          f"{uri} != {os.path.realpath(path)}")
 
 
 def test_directory_tree_depth(tmpdir: str) -> None:
@@ -2329,6 +2458,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="replay_mcp_test_") as tmpdir:
         test_handshake_isolated(tmpdir)
         test_handshake(tmpdir)
+        test_protocol_negotiation(tmpdir)
+        test_protocol_batch_rejected(tmpdir)
         test_tools_list(tmpdir)
         test_tools_list_schema(tmpdir)
         test_tools_list_annotations(tmpdir)
@@ -2391,6 +2522,7 @@ def main() -> int:
         test_get_file_info(tmpdir)
         test_read_file_not_found(tmpdir)
         test_read_binary_file(tmpdir)
+        test_read_binary_file_uri_encoding(tmpdir)
         test_read_multiple_files(tmpdir)
         test_glob_search(tmpdir)
         test_glob_search_exclude_globs(tmpdir)
