@@ -4,6 +4,7 @@
 build/**
 xcconfigs/ReplayDistribution.xcconfig
 private
+installer
 .build
 yyjson/test
 yyjson/doc
