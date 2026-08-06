@@ -199,6 +199,7 @@ EOF
 	out=$("$REPLAY_TOOL" "$pl" 2>&1)
 	v3_count=$(count_occurrences "$out" "v3")
 	verify_eq "5" "$v3_count" "glob_chain iter=$iter: 5 reads must observe v3"
+	local n
 	for n in 1 2 3 4 5; do
 		final=$(cat "$dir/src/f$n.txt")
 		verify_eq "v3" "$final" "glob_chain iter=$iter: f$n final content"
