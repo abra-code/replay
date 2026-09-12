@@ -5,10 +5,79 @@
 - fingerprint: calculate deep directory hash - [readme](fingerprint/README.md)
 - gate: cached task execution tool - [readme](gate/README.md)
 
-To install all 4 tools locally in ~/.local/bin run the installer in terminal:
+## Getting the tools
+
+There are four ways to end up with these tools, and they are not
+interchangeable. Pick by what you are doing.
+
+| | Builds with | Architectures | Lands in |
+|---|---|---|---|
+| `install.sh` | Swift Package Manager | this machine only | `~/.local/bin` |
+| `swift build -c release` | Swift Package Manager | this machine only | `.build/release` |
+| `./build.sh` | xcodebuild | universal for Release | `build/Release` |
+| `installer/` | PackageBuilder.app | whatever it is handed | `installer/dist/*.pkg` |
+
+### Install from source, in one command
+
 ```
 source <(/usr/bin/curl -fsSL 'https://raw.githubusercontent.com/abra-code/replay/refs/heads/master/install.sh')
 ```
+
+Clones the repository, builds with Swift Package Manager, installs all four
+tools into `~/.local/bin`, and adds that directory to `PATH` in `~/.zshrc` if
+it is not there already. Needs the Xcode command line tools.
+
+The binaries this produces are for **this machine's architecture only**, which
+is the right answer here: the build happens on the machine that will run them,
+so a second slice would be dead weight.
+
+### Build from a clone
+
+`swift build -c release` is the same path `install.sh` takes, and produces the
+same native-only binaries in `.build/release`.
+
+`./build.sh` is the Xcode path, and the one to use for anything that leaves
+this machine. Release builds **universal (arm64 + x86_64)** binaries into
+`build/Release` and then checks that is really what came out. Debug builds this
+machine's architecture only, following `ReplayProjectDebug.xcconfig`, which sets
+`ONLY_ACTIVE_ARCH = YES` so the compile loop stays fast.
+
+```
+./build.sh                      # Release, universal - the default
+./build.sh Debug                # Debug, this machine's architecture only
+./build.sh --native             # Release, this machine's architecture only
+./build.sh Debug --universal    # Debug, both architectures
+./build.sh --signpost           # os_signpost intervals, for Instruments.app
+./build.sh --timing             # inline timing accumulators, printed to stderr
+```
+
+`build.sh` passes `ARCHS` and `ONLY_ACTIVE_ARCH` to `xcodebuild` explicitly
+rather than leaving them to the xcconfigs. Without that, `fingerprint` and
+`gate` come out arm64-only even though `xcodebuild -showBuildSettings` reports
+`ARCHS = arm64 x86_64` and `ONLY_ACTIVE_ARCH = NO` for both schemes.
+
+Do not run `xcodebuild clean` on these projects. `SYMROOT` is the shared
+`build/` folder, which the build system did not create, so clean fails with
+"Could not delete build/Release because it was not created by the build
+system". To start fresh, `rm -rf build`.
+
+### Sign
+
+```
+./codesign.sh                                           # ad-hoc, local use only
+./codesign.sh "Developer ID Application: Name (TEAMID)" # for distribution
+```
+
+An identity also turns on the hardened runtime and a secure timestamp. Both are
+required for notarization, and the installer project asserts both before it
+will package anything.
+
+### Build an installer package
+
+`installer/` holds a PackageBuilder project that wraps the four binaries from
+`build/Release` into a `.pkg` installing them into `/usr/local/bin`. It builds
+nothing itself - it verifies the artifacts it is handed, so `./build.sh` and
+`./codesign.sh <identity>` come first. See `installer/README.md`.
 
 # replay
 A macOS tool to execute a list of declared actions.  

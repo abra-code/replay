@@ -2,6 +2,11 @@
 # replay tools installer for macOS zsh
 # Usage: source <(/usr/bin/curl -fsSL 'https://raw.githubusercontent.com/abra-code/replay/refs/heads/master/install.sh')
 # This installs replay, dispatch, fingerprint & gate tools to ~/.local/bin and ensures that path is present in PATH var
+#
+# This builds with Swift Package Manager, which targets this machine's
+# architecture only. That is deliberate: the build happens on the machine that
+# will run the tools, so a universal binary would be dead weight. Use build.sh
+# in a clone for universal binaries, which is what a release ships.
 
 set -o pipefail
 
@@ -53,10 +58,23 @@ install_tools() {
 
     # Final install step
     if [ ${build_result} = 0 ] && [ "${BUILD_DIR}" != "" ]; then
-        /usr/bin/install -v "$BUILD_DIR/release/replay" "$INSTALL_DIR/"
-        /usr/bin/install -v "$BUILD_DIR/release/dispatch" "$INSTALL_DIR/"
-        /usr/bin/install -v "$BUILD_DIR/release/fingerprint" "$INSTALL_DIR/"
-        /usr/bin/install -v "$BUILD_DIR/release/gate" "$INSTALL_DIR/"
+        local install_failed=0
+        local tool
+        local install_result
+        for tool in replay dispatch fingerprint gate; do
+            /usr/bin/install -v "$BUILD_DIR/release/$tool" "$INSTALL_DIR/"
+            install_result=$?
+            if [ ${install_result} != 0 ]; then
+                echo "ERROR: failed to install $tool to $INSTALL_DIR/" >&2
+                install_failed=1
+            fi
+        done
+
+        if [ ${install_failed} != 0 ]; then
+            /bin/rm -rf "$tmp_dir"
+            return 1
+        fi
+
         echo "✅ Installed replay, dispatch, fingerprint & gate to $INSTALL_DIR/"
     else
         echo "❌ Build failed for replay tools" >&2
@@ -64,7 +82,11 @@ install_tools() {
         return 1
     fi
 
+    # Explicit: without it the function returns the status of the cleanup rm,
+    # so a temp directory that would not delete would report the whole install
+    # as failed after every tool had been installed correctly.
     /bin/rm -rf "$tmp_dir"
+    return 0
 }
 
 # ------------------------------------------------------------------
@@ -77,7 +99,22 @@ build_from_git() {
 
     echo "Cloning $repo_url"
     /usr/bin/git clone --depth 1 "$repo_url" "$dest_dir/$repo_name"
+    local clone_result=$?
+    if [ ${clone_result} != 0 ]; then
+        echo "ERROR: could not clone $repo_url" >&2
+        return 1
+    fi
+
+    # Without the status check above and this one, a failed clone leaves the
+    # directory missing, pushd fails, and "swift build" then runs in whatever
+    # directory the user was sitting in when they sourced this - building their
+    # project instead of this one.
     pushd "$dest_dir/$repo_name" > /dev/null
+    local pushd_result=$?
+    if [ ${pushd_result} != 0 ]; then
+        echo "ERROR: could not enter $dest_dir/$repo_name" >&2
+        return 1
+    fi
 
     # products placed in .build
     /usr/bin/swift build -c release
@@ -105,8 +142,20 @@ build_from_zip() {
     /usr/bin/unzip -q "$dest_dir/archive.zip" -d "$dest_dir/unpacked"
 
     pushd "$dest_dir/unpacked" > /dev/null
+    local pushd_result=$?
+    if [ ${pushd_result} != 0 ]; then
+        echo "ERROR: could not enter $dest_dir/unpacked" >&2
+        return 1
+    fi
+
     # cd into a child dir starting with repo name
     cd ${repo_name}*/
+    local cd_result=$?
+    if [ ${cd_result} != 0 ]; then
+        echo "ERROR: no ${repo_name}* directory in the archive" >&2
+        popd > /dev/null
+        return 1
+    fi
 
     # products placed in .build
     /usr/bin/swift build -c release
@@ -141,6 +190,13 @@ finalize_path() {
 
 install_tools "replay" "https://github.com/abra-code/replay.git" "git"
 # install_tools "replay" "https://github.com/abra-code/replay/archive/refs/tags/v.1.2.zip" "zip"
+install_status=$?
+
+if [ ${install_status} != 0 ]; then
+    echo ""
+    echo "Installation did not complete. Nothing was added to PATH." >&2
+    return 1
+fi
 
 finalize_path
 

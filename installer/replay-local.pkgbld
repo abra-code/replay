@@ -1,0 +1,116 @@
+{
+  "COMPONENTS" : [
+    {
+      "TITLE" : "",
+      "OVERWRITE_PERMISSIONS" : false,
+      "PREINSTALL" : "",
+      "PAYLOAD" : [
+        {
+          "DESTINATION" : "\/usr\/local\/bin\/replay",
+          "OWNER" : "root",
+          "MODE" : "0755",
+          "SOURCE" : "${ARTIFACTS_DIR}\/replay",
+          "GROUP" : "wheel",
+          "VERIFY" : {
+            "ARCHITECTURES" : [
+              "x86_64",
+              "arm64"
+            ],
+            "VERSION_FLAG" : "--version",
+            "HARDENED_RUNTIME" : false,
+            "SECURE_TIMESTAMP" : false,
+            "SIGNED_BY" : ""
+          }
+        },
+        {
+          "DESTINATION" : "\/usr\/local\/bin\/dispatch",
+          "OWNER" : "root",
+          "MODE" : "0755",
+          "SOURCE" : "${ARTIFACTS_DIR}\/dispatch",
+          "GROUP" : "wheel",
+          "VERIFY" : {
+            "ARCHITECTURES" : [
+              "x86_64",
+              "arm64"
+            ],
+            "VERSION_FLAG" : "--version",
+            "HARDENED_RUNTIME" : false,
+            "SECURE_TIMESTAMP" : false,
+            "SIGNED_BY" : ""
+          }
+        },
+        {
+          "DESTINATION" : "\/usr\/local\/bin\/fingerprint",
+          "OWNER" : "root",
+          "MODE" : "0755",
+          "SOURCE" : "${ARTIFACTS_DIR}\/fingerprint",
+          "GROUP" : "wheel",
+          "VERIFY" : {
+            "ARCHITECTURES" : [
+              "x86_64",
+              "arm64"
+            ],
+            "VERSION_FLAG" : "--version",
+            "HARDENED_RUNTIME" : false,
+            "SECURE_TIMESTAMP" : false,
+            "SIGNED_BY" : ""
+          }
+        },
+        {
+          "DESTINATION" : "\/usr\/local\/bin\/gate",
+          "OWNER" : "root",
+          "MODE" : "0755",
+          "SOURCE" : "${ARTIFACTS_DIR}\/gate",
+          "GROUP" : "wheel",
+          "VERIFY" : {
+            "ARCHITECTURES" : [
+              "x86_64",
+              "arm64"
+            ],
+            "VERSION_FLAG" : "--version",
+            "HARDENED_RUNTIME" : false,
+            "SECURE_TIMESTAMP" : false,
+            "SIGNED_BY" : ""
+          }
+        }
+      ],
+      "IDENTIFIER" : "com.abracode.pkg.replay",
+      "VERSION" : "",
+      "DESCRIPTION" : "",
+      "SELECTED" : true,
+      "INSTALL_LOCATION" : "\/",
+      "POSTINSTALL" : "",
+      "RELOCATABLE" : false,
+      "AUTH" : "Root"
+    }
+  ],
+  "DISTRIBUTION" : {
+    "TITLE" : "replay command line tools",
+    "REQUIRE_SCRIPTS" : false,
+    "HOST_ARCHITECTURES" : [
+      "arm64",
+      "x86_64"
+    ],
+    "RESOURCES" : {
+      "README" : "",
+      "CONCLUSION" : "",
+      "LICENSE" : "${PROJECT_DIR}\/resources\/license.txt",
+      "WELCOME" : "${PROJECT_DIR}\/resources\/welcome.txt",
+      "BACKGROUND" : ""
+    },
+    "CUSTOMIZE" : "never"
+  },
+  "FORMAT_VERSION" : 1,
+  "PROJECT" : {
+    "NAME" : "replay",
+    "VERSION" : "2.2.1",
+    "OUTPUT_DIR" : "dist",
+    "PACKAGE_NAME" : "${NAME}_${VERSION}-localtest.pkg",
+    "MIN_OS_VERSION" : "12.0",
+    "ARTIFACTS_DIR" : "\/Users\/tkukielk\/git\/replay\/build\/Release"
+  },
+  "SIGNING" : {
+    "ENABLED" : false,
+    "INSTALLER_IDENTITY" : ""
+  }
+}

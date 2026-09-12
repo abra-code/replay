@@ -1,0 +1,17 @@
+replay command line tools
+
+This installer places four command line tools in /usr/local/bin:
+
+  replay        run a declarative list of file actions, in parallel, with
+                dependency ordering and content-addressed caching
+  dispatch      run a single action through the same engine
+  fingerprint   compute and compare content fingerprints of files and trees
+  gate          skip a command when its inputs have not changed
+
+All four are universal binaries and require macOS 12.0 or later.
+
+/usr/local/bin is on the default PATH, so the tools are available in a new
+shell as soon as the installation finishes. Nothing else on the system is
+modified, and no existing directory permissions are changed.
+
+Documentation: https://github.com/abra-code/replay
