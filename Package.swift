@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Replay",
-    platforms: [.macOS(.v10_15)],
+    platforms: [.macOS(.v12)],
     products: [
         .executable(name: "replay", targets: ["ReplayTool"]),
         .executable(name: "dispatch", targets: ["DispatchTool"]),
