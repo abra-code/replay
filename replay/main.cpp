@@ -43,6 +43,7 @@ enum
 	kOptAllowWrite,
 	kOptDenyNetwork,
 	kOptMCPServer,
+	kOptNoSandbox,
 	kOptCache,
 	kOptCacheDir,
 	kOptCacheFormat,
@@ -73,6 +74,7 @@ static struct option sLongOptions[] =
 	{"allow-write",			required_argument,	NULL, kOptAllowWrite},
 	{"deny-network",		no_argument,			NULL, kOptDenyNetwork},
 	{"mcp-server",			no_argument,			NULL, kOptMCPServer},
+	{"no-sandbox",			no_argument,			NULL, kOptNoSandbox},
 	{"cache",				no_argument,			NULL, kOptCache},
 	{"cache-dir",			required_argument,	NULL, kOptCacheDir},
 	{"cache-format",		required_argument,	NULL, kOptCacheFormat},
@@ -172,6 +174,12 @@ DisplayHelp(void)
 		"                     Implements the standard MCP filesystem tool set plus extended tools\n"
 		"                     (grep_files, glob_search, edit_files, execute_command).\n"
 		"                     See mcp_tools_reference.md for the full tool and parameter reference.\n"
+		"  --no-sandbox       With --mcp-server: apply no kernel sandbox. The file tools still\n"
+		"                     accept only paths in the allowed directories (an allowed \"/\"\n"
+		"                     accepts every path); execute_command runs unconfined. For a\n"
+		"                     server that already runs in an isolated machine, and for commands\n"
+		"                     that apply a sandbox of their own, which a sandboxed process\n"
+		"                     cannot do. Not combinable with --deny-network or --sandbox.\n"
 		"  -V, --version      Display version.\n"
 		"  -h, --help         Display this help.\n"
 		"\n"
@@ -689,6 +697,8 @@ int main(int argc, const char * argv[])
 	std::vector<std::string> sandboxAllowRead;
 	std::vector<std::string> sandboxAllowWrite;
 	bool sandboxDenyNetwork = false;
+	bool noSandbox = false;
+	bool explicitSandbox = false;
 	// Explicit --allow-read/--allow-write dirs recorded in command-line order.
 	// In MCP mode the first of these is the project (working) directory.
 	struct CliAllowedDir { std::string path; bool writable; };
@@ -770,6 +780,7 @@ int main(int argc, const char * argv[])
 			
 			case kOptSandbox:
 				sandboxRequested = true;
+				explicitSandbox = true;
 			break;
 
 			case kOptAllowRead:
@@ -796,6 +807,10 @@ int main(int argc, const char * argv[])
 
 			case kOptMCPServer:
 				mcpServerMode = true;
+			break;
+
+			case kOptNoSandbox:
+				noSandbox = true;
 			break;
 
 			// All --cache-* options imply --cache: passing one without the other is
@@ -890,6 +905,25 @@ int main(int argc, const char * argv[])
 
 	// Determine playlist path (needed for both pre-sandbox extraction and execution).
 	const char* playlistPath = (optind < argc) ? argv[optind] : nullptr;
+
+	// --no-sandbox keeps the MCP server's allowed-directory list (built from --allow-read,
+	// --allow-write and the profile's dirs below) but applies no kernel sandbox. It is refused
+	// where it would mean nothing (outside MCP mode the allow flags exist only for the sandbox)
+	// or contradict another flag (--deny-network and --sandbox need the sandbox).
+	if(noSandbox)
+	{
+		if(!mcpServerMode)
+		{
+			LogError("error: --no-sandbox applies to --mcp-server only\n");
+			return EXIT_FAILURE;
+		}
+		if(sandboxDenyNetwork || explicitSandbox)
+		{
+			LogError("error: --no-sandbox cannot be combined with %s\n", sandboxDenyNetwork ? "--deny-network" : "--sandbox");
+			return EXIT_FAILURE;
+		}
+		sandboxRequested = false;
+	}
 
 	// The cache needs a complete dependency graph and a playlist file to key its
 	// manifest on. Modes that provide neither ignore --cache with a warning rather
@@ -1076,6 +1110,7 @@ int main(int argc, const char * argv[])
 		for (const auto &profile_dir : mcpProfileConfig.read_only)
 			add_allowed_dir(profile_dir, false);
 
+		mcpOpts.kernelSandbox = sandboxRequested;
 		context.mcpServer = true;
 		int ret = RunMCPServer(&context, mcpOpts);
 		safe_exit(ret);

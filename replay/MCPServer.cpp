@@ -186,7 +186,11 @@ static PathResult validate_path(const std::string &requested,
     {
         if (need_writable && !dir.writable)
             continue;
-        if (r.canonical == dir.path || r.canonical.starts_with(dir.path + "/"))
+        // An allowed "/" covers every path ("/" + "/" would match none but the root itself),
+        // but only without the kernel sandbox: the sandbox drops a "/" grant, so under it
+        // "/" must not open the file tools to whatever the sandbox's baseline still permits.
+        bool coversAll = (dir.path == "/") && !opts.kernelSandbox;
+        if (coversAll || r.canonical == dir.path || r.canonical.starts_with(dir.path + "/"))
             return {true, r.canonical, {}};
     }
     return {false, {},
@@ -2391,6 +2395,8 @@ int RunMCPServer(ReplayContext *context, const MCPServerOptions &opts)
     }
     fprintf(stderr, "replay-mcp: starting MCP server (protocol %s; supported: %s)\n",
             kProtocolVersion, supportedList.c_str());
+    if (!opts.kernelSandbox)
+        fprintf(stderr, "replay-mcp: no kernel sandbox; the allowed directories bound the file tools only\n");
     if (opts.allowedDirs.empty())
         fprintf(stderr, "replay-mcp: WARNING — no allowed directories configured\n");
     else

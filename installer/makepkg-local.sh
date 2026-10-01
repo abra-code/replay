@@ -11,7 +11,7 @@
 # separate step, and the command to run is printed at the end.
 #
 # Usage: sh makepkg-local.sh [options]
-#   --version <v>        Package version. Default: 2.2.1
+#   --version <v>        Package version. Default: 2.2.2
 #   --artifacts-dir <d>  Where the payload artifacts are. Default: /Users/tkukielk/git/replay/build/Release
 #   --output-dir <d>     Where the signed package lands. Default: /Users/tkukielk/git/replay/installer/dist
 #   --identity <i>       Installer signing identity. Default: (none)
@@ -25,7 +25,7 @@ set -u
 
 # --- The document, frozen at export time --------------------------------------
 project_name='replay'
-package_version='2.2.1'
+package_version='2.2.2'
 installer_identity=''
 artifacts_dir='/Users/tkukielk/git/replay/build/Release'
 output_dir='/Users/tkukielk/git/replay/installer/dist'

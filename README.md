@@ -189,6 +189,12 @@ Options:
                      Implements the standard MCP filesystem tool set plus extended tools
                      (grep_files, glob_search, edit_files, execute_command).
                      See mcp_tools_reference.md for the full tool and parameter reference.
+  --no-sandbox       With --mcp-server: apply no kernel sandbox. The file tools still
+                     accept only paths in the allowed directories (an allowed "/"
+                     accepts every path); execute_command runs unconfined. For a
+                     server that already runs in an isolated machine, and for commands
+                     that apply a sandbox of their own, which a sandboxed process
+                     cannot do. Not combinable with --deny-network or --sandbox.
   -V, --version      Display version.
   -h, --help         Display this help.
 

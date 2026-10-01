@@ -103,7 +103,7 @@
   "FORMAT_VERSION" : 1,
   "PROJECT" : {
     "NAME" : "replay",
-    "VERSION" : "2.2.1",
+    "VERSION" : "2.2.2",
     "OUTPUT_DIR" : "dist",
     "PACKAGE_NAME" : "${NAME}_${VERSION}.pkg",
     "MIN_OS_VERSION" : "12.0",

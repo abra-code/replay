@@ -2847,6 +2847,81 @@ def test_missing_required_params(tmpdir: str) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def test_no_sandbox(tmpdir: str) -> None:
+    """--no-sandbox: the allowed-dir list still bounds the file tools, execute_command is
+    not confined; the same command under the sandbox is refused. An allowed "/" accepts
+    every path."""
+    print("=== MCP: --no-sandbox, and an allowed / ===")
+
+    project = f"{tmpdir}/ns_project"
+    outside = f"{tmpdir}/ns_outside"
+    os.makedirs(project, exist_ok=True)
+    os.makedirs(outside, exist_ok=True)
+    with open(f"{outside}/note.txt", "w") as f:
+        f.write("outside")
+
+    def calls(target: str) -> list[dict]:
+        return [
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+             "params": {"name": "execute_command",
+                        "arguments": {"command": f"printf 'x' > {target}",
+                                      "workingDirectory": project}}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+             "params": {"name": "read_file", "arguments": {"path": f"{outside}/note.txt"}}},
+        ]
+
+    # Sandboxed, the shell cannot write outside the project.
+    sandboxed = run_mcp(calls(f"{outside}/sandboxed.txt"), [project], sequential=True)
+    check("sandboxed: shell write outside the project fails",
+          not os.path.exists(f"{outside}/sandboxed.txt"), text_of(sandboxed[1]))
+
+    # --no-sandbox: the shell can, while read_file still refuses a path outside the list.
+    unconfined = run_mcp(calls(f"{outside}/unconfined.txt"), [project],
+                         extra_args=["--no-sandbox"], sequential=True)
+    check("--no-sandbox: shell write outside the project succeeds",
+          os.path.exists(f"{outside}/unconfined.txt"), text_of(unconfined[1]))
+    check("--no-sandbox: read_file outside the allowed dirs is still refused",
+          "outside the allowed directories" in json.dumps(unconfined[2]), str(unconfined[2]))
+
+    # An allowed "/" accepts every path; the project stays the first (working) dir.
+    everywhere = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": f"{outside}/note.txt"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "list_allowed_directories", "arguments": {}}},
+    ], [project, "/"], extra_args=["--no-sandbox"], sequential=True)
+    check("allowed /: read_file anywhere succeeds",
+          "outside" in text_of(everywhere[1]), str(everywhere[1]))
+    listing = [line.strip() for line in text_of(everywhere[2]).splitlines() if line.strip()]
+    check("allowed /: the project first, then /",
+          len(listing) >= 2 and listing[0].split(" (")[0].endswith("/ns_project")
+          and any(line.split(" (")[0] == "/" for line in listing[1:]),
+          str(listing))
+
+    # Under the kernel sandbox, which drops a "/" grant, an allowed "/" covers only "/":
+    # neither a path outside the list nor a system file the sandbox baseline can read.
+    boxed = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": f"{outside}/note.txt"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "read_file",
+                    "arguments": {"path": "/System/Library/CoreServices/SystemVersion.plist"}}},
+    ], [project], extra_args=["--allow-read", "/"], sequential=True)
+    check("sandboxed, allowed /: read_file outside the list is refused",
+          "outside the allowed directories" in json.dumps(boxed[1]), str(boxed[1]))
+    check("sandboxed, allowed /: read_file of a system file is refused",
+          "outside the allowed directories" in json.dumps(boxed[2]), str(boxed[2]))
+
+    # Refusals: outside MCP mode, and with flags that need the sandbox.
+    for args, needle in ((["--no-sandbox", "/dev/null"], "applies to --mcp-server only"),
+                         (["--no-sandbox", "--deny-network", "--mcp-server"], "--deny-network"),
+                         (["--no-sandbox", "--sandbox", "--mcp-server"], "--sandbox")):
+        proc = subprocess.run([str(REPLAY), *args], stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=10)
+        check(f"--no-sandbox refused: {' '.join(args)}",
+              proc.returncode != 0 and needle in proc.stderr, proc.stderr)
+
+
 def main() -> int:
     if not REPLAY.exists():
         print(f"error: replay binary not found at {REPLAY}", file=sys.stderr)
@@ -2937,6 +3012,7 @@ def main() -> int:
         test_glob_search_missing_globs(tmpdir)
         test_list_allowed_directories(tmpdir)
         test_sandbox_profile_allowed_dirs(tmpdir)
+        test_no_sandbox(tmpdir)
         test_path_validation(tmpdir)
         test_missing_required_params(tmpdir)
         test_readonly_dir(tmpdir)

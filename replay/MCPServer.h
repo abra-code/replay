@@ -12,6 +12,7 @@ struct MCPAllowedDir {
 
 struct MCPServerOptions {
     std::vector<MCPAllowedDir> allowedDirs;
+    bool kernelSandbox = true;  // false: no Seatbelt sandbox (--no-sandbox, or no allow flags)
 };
 
 // JSON-RPC result/error builders — implemented in MCPServer.mm.
