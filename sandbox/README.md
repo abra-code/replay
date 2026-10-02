@@ -187,12 +187,16 @@ The profile always emits an explicit network rule — `(allow network*)` by defa
 
 Use `sandbox/sandbox-discover.py` to capture sandbox violations and emit a profile.
 
-1. **System log** — queries the unified log database with `log show` after the command exits. Covers framework-level violations (LaunchServices, dyld, mach-lookup).
-2. **Stderr** — parses the command's own error output for "Operation not permitted" / "permission denied" messages and extracts the denied paths. This catches action-level file violations that the kernel's per-process violation log rate-limiter may suppress when many startup-phase violations are generated first.
+1. **System log** — reads the kernel's violation records from a live `log stream` while the command runs (a `log show` just after the run misses records on recent macOS). Only file violations become grants.
+2. **Stderr** — parses the command's own error output for "Operation not permitted" / "permission denied" messages and extracts the denied paths (quoted, or bare before the error text). This catches violations the kernel's per-process log rate-limiter suppressed, and ones it does not log at all.
 
-No guesswork, no sudo.
+No sudo.
 
-Two modes:
+**Whose violation is it?** The log names a process id, not the command it belongs to. The tool follows the command's descendants while it runs (fork events and a look at the process table), and takes their violations as certain. A violation from a process it did not see, but which did not exist before the command started, is a **candidate**: it may be a child that lived a millisecond, or somebody else's new process. A violation from a process older than the command is ignored. In loop mode candidates are checked before they reach the profile (below); in a single run they are left out and counted in the output.
+
+**Which folder is granted?** A refused file grants its parent folder; a refused folder grants itself. A path directly inside a folder too broad to grant (the home folder, `~/Library`, `/usr`, `/private/var` and the like) is granted by itself, and such a folder that was refused itself is left out: that is a decision for a person. A refused folder that has a grant under it (git looks at the folders above its repository) is given as that one path, not with its contents: it goes into the profile as an `extra_rules` entry, `(allow file-read* (literal "..."))`.
+
+Three modes:
 
 **sandbox-exec mode** (default) — wraps the command with a minimal baseline-only policy. Use for arbitrary commands with no built-in sandbox support. The command will fail or print errors; that is expected.
 
@@ -203,6 +207,20 @@ sandbox/sandbox-discover.py python3 script.py
 # This writes sandbox_profile.json. Verify with the generated profile:
 python3 --sandbox ... script.py
 ```
+
+**Loop mode** (`--loop [N]`) — the same, repeated. A refused operation usually fails, so one run finds only the first layer of what a command needs. Each pass runs the command under the baseline plus the folders found so far, until the command succeeds, a pass finds nothing new, or N passes ran (default 8). This is how a profile for a real workflow is found:
+
+```sh
+sandbox/sandbox-discover.py --loop -o git.json -- /usr/bin/git -C ~/project status
+```
+
+- What the successful pass was still refused is reported as not needed, and left out.
+- Candidate folders are granted while the loop looks, then checked: the command is run once more without them. If it still succeeds they are all dropped. If not, each is taken away in turn: one the command succeeds without is dropped, one it fails without is kept. With more than 12 candidates they are not tried one by one; they stay and are listed as **unverified**, for you to check.
+- `--allow-read DIR` and `--allow-write DIR` (repeatable) grant folders from the first pass, for what you already know the command needs.
+- Exit status: 0 when the command ended up succeeding, 3 when the loop stopped short (the command still fails and nothing new was refused, or the passes ran out). A command that fails for a reason no folder fixes (a system service, the network, its own arguments) ends that way.
+- `--json` writes progress as JSON events on standard error and nothing else: a `pass` event after each run (`pass`, `exit`, `new_read`, `new_write`, the grants so far as `read_only` and `read_write`, and `not_needed` on a successful pass), a `check` event for each candidate check (`without`, `exit`), and a `done` event (`passes`, `exit`, `stopped` as `success`, `no-new-paths` or `max-passes`, `profile`, the grants, `folder_only`, `unverified`).
+
+A single run (no `--loop`) exits with the command's own status, as before.
 
 **Native mode** (`-n`) — runs the command directly without wrapping, relying on the tool's own sandbox (e.g. `replay` or `gate` with `--sandbox` or `--sandbox-profile`) to generate violations.
 
@@ -220,14 +238,14 @@ Additional flags:
 
 ```sh
 ./sandbox/sandbox-discover.py -o my_profile.json ...    # custom output path
-./sandbox/sandbox-discover.py -v ...                    # print violation paths; save raw log to /tmp
+./sandbox/sandbox-discover.py -v ...                    # print violation paths; keep the raw log and output
 ```
 
 ---
 
 ## Diagnosing sandbox violations
 
-`sandbox-discover.py` automatically queries the system log after a command exits. If you want to watch violations in real-time, run this in a separate terminal before invoking the tool:
+`sandbox-discover.py` reads the system log while a command runs. To watch violations yourself, run this in a separate terminal:
 
 ```sh
 log stream --style compact --predicate 'subsystem == "com.apple.sandbox" || sender == "Sandbox"'
