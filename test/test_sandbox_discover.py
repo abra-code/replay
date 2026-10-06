@@ -15,6 +15,9 @@ Scenarios:
   6. --json: a "pass" event per run, a "check" event when candidate folders were verified, and a
      "done" event, on standard error, nothing on stdout
   7. loop mode on a command that fails for a reason no folder fixes: it stops with status 3
+  8. stall hints: the paths a command's output names, the application a granted folder is in,
+     the folder above a granted bin folder; and, run for real, a command that only asks
+     access(2) whether it may read a folder and names it when refused
 
 4-7 run commands under /usr/bin/sandbox-exec and read the system log (`log stream`), so they
 need to run outside any sandbox; inside one, sandbox-exec cannot apply a profile and they are
@@ -115,6 +118,54 @@ check("  and after a tool's prefix with a colon",
       discover.paths_in_error_line("sh: line 1: /opt/tool/run: Permission denied") == ["/opt/tool/run"])
 check("no path, nothing", discover.paths_in_error_line("Operation not permitted") == [])
 
+print("== stall hints: what the log does not show ==")
+named = discover.paths_named_in_output([
+    "CMake Error: Could not find CMAKE_ROOT !!!\n",
+    "Modules directory not found in\n",
+    "/Applications/CMake.app/Contents/share/cmake-4.3\n",
+    "see /opt/tool/share/data.txt. Then (/opt/tool/lib) and '/opt/my tool/x'\n",
+])
+check("a line that is one path", "/Applications/CMake.app/Contents/share/cmake-4.3" in named, str(named))
+check("a path in a sentence, with and without its full stop",
+      "/opt/tool/share/data.txt." in named and "/opt/tool/share/data.txt" in named, str(named))
+check("a path in brackets", "/opt/tool/lib" in named, str(named))
+named = discover.paths_named_in_output([
+    "cannot read ~/Library/Preferences/a.plist or $HOME/Library/Caches or ${HOME}/Library/Logs\n",
+    "ld: build/bin/tool and ../usr/lib/x and either/or; cc -I/opt/tool/include --prefix=/opt/kit: /a/bin\n",
+])
+check("a slash inside a word starts no path: after ~ or a variable, in a relative path",
+      not [p for p in named if p.startswith(("/Library", "/bin", "/usr", "/or"))], str(named))
+check("  but a path joined to an option, or after = or a colon, is one",
+      {"/opt/tool/include", "/opt/kit", "/a/bin"} <= set(named), str(named))
+many = ["cc -I/opt/x/include%d -o /build/obj/file%d.o\n" % (i, i) for i in range(20000)]
+began = time.monotonic()
+check("the paths of a long build log are found in little time",
+      len(discover.paths_named_in_output(many)) == 40000 and time.monotonic() - began < 2,
+      f"{time.monotonic() - began:.1f} s")
+on_disk = {"/Applications/CMake.app/Contents/share/cmake-4.3", "/opt/tool/share/data.txt", "/opt/tool/lib",
+           "/usr/local/x.conf", "/dev/tty", "/Users/alice/proj/src/a.c"}
+dirs = {"/Applications/CMake.app/Contents/share/cmake-4.3", "/opt/tool/lib"}
+hints = discover.hints_from_output(
+    ["/Applications/CMake.app/Contents/share/cmake-4.3\n", "read /opt/tool/share/data.txt and /opt/tool/lib\n",
+     "/usr/local/x.conf /dev/tty /nowhere/at/all /Users/alice/proj/src/a.c\n"],
+    granted=["/Users/alice/proj"], wide={"/usr/local"},
+    exists=lambda p: p in on_disk, is_dir=lambda p: p in dirs)
+check("a named folder is tried itself", "/Applications/CMake.app/Contents/share/cmake-4.3" in hints, str(hints))
+check("a named file gives its folder", "/opt/tool/share" in hints and "/opt/tool/share/data.txt" not in hints, str(hints))
+check("  but the file alone when its folder is too wide", "/usr/local/x.conf" in hints, str(hints))
+check("a device, a path that is not there and one already granted are left out",
+      not any(h.startswith(("/dev", "/nowhere", "/Users/alice")) for h in hints), str(hints))
+granted = ["/Applications/CMake.app/Contents/bin", "/opt/homebrew/bin", "/usr/local/bin", "/Users/alice/proj"]
+check("the application a granted folder is in",
+      discover.hints_from_layout(granted, wide) == ["/Applications/CMake.app"],
+      str(discover.hints_from_layout(granted, wide)))
+check("then the folder above a granted bin folder, unless too wide",
+      discover.hints_from_layout(granted, wide, bundles=False) == ["/opt/homebrew"],
+      str(discover.hints_from_layout(granted, wide, bundles=False)))
+check("nothing for what is granted already",
+      discover.hints_from_layout(["/Applications/CMake.app", "/Applications/CMake.app/Contents/bin"], wide) == [])
+check("the system's program folders can be granted", not ({"/bin", "/sbin", "/usr/bin", "/usr/sbin"} & wide))
+
 print("== profile text ==")
 with tempfile.TemporaryDirectory() as tmp:
     sbpl = os.path.join(tmp, "p.sb")
@@ -122,6 +173,10 @@ with tempfile.TemporaryDirectory() as tmp:
     text = open(sbpl).read()
     check("a quote in a folder name is escaped", '(subpath "/tmp/a\\"b")' in text, text)
     check("a backslash is escaped", '(subpath "/tmp/c\\\\d")' in text, text)
+    discover.write_sbpl(sbpl, [], ["/private/var/folders/x/T"], keep_out=["/private/var/folders/x/T/work"])
+    lines = open(sbpl).read().splitlines()
+    check("the tool's own working folder cannot be written, whatever is granted: the rule comes last",
+          lines[-1] == '(deny file-write* (subpath "/private/var/folders/x/T/work"))', lines[-1])
 
 print("== option errors ==")
 r = run(["--loop", "--native", "--", "/usr/bin/true"])
@@ -239,6 +294,61 @@ else:
         check("it stops with status 3", r.returncode == 3, str(r.returncode))
         check("  saying nothing new was refused, or that the passes ran out",
               events and events[-1].get("stopped") in ("no-new-paths", "max-passes"), str(events[-1] if events else None))
+
+        print("== a refusal the log does not show ==")
+        # test -r asks access(2), which is refused without a log record; the job then names the
+        # folder, as cmake names its Modules folder.
+        os.makedirs(os.path.join(work, "asked", "data"))
+        with open(os.path.join(work, "asked", "data", "x.txt"), "w") as f:
+            f.write("x\n")
+        asked = os.path.realpath(os.path.join(work, "asked", "data"))
+        job = f'/bin/test -r "{asked}" || {{ echo "data folder not readable:" >&2; echo "{asked}" >&2; exit 1; }}'
+        r = run(["--loop", "--json", "-o", profile, "--", "/bin/sh", "-c", job])
+        events = [json.loads(line) for line in r.stderr.splitlines() if line.startswith("{")]
+        hints = [e for e in events if e.get("event") == "hint"]
+        check("the command succeeds in the end", r.returncode == 0, f"{r.returncode} {r.stderr[-300:]}")
+        check("  after a hint taken from its output", bool(hints) and hints[0].get("source") == "output"
+              and asked in hints[0].get("paths", []), str(hints))
+        check("  the done event names it as a folder the log never showed",
+              events[-1].get("hinted") == [asked], str(events[-1].get("hinted")))
+        check("  and the folder is in the profile, checked as needed",
+              asked in json.load(open(profile)).get("read_only", [])
+              and asked not in events[-1].get("unverified", []), str(events[-1]))
+
+        print("== the tool's own working folder ==")
+        # It is made in the temporary folder, which a command is often given to change. A
+        # temporary folder of this run's own, so the only working folder in it is this run's.
+        own_tmp = os.path.realpath(os.path.join(work, "tmp"))
+        os.makedirs(own_tmp)
+        plant = 'for d in "${TMPDIR%/}"/sandbox_discover_*; do echo x > "$d/sbpl" && exit 1; done; echo x > "${TMPDIR%/}/free"'
+        r = subprocess.run([sys.executable, "-B", str(DISCOVER), "--loop", "--json", "-o", profile,
+                            "--allow-write", own_tmp, "--", "/bin/sh", "-c", plant],
+                           capture_output=True, text=True, env=dict(os.environ, TMPDIR=own_tmp))
+        check("the command cannot write it, though it can write the temporary folder around it",
+              r.returncode == 0 and os.path.exists(os.path.join(own_tmp, "free")), f"{r.returncode} {r.stderr[-300:]}")
+
+        # A hint that is the folder above a certain one: checked by itself, the certain folder
+        # stays granted, so the hint is dropped when only that folder was needed.
+        os.makedirs(os.path.join(work, "kit", "bin"))
+        with open(os.path.join(work, "kit", "bin", "f"), "w") as f:
+            f.write("f\n")
+        kit = os.path.realpath(os.path.join(work, "kit"))
+        job = (f'/bin/cat "{kit}/bin/f" > /dev/null && {{ /bin/test -r "{asked}" || '
+               f'{{ echo "{kit}" >&2; echo "{asked}" >&2; exit 1; }}; }}')
+        r = run(["--loop", "--json", "-o", profile, "--", "/bin/sh", "-c", job])
+        events = [json.loads(line) for line in r.stderr.splitlines() if line.startswith("{")]
+        read_only = json.load(open(profile)).get("read_only", [])
+        check("a hinted folder above a certain one is checked with that one still granted",
+              r.returncode == 0 and kit not in read_only and kit + "/bin" in read_only and asked in read_only,
+              f"{r.returncode} {read_only} {r.stderr[-300:]}")
+
+        # Nothing is hinted after the last pass: no run is left to try it in.
+        job = f'/bin/test -r "{asked}" || {{ echo "{asked}" >&2; exit 1; }}'
+        r = run(["--loop", "1", "--json", "-o", profile, "--", "/bin/sh", "-c", job])
+        events = [json.loads(line) for line in r.stderr.splitlines() if line.startswith("{")]
+        check("no folder is hinted after the last pass",
+              r.returncode == 3 and not [e for e in events if e.get("event") == "hint"]
+              and asked not in json.load(open(profile)).get("read_only", []), str(events[-1] if events else r.stderr[-300:]))
     finally:
         subprocess.run(["/bin/rm", "-rf", work])
 

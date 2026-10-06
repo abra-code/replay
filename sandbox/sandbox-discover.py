@@ -72,6 +72,14 @@ def paths_in_error_line(line):
                 found.append(m.group(1))
     return found
 
+# Any absolute path in a line of a tool's output, for stall hints (paths_named_in_output). Its
+# first slash must start a word: the "/Library/Caches" in "~/Library/Caches" or
+# "$HOME/Library/Caches" and the "/bin" in "build/bin" are not paths the tool named. A path
+# joined to a one-letter option ("-I/opt/include") is one.
+OUTPUT_PATH_RE = re.compile(r'(?:(?<![\w.~})\]])|(?<=\s-[A-Za-z]))(/[^\s"\'<>|;,()\[\]{}]+)')
+# Stall hints tried in one go; a tool that prints a page of paths is not naming what it lacks.
+MAX_STALL_HINTS = 12
+
 DEFAULT_LOOP_PASSES = 8
 # The violation records are read from a live `log stream` started before the command: on
 # macOS 27 a `log show` just after the run misses records the stream delivers. The stream needs
@@ -87,9 +95,11 @@ def wide_folders(home):
     """Folders too broad to grant because one file inside was refused: granting the parent of
     ~/.gitconfig would grant the whole home folder. A path directly inside one of these is
     granted by itself instead."""
-    wide = {'/', '/Applications', '/Library', '/System', '/Users', '/Volumes', '/bin', '/dev',
-            '/etc', '/opt', '/private', '/private/etc', '/private/var', '/sbin', '/usr',
-            '/usr/bin', '/usr/local', '/usr/sbin', '/var',
+    # Not here: /bin, /sbin, /usr/bin and /usr/sbin. They hold nothing but the system's own
+    # programs, and a tool that looks for another one lists them (cmake crashes when it cannot).
+    wide = {'/', '/Applications', '/Library', '/System', '/Users', '/Volumes', '/dev',
+            '/etc', '/opt', '/private', '/private/etc', '/private/var', '/usr',
+            '/usr/local', '/var',
             '/tmp', '/private/tmp', '/private/var/tmp', '/private/var/folders', '/var/folders'}
     # Refused paths are compared in their resolved form, so a home folder reached through a
     # symbolic link is listed under both names.
@@ -149,6 +159,79 @@ def covered_by(path, dir_list):
     return any(path == d or path.startswith(d + '/') for d in dir_list)
 
 
+# STALL HINTS. Not every refusal reaches the system log: a tool that asks access(2) whether it
+# may read a path is refused without a record, and many tools ask before they open (cmake does,
+# for its own Modules folder, and then says "CMake has most likely not been installed
+# correctly"). A pass that fails with nothing new in the log is therefore not the end. Three more
+# sources are tried, in this order, and what they give is granted as candidates, checked like
+# any other candidate before it reaches the profile:
+#   1. the paths the command itself names in its output, when they exist and are not granted;
+#   2. the application bundle a granted path is in: a tool reads the rest of its application;
+#   3. the folder above a granted bin folder: a tool's share and lib folders are beside it.
+
+def paths_named_in_output(lines):
+    """The absolute paths in a tool's output, in order, each once: a line that is one path
+    (spaces and all), and every path-like word. With and without a full stop at the end, since
+    a path often ends a sentence."""
+    found = []
+    # A build's output may hold many thousands of paths: looked up in a set, not in the list.
+    seen = set()
+    for line in lines:
+        whole = line.strip()
+        words = ([whole] if whole.startswith('/') else []) + OUTPUT_PATH_RE.findall(line)
+        for word in words:
+            for path in (word, word.rstrip('.:')):
+                if len(path) > 1 and path not in seen:
+                    seen.add(path)
+                    found.append(path)
+    return found
+
+
+def hints_from_output(lines, granted, wide=frozenset(), exists=os.path.exists, is_dir=os.path.isdir):
+    """Folders (or single files) to try for the paths a tool's output names: an existing folder
+    itself; a file's folder, or the file alone when its folder is too wide. Left out: what is
+    granted already, the too-wide folders, and devices."""
+    hints = []
+    for named in paths_named_in_output(lines):
+        try:
+            path = os.path.realpath(named)
+        except (OSError, ValueError):
+            continue
+        if not exists(path):
+            continue
+        if not is_dir(path):
+            parent = os.path.dirname(path)
+            path = path if (not parent or parent in wide) else parent
+        if path in wide or path == '/dev' or path.startswith('/dev/') or covered_by(path, granted):
+            continue
+        if path not in hints and not covered_by(path, hints):
+            hints.append(path)
+            if len(hints) >= MAX_STALL_HINTS:
+                break
+    return hints
+
+
+def hints_from_layout(granted, wide=frozenset(), bundles=True):
+    """Folders to try for what is granted already. With `bundles`, the application bundle a
+    granted path is in; without, the folder above a granted bin, sbin or libexec folder (its
+    share and lib are there). The second is the wider guess, since every folder a shell
+    searches for programs is refused and so granted: it is tried after the first gave nothing."""
+    hints = []
+    for folder in granted:
+        at = folder.find('.app/')
+        if bundles:
+            if at < 0:
+                continue
+            hint = folder[:at + 4]
+        elif at < 0 and os.path.basename(folder) in ('bin', 'sbin', 'libexec'):
+            hint = os.path.dirname(folder)
+        else:
+            continue
+        if hint and hint not in wide and not covered_by(hint, granted) and hint not in hints:
+            hints.append(hint)
+    return hints
+
+
 def sbpl_string(text):
     """An SBPL string literal: backslashes and double quotes escaped, so a crafted folder name
     cannot end the string and add rules of its own."""
@@ -160,8 +243,11 @@ def folder_rule(folder):
     return f'(allow file-read* (literal {sbpl_string(folder)}))'
 
 
-def write_sbpl(path, read_dirs=(), write_dirs=(), folder_only=()):
-    """The minimal baseline, plus the folders granted so far (loop mode, --allow-*)."""
+def write_sbpl(path, read_dirs=(), write_dirs=(), folder_only=(), keep_out=()):
+    """The minimal baseline, plus the folders granted so far (loop mode, --allow-*). The
+    command may not write the `keep_out` folders whatever is granted: this tool's own working
+    folder, which holds the profile of the next pass and the log the grants are read from, and
+    is inside the temporary folder a command is often given."""
     lines = ['(version 1)', '(debug deny)', '(import "bsd.sb")',
              '(allow process-exec*)', '(allow process-fork)', '(allow network*)']
     for d in folder_only:
@@ -170,6 +256,9 @@ def write_sbpl(path, read_dirs=(), write_dirs=(), folder_only=()):
         lines.append(f'(allow file-read* (subpath {sbpl_string(d)}))')
     for d in write_dirs:
         lines.append(f'(allow file-read* file-write* (subpath {sbpl_string(d)}))')
+    # Last, since the last rule that matches decides.
+    for d in keep_out:
+        lines.append(f'(deny file-write* (subpath {sbpl_string(d)}))')
     with open(path, 'w') as f:
         f.write('\n'.join(lines) + '\n')
 
@@ -384,7 +473,7 @@ def run_pass(command, native, tmpdir, read_dirs, write_dirs, verbose, say, folde
     if native:
         cmd_args = command
     else:
-        write_sbpl(sbpl_file, read_dirs, write_dirs, folder_only)
+        write_sbpl(sbpl_file, read_dirs, write_dirs, folder_only, keep_out=[os.path.realpath(tmpdir)])
         cmd_args = ['/usr/bin/sandbox-exec', '-f', sbpl_file] + command
 
     log_handle = open(log_file, 'w')
@@ -413,12 +502,13 @@ def run_pass(command, native, tmpdir, read_dirs, write_dirs, verbose, say, folde
             raise DiscoverError("cannot read the system log: /usr/bin/log stream exited with status "
                                 f"{stream.returncode}" + (f" ({reason})" if reason else ""))
         earlier_pids = all_pids()
-        stdout_handle = open(stdout_file, 'w') if verbose else None
+        # Always kept: a stalled pass is searched for the paths the command names (stall hints).
+        stdout_handle = open(stdout_file, 'w')
         with open(stderr_file, 'w') as sf:
             try:
                 process = subprocess.Popen(
                     cmd_args,
-                    stdout=stdout_handle if verbose else subprocess.DEVNULL,
+                    stdout=stdout_handle,
                     stderr=subprocess.PIPE,
                     text=True,
                     errors='replace'
@@ -552,25 +642,33 @@ def main():
     maybe_write = set()
     given_read = [os.path.realpath(d) for d in args.allow_read]
     given_write = [os.path.realpath(d) for d in args.allow_write]
+    # Stall hints: folders granted whole, as candidates until the check at the end (then
+    # `hints_checked`), since nothing in the log says the command asked for them.
+    hinted = set()
+    hints_checked = False
 
     def grants(with_candidates):
         writes = write_paths | maybe_write if with_candidates else write_paths
         reads = read_paths | maybe_read if with_candidates else read_paths
+        hints = hinted if (with_candidates or hints_checked) else set()
         write_dirs = sorted(set(minimal_dirs(writes, wide)) | set(given_write))
         write_dirs = [d for d in write_dirs if not covered_by(d, [w for w in write_dirs if w != d])]
-        read_dirs = sorted(set(minimal_dirs(reads, wide)) | set(given_read))
+        read_dirs = sorted(set(minimal_dirs(reads, wide)) | set(given_read) | hints)
         read_dirs = [d for d in read_dirs
                      if not covered_by(d, write_dirs) and not covered_by(d, [r for r in read_dirs if r != d])]
         return read_dirs, write_dirs
 
-    def folder_only(with_candidates):
+    def folder_only(with_candidates, granted=None):
         """Refused folders above a grant, given as that one path (folders_above_grants), less
-        any that a granted folder covers anyway."""
+        any that a granted folder covers anyway: one of `granted` when given (a candidate
+        check, which runs under fewer folders), of grants() otherwise."""
         refused = read_paths | write_paths
         if with_candidates:
             refused = refused | maybe_read | maybe_write
-        read_dirs, write_dirs = grants(with_candidates)
-        return [f for f in folders_above_grants(refused, wide) if not covered_by(f, read_dirs + write_dirs)]
+        if granted is None:
+            read_dirs, write_dirs = grants(with_candidates)
+            granted = read_dirs + write_dirs
+        return [f for f in folders_above_grants(refused, wide) if not covered_by(f, granted)]
 
     max_passes = args.loop if args.loop is not None else 1
     tmpdir = tempfile.mkdtemp(prefix='sandbox_discover_')
@@ -624,10 +722,40 @@ def main():
             if args.loop is None:
                 break
             if not grew:
-                # The command still fails, but nothing new was refused: what stops it is not a
-                # folder this tool can find (a service, the network, or the command itself).
-                stopped = 'no-new-paths'
-                break
+                # The command still fails and the log shows nothing new. Before giving up, try
+                # what the log cannot show (stall hints, above).
+                granted = after_read + after_write
+                output_lines = []
+                for name in ('stderr', 'stdout'):
+                    try:
+                        with open(os.path.join(tmpdir, name), errors='replace') as f:
+                            output_lines += f.readlines()
+                    except OSError:
+                        pass
+                source = 'output'
+                hints = [h for h in hints_from_output(output_lines, granted, wide) if h not in hinted]
+                if not hints:
+                    source = 'bundle'
+                    hints = [h for h in hints_from_layout(granted, wide) if h not in hinted]
+                if not hints:
+                    source = 'layout'
+                    hints = [h for h in hints_from_layout(granted, wide, bundles=False) if h not in hinted]
+                if not hints:
+                    # What stops the command is not a folder this tool can find (a service, the
+                    # network, or the command itself).
+                    stopped = 'no-new-paths'
+                    break
+                # Not after the last pass: no run is left to try them in, and they would reach
+                # the profile without the command ever having run with them.
+                if number < max_passes:
+                    hinted.update(hints)
+                    event({'event': 'hint', 'pass': number, 'source': source, 'paths': hints})
+                    say(f"  nothing new was refused in the log; trying {len(hints)} folder(s) "
+                        + {'output': "the command names in its output:",
+                           'bundle': "that hold what is granted already (application bundles):",
+                           'layout': "beside the bin folders granted already:"}[source])
+                    for hint in hints:
+                        say(f"    {hint}")
             say()
         else:
             stopped = 'max-passes'
@@ -652,6 +780,7 @@ def main():
                     say("  the command succeeds without them; they are left out")
                     maybe_read.clear()
                     maybe_write.clear()
+                    hinted.clear()
                 elif len(candidates) > MAX_CANDIDATE_CHECKS:
                     say(f"  the command fails without them, and there are more than {MAX_CANDIDATE_CHECKS} "
                         "to try one by one; they stay in the profile, unverified")
@@ -663,15 +792,25 @@ def main():
                     for folder in candidates:
                         without_read = [d for d in grants(True)[0] if d != folder]
                         without_write = [d for d in grants(True)[1] if d != folder]
-                        # A folder the candidates only raised to read-write stays readable.
-                        if folder in certain_read and folder not in without_read:
-                            without_read.append(folder)
+                        # Only the candidate is taken away. A folder the candidates only raised
+                        # to read-write stays readable, and the certain folders inside it come
+                        # back: grants() left them out as covered (a hint is often the folder
+                        # above a certain one), and without them the command would fail for
+                        # their sake and the candidate be kept as needed.
+                        without_write += [d for d in certain_write
+                                          if covered_by(d, [folder]) and d not in without_write]
+                        without_read += [d for d in certain_read
+                                         if covered_by(d, [folder]) and d not in without_read
+                                         and not covered_by(d, without_write)]
                         passes += 1
                         check_code = run_pass(command, False, tmpdir, without_read, without_write, quiet, say,
-                                              folder_only(True))[0]
+                                              folder_only(True, without_read + without_write))[0]
                         event({'event': 'check', 'pass': passes, 'exit': check_code, 'without': [folder]})
                         if check_code == 0:
                             say(f"  not needed: {folder}")
+                            # With it go the hints inside it, which this run was without too.
+                            for hint in [h for h in hinted if covered_by(h, [folder])]:
+                                hinted.discard(hint)
                             for paths in (maybe_read, maybe_write):
                                 for path in [p for p in paths if p == folder or covered_by(p, [folder])
                                              or os.path.dirname(p) == folder]:
@@ -682,6 +821,7 @@ def main():
                 unverified = candidates
             read_paths |= maybe_read
             write_paths |= maybe_write
+        hints_checked = True
 
         read_only_dirs, write_dirs = grants(False)
 
@@ -721,7 +861,9 @@ def main():
 
         event({'event': 'done', 'passes': passes, 'exit': exit_code, 'stopped': stopped,
                'profile': args.output, 'read_only': read_only_dirs, 'read_write': write_dirs,
-               'folder_only': only_folders, 'unverified': unverified})
+               'folder_only': only_folders, 'unverified': unverified,
+               # The folders in the profile that the log never named (stall hints).
+               'hinted': sorted(h for h in hinted if h in read_only_dirs)})
 
         say()
         if args.loop is not None:
