@@ -243,6 +243,65 @@ Additional flags:
 
 ---
 
+## Tools that start a sandbox of their own (Swift, Xcode)
+
+macOS does not let a sandboxed process apply another sandbox. A tool that confines its own helpers with `sandbox-exec` therefore fails under `replay`, `gate` or any other Seatbelt sandbox, whatever directories the profile allows. The sign is this line in the tool's output, usually followed by an error that does not mention the sandbox at all:
+
+```
+sandbox-exec: sandbox_apply: Operation not permitted
+```
+
+No `read_only` or `read_write` entry fixes it, and `sandbox-discover.py` stops with "no new paths" while the command still fails. The helper's own sandbox has to be turned off, which is a fair trade here: the helper then runs under the outer sandbox, like everything else the command starts.
+
+The Swift and Xcode tools do this in three places.
+
+| Where | What fails | How to turn the inner sandbox off |
+|---|---|---|
+| `swift build`, `swift test`, `swift package` | Reading `Package.swift` and running package plugins | `swift build --disable-sandbox` |
+| The Swift compiler, for macros (`@State`, `@Observable`, `#Preview`, any package macro) | `external macro implementation type ... could not be found`, `swift-plugin-server produced malformed response` | Pass `-disable-sandbox` to the compiler. With xcodebuild: `OTHER_SWIFT_FLAGS='$(inherited) -disable-sandbox'` |
+| xcodebuild, for a project or workspace with Swift packages | `xcodebuild: error: Could not resolve package dependencies` | The Xcode setting `IDEPackageSupportDisableManifestSandbox` (see below) |
+
+An xcodebuild build of a project that uses SwiftUI, with the compiler's sandbox off:
+
+```sh
+/usr/bin/xcodebuild -project App.xcodeproj -scheme App build \
+    'OTHER_SWIFT_FLAGS=$(inherited) -disable-sandbox'
+```
+
+The quotes keep the shell from expanding `$(inherited)`: xcodebuild must receive it as written, so that the project's own Swift flags stay.
+
+For package manifests xcodebuild has no command line option. The setting is a user default of Xcode, which applies to every later build of that user, in and out of a sandbox, until it is removed. It was not tried for this document, so check it before relying on it:
+
+```sh
+/usr/bin/defaults write com.apple.dt.Xcode IDEPackageSupportDisableManifestSandbox -bool YES
+/usr/bin/defaults delete com.apple.dt.Xcode IDEPackageSupportDisableManifestSandbox     # to undo
+```
+
+### What an Xcode build needs besides that
+
+Tried with Xcode 27 on macOS 27: a clean and an incremental build of a project with Swift, Objective-C and C++ frameworks and three applications passed with these directories, the flag above and, for the applications' icons, the rule shown below.
+
+| Access | Directories |
+|---|---|
+| Read-only | Xcode itself (`/Applications/Xcode.app`), `/Library/Developer/CommandLineTools`, `/Library/Developer/PrivateFrameworks`, `~/Library/Developer/Xcode/UserData`, and the file `/Library/Preferences/com.apple.dt.Xcode.plist` |
+| Read-write | the project, `~/Library/Developer/Xcode/DerivedData`, `~/Library/Caches/org.swift.swiftpm`, `~/Library/org.swift.swiftpm`, and the per-user cache and temporary directories (`getconf DARWIN_USER_CACHE_DIR`, `getconf DARWIN_USER_TEMP_DIR`) |
+
+`/Library/Developer/PrivateFrameworks` is easy to miss: without it xcodebuild itself does not start ("failed to load a required plug-in").
+
+Two things an Xcode build may need are not directories:
+
+- **An Icon Composer file (`.icon`) in a target.** The icon export step asks Launch Services what kind of file it is, and fails with "The file ... couldn't be opened" and "Icon export exited with status 255". It passes with one more rule in the profile, which lets the process look up, not change, the Launch Services database:
+
+  ```json
+  { "extra_rules": ["(allow mach-lookup (global-name \"com.apple.lsd.mapdb\"))"] }
+  ```
+
+- **Running tests.** `xcodebuild build-for-testing` works. `xcodebuild test` does not: starting the tests needs the test manager service and a pseudo-terminal, and allowing every service was not enough. Run the tests outside the sandbox.
+
+Signing with a certificate from the keychain and anything that talks to a simulator or a device also go through services outside the sandbox, and were not tried.
+
+---
+
 ## Diagnosing sandbox violations
 
 `sandbox-discover.py` reads the system log while a command runs. To watch violations yourself, run this in a separate terminal:
