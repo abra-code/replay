@@ -2,6 +2,7 @@
 #include "ReplayAction.h"
 #include "ReplayActionPrivate.h"
 #include "yyjson.hpp"
+#include "Platform.h"
 #include <sys/stat.h>
 #include <time.h>
 #include <cerrno>
@@ -63,11 +64,11 @@ GetFileInfo(const std::string &path, ReplayContext *context, ActionContext *acti
 		char perms[11];
 		format_permissions(st.st_mode, perms);
 		char created[21], modified[21];
-		time_t birthtime = st.st_birthtimespec.tv_sec;
+		time_t birthtime = platform_birth_time(path.c_str(), st);
 		if(birthtime == 0)
-			birthtime = st.st_ctimespec.tv_sec;
+			birthtime = platform_stat_ctime(st).tv_sec;
 		format_iso8601(birthtime, created);
-		format_iso8601(st.st_mtimespec.tv_sec, modified);
+		format_iso8601(platform_stat_mtime(st).tv_sec, modified);
 		const char *typeStr;
 		if      (S_ISREG(st.st_mode))
 			typeStr = "file";
@@ -135,13 +136,13 @@ GetFileInfo(const std::string &path, ReplayContext *context, ActionContext *acti
 	format_permissions(st.st_mode, perms);
 
 	char created[21];
-	time_t birthtime = st.st_birthtimespec.tv_sec;
+	time_t birthtime = platform_birth_time(path.c_str(), st);
 	if(birthtime == 0)
-		birthtime = st.st_ctimespec.tv_sec;
+		birthtime = platform_stat_ctime(st).tv_sec;
 	format_iso8601(birthtime, created);
 
 	char modified[21];
-	format_iso8601(st.st_mtimespec.tv_sec, modified);
+	format_iso8601(platform_stat_mtime(st).tv_sec, modified);
 
 	const char *typeStr;
 	if(S_ISREG(st.st_mode))

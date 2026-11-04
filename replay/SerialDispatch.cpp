@@ -95,11 +95,11 @@ DispatchTaskSerially(ActionStep step, ReplayContext *context)
 {
 	HandleActionStep(std::move(step), context,
 		[context](std::function<bool()> action,
-		__unused std::vector<std::string> inputs,
-		__unused std::vector<std::string> mutatingInputs,
-		__unused std::vector<std::string> exclusiveInputs,
-		__unused std::vector<std::string> outputs,
-		__unused ActionCacheInfo cacheInfo)
+		[[maybe_unused]] std::vector<std::string> inputs,
+		[[maybe_unused]] std::vector<std::string> mutatingInputs,
+		[[maybe_unused]] std::vector<std::string> exclusiveInputs,
+		[[maybe_unused]] std::vector<std::string> outputs,
+		[[maybe_unused]] ActionCacheInfo cacheInfo)
 		{
 			if(action)
 			{

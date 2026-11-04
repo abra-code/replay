@@ -8,7 +8,9 @@
 #include "dispatch_queues_helper.h"
 
 #include <unistd.h>
+#if defined(__APPLE__)
 #include <sys/sysctl.h>
+#endif
 
 static dispatch_group_t s_all_tasks_group = nullptr;
 static dispatch_once_t s_all_tasks_token;
@@ -28,6 +30,7 @@ static int get_physical_core_count()
     if (online > 0)
         return static_cast<int>(online);
 
+#if defined(__APPLE__)
     // Fallback: sysctlbyname for hw.physicalcpu (Apple Silicon accurate)
     int cores = 0;
     size_t len = sizeof(cores);
@@ -37,6 +40,7 @@ static int get_physical_core_count()
     // Final fallback: logical via sysctlbyname
     if (sysctlbyname("hw.logicalcpu", &cores, &len, nullptr, 0) == 0 && cores > 0)
         return cores;
+#endif
 
     return 8; // sane default
 }

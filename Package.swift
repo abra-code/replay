@@ -142,7 +142,10 @@ let package = Package(
                 .unsafeFlags(["-std=c++20"]),
             ],
             linkerSettings: [
-                .linkedFramework("Foundation"),
+                .linkedFramework("Foundation", .when(platforms: [.macOS])),
+                .linkedLibrary("Foundation", .when(platforms: [.linux])),
+                .linkedLibrary("dispatch", .when(platforms: [.linux])),
+                .linkedLibrary("BlocksRuntime", .when(platforms: [.linux])),
             ]
         ),
 
@@ -154,7 +157,10 @@ let package = Package(
                 .unsafeFlags(["-std=c++20"]),
             ],
             linkerSettings: [
-                .linkedFramework("Foundation"),
+                .linkedFramework("Foundation", .when(platforms: [.macOS])),
+                .linkedLibrary("Foundation", .when(platforms: [.linux])),
+                .linkedLibrary("dispatch", .when(platforms: [.linux])),
+                .linkedLibrary("BlocksRuntime", .when(platforms: [.linux])),
             ]
         ),
 
@@ -167,8 +173,11 @@ let package = Package(
                 .unsafeFlags(["-std=c++20"]),
             ],
             linkerSettings: [
-                .linkedFramework("Foundation"),
-                .linkedLibrary("objc"),
+                .linkedFramework("Foundation", .when(platforms: [.macOS])),
+                .linkedLibrary("objc", .when(platforms: [.macOS])),
+                .linkedLibrary("Foundation", .when(platforms: [.linux])),
+                .linkedLibrary("dispatch", .when(platforms: [.linux])),
+                .linkedLibrary("BlocksRuntime", .when(platforms: [.linux])),
             ]
         ),
 
@@ -180,8 +189,11 @@ let package = Package(
                 .unsafeFlags(["-std=c++20"]),
             ],
             linkerSettings: [
-                .linkedFramework("Foundation"),
-                .linkedLibrary("objc"),
+                .linkedFramework("Foundation", .when(platforms: [.macOS])),
+                .linkedLibrary("objc", .when(platforms: [.macOS])),
+                .linkedLibrary("Foundation", .when(platforms: [.linux])),
+                .linkedLibrary("dispatch", .when(platforms: [.linux])),
+                .linkedLibrary("BlocksRuntime", .when(platforms: [.linux])),
             ]
         ),
     ]

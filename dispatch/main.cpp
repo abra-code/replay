@@ -7,7 +7,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <dispatch/dispatch.h>
-#include <mach-o/dyld.h>
+#include "Platform.h"
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -109,6 +109,7 @@ FinalizeCallbackListener(CFRunLoopSourceRef runLoopSource)
 static void
 StartProcessExitMonitoring(int pid)
 {
+#if defined(__APPLE__)
 	dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, (uintptr_t)pid,
 		DISPATCH_PROC_EXIT, dispatch_get_main_queue());
 	if (source != nullptr)
@@ -122,6 +123,9 @@ StartProcessExitMonitoring(int pid)
 		// GCD retains internally while pending — safe to release our reference
 		dispatch_release(source);
 	}
+#else
+	(void)pid; // Phase 1 stub: Linux libdispatch has no DISPATCH_SOURCE_TYPE_PROC (Phase 4)
+#endif
 }
 
 
@@ -384,10 +388,8 @@ int main(int argc, const char *argv[])
 			bool ensureResponse = (action != kActionStartServer); // when starting the server one message will be sent by default
 
 			std::string pathToDispatch = pathToDispatchFromArg; // fallback path
-			char dispatchPath[PATH_MAX] = {0};
-			uint32_t buffSize = PATH_MAX;
-			int execResult = _NSGetExecutablePath(dispatchPath, &buffSize); // get real executable path
-			if (execResult == 0)
+			std::string dispatchPath = platform_executable_path(); // get real executable path
+			if (!dispatchPath.empty())
 				pathToDispatch = dispatchPath;
 
 			remotePort.Adopt(StartReplayAndOpenRemotePort(pathToDispatch, portName, arguments, ensureResponse),

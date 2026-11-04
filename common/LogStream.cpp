@@ -1,5 +1,6 @@
 #include "LogStream.h"
 #include <stdlib.h>
+#include <cstdarg>
 #include <mutex>
 
 FILE *gLogOut = nullptr;

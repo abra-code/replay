@@ -12,9 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <mach-o/dyld.h>
+#include <algorithm>
+#include "Platform.h"
 
 
+#if defined(__APPLE__)
 // Private SPI: declared in <sandbox.h> as deprecated, but the
 // _with_parameters variant is in libSystem's tbd stubs without a header.
 // Weak-link so the linker resolves it from the SDK; if the symbol is ever
@@ -29,6 +31,7 @@ extern "C" int sandbox_init_with_parameters(const char *profile,
 // the SPI allocated for *errorbuf. Weak-imported for symmetry with the init
 // SPI above so we can fall back to free() on the unlikely chance it's gone.
 extern "C" void sandbox_free_error(char *errorbuf) __attribute__((weak_import));
+#endif
 
 
 namespace sandbox
@@ -125,10 +128,10 @@ void AddSystemAutoAllows(Config& cfg)
         cfg.read_only.push_back(std::string(home) +
             "/Library/Preferences/com.apple.LaunchServices");
 
-    char raw_path[PATH_MAX];
-    uint32_t path_size = sizeof(raw_path);
-    if (_NSGetExecutablePath(raw_path, &path_size) == 0)
+    std::string raw_exe = platform_executable_path();
+    if (!raw_exe.empty())
     {
+        const char *raw_path = raw_exe.c_str();
         char resolved[PATH_MAX];
         const char *canon = (realpath(raw_path, resolved) != nullptr)
                             ? resolved : raw_path;
@@ -317,7 +320,11 @@ std::string GenerateSbplProfile(const Config& config)
 
 bool IsAvailable()
 {
+#if defined(__APPLE__)
     return (&sandbox_init_with_parameters != nullptr);
+#else
+    return false; // Phase 1 stub: the Linux sandbox (Landlock and seccomp) comes in Phase 5
+#endif
 }
 
 
@@ -334,6 +341,7 @@ bool ApplyProfile(const std::string& sbpl_profile, bool verbose)
         fprintf(stdout, "Sandbox profile:\n%s\n", sbpl_profile.c_str());
     }
 
+#if defined(__APPLE__)
     char *errbuf = nullptr;
     int rc = sandbox_init_with_parameters(sbpl_profile.c_str(), 0, nullptr, &errbuf);
     if (rc != 0)
@@ -350,6 +358,9 @@ bool ApplyProfile(const std::string& sbpl_profile, bool verbose)
         return false;
     }
     return true;
+#else
+    return false; // unreachable: IsAvailable() is false
+#endif
 }
 
 

@@ -10,8 +10,10 @@
 #define REPLAY_GROUP_ID "group"
 #define GetAppGroupIdentifier() CFSTR(REPLAY_GROUP_ID)
 
-static CFStringRef kReplayServerPortFormat = CFSTR("%@.replay-port.%@");
-static CFStringRef kDispatchListenerPortFormat = CFSTR("%@.dispatch-port.%@");
+// Macros, not file-scope variables: on Linux CFSTR is a statement expression, which
+// C++ does not allow at file scope.
+#define kReplayServerPortFormat CFSTR("%@.replay-port.%@")
+#define kDispatchListenerPortFormat CFSTR("%@.dispatch-port.%@")
 
 enum ReplayMessage
 {

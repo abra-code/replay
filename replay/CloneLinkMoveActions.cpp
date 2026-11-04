@@ -31,7 +31,9 @@ CloneItem(const std::string &fromPath, const std::string &toPath, ReplayContext 
 		int rc = posix_clone_item(fromPath, toPath);
 		isSuccessful = (rc == 0);
 
-		if(!isSuccessful && context->force)
+		// --force removes the destination and tries again, which cannot help when cloning is not
+		// supported at all (ENOTSUP: the Linux stub until Phase 2) and would only lose the destination.
+		if(!isSuccessful && context->force && (errno != ENOTSUP))
 		{
 			if(!posix_remove_recursive(toPath))
 			{
@@ -64,7 +66,7 @@ MoveItem(const std::string &fromPath, const std::string &toPath, ReplayContext *
 	if(context->mcpServer)
 	{
 		bool isSuccessful = posix_move_item(fromPath, toPath);
-		if(!isSuccessful && context->force)
+		if(!isSuccessful && context->force && (errno != ENOTSUP)) // see CloneItem
 		{
 			posix_remove_recursive(toPath);
 			std::string parentPath = posix_parent_dir(toPath);
@@ -97,7 +99,7 @@ MoveItem(const std::string &fromPath, const std::string &toPath, ReplayContext *
 	{
 		isSuccessful = posix_move_item(fromPath, toPath);
 
-		if(!isSuccessful && context->force)
+		if(!isSuccessful && context->force && (errno != ENOTSUP)) // see CloneItem
 		{
 			if(!posix_remove_recursive(toPath))
 			{

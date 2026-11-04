@@ -47,6 +47,7 @@ public:
 		return false;
 	}
 
+#if defined(__APPLE__) // on 64-bit Linux int64_t and CFIndex are the same type (long)
 	bool GetValue(CFStringRef inKey, int64_t &outValue) const noexcept
 	{
 		CFNumberRef num = nullptr;
@@ -54,6 +55,7 @@ public:
 			return ::CFNumberGetValue(num, kCFNumberSInt64Type, &outValue);
 		return false;
 	}
+#endif
 
 	bool GetValue(CFStringRef inKey, double &outValue) const noexcept
 	{
@@ -124,11 +126,13 @@ public:
 		::CFDictionarySetValue(mRef, inKey, (CFNumberRef)num);
 	}
 
+#if defined(__APPLE__) // on 64-bit Linux int64_t and CFIndex are the same type (long)
 	void SetValue(CFStringRef inKey, int64_t inValue) noexcept
 	{
 		CFObj<CFNumberRef> num(::CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt64Type, &inValue));
 		::CFDictionarySetValue(mRef, inKey, (CFNumberRef)num);
 	}
+#endif
 
 	void SetValue(CFStringRef inKey, double inValue) noexcept
 	{

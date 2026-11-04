@@ -12,6 +12,7 @@
 #pragma once
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <cstddef>
 
 typedef enum CFObjRetainType
 {
@@ -131,11 +132,11 @@ protected:
 };
 
 
-template<class T> bool operator==(CFObj<T>& inObj, nullptr_t)
+template<class T> bool operator==(CFObj<T>& inObj, std::nullptr_t)
 {
    return ((T)inObj == (T)nullptr);
 }
-template<class T> bool operator!=(CFObj<T>& inObj, nullptr_t)
+template<class T> bool operator!=(CFObj<T>& inObj, std::nullptr_t)
 {
    return ((T)inObj != (T)nullptr);
 }

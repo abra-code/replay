@@ -1,4 +1,4 @@
-#if defined( __arm64__ )
+#if defined( __arm64__ ) || defined( __aarch64__ )
 	#include "blake3_neon.c"
 #elif defined( __x86_64__ )
 	#include "blake3_sse2.c"

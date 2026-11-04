@@ -18,6 +18,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/xattr.h>
+#include "Platform.h"
 #include <unistd.h>
 
 #include <cerrno>
@@ -38,8 +39,8 @@ extern "C" uint32_t crc32_impl(uint32_t crc0, const char* buf, size_t len);
 extern FileHashAlgorithm g_hash;
 extern bool g_verbose;
 
-inline constexpr const char* kCrc32CXattrName = "public.fingerprint.crc32c";
-inline constexpr const char* kBlake3XattrName = "public.fingerprint.blake3";
+inline constexpr const char* kCrc32CXattrName = REPLAY_XATTR_PREFIX "public.fingerprint.crc32c";
+inline constexpr const char* kBlake3XattrName = REPLAY_XATTR_PREFIX "public.fingerprint.blake3";
 
 // The xattr hash memoization is an optimization: failing to write it is never fatal,
 // it only costs a re-hash next time. Permission failures are routine and must stay
@@ -52,7 +53,7 @@ void report_xattr_failure(const char* operation, int result, int err, const std:
 {
     // ENOATTR: removing an xattr that was never written - the normal case for the
     // fingerprint tool's --xattr clear. (replay never selects XattrMode::Clear.)
-    if ((err == EACCES) || (err == EPERM) || (err == ENOTSUP) || (err == EROFS) || (err == ENOATTR))
+    if ((err == EACCES) || (err == EPERM) || (err == ENOTSUP) || (err == EROFS) || (err == kPlatformErrNoAttr))
         return;
     if (!g_verbose)
         return;
@@ -167,7 +168,7 @@ bool read_xattr_fileinfo(const std::string& path, FileInfoCore& current_file_inf
 {
     FileInfoCore cached_file_info {};
     const char* xattr_name = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
-    ssize_t attr_size = getxattr(path.c_str(), xattr_name, &cached_file_info, sizeof(FileInfoCore), 0, XATTR_NOFOLLOW);
+    ssize_t attr_size = platform_get_xattr_nofollow(path.c_str(), xattr_name, &cached_file_info, sizeof(FileInfoCore));
 
     if (attr_size != sizeof(FileInfoCore))
     {
@@ -214,12 +215,10 @@ void write_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcep
     // class, so it is not standard-layout and that offset is an assumption rather than a
     // guarantee. Same codegen, and it stops the assumption from growing more load-bearing
     // as runtime-only fields are added.
-    int xattr_result = ::setxattr(path.c_str(),
+    int xattr_result = platform_set_xattr_nofollow(path.c_str(),
                        xattrName,
                        &static_cast<const FileInfoCore &>(info),
-                       sizeof(FileInfoCore), //only the core part of the FileInfo is persisted
-                       0,              // position (ignored)
-                       XATTR_NOFOLLOW); // or 0 to not follow symlinks
+                       sizeof(FileInfoCore)); //only the core part of the FileInfo is persisted
 
     int err = errno;
 
@@ -246,7 +245,7 @@ void clear_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcep
 
     errno = 0; //clear any potentially lingering errors from previous operation
     const char* xattr_name = (g_hash == FileHashAlgorithm::CRC32C) ? kCrc32CXattrName : kBlake3XattrName;
-    int xattr_result = ::removexattr(path.c_str(), xattr_name, XATTR_NOFOLLOW);
+    int xattr_result = platform_remove_xattr_nofollow(path.c_str(), xattr_name);
 
     int err = errno;
 

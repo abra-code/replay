@@ -10,6 +10,7 @@
 #include <fts.h>
 #include <sys/stat.h>
 #include <cstdint>
+#include "Platform.h"
 
 // the structure persisted in xattr for "public.fingerprint.crc32c" or "public.fingerprint.blake3"
 struct FileInfoCore
@@ -54,11 +55,11 @@ struct FileInfo : public FileInfoCore
     explicit FileInfo(const struct stat& st) noexcept
         : FileInfoCore { .inode = st.st_ino,
                          .size = st.st_size,
-                         .mtime_ns = (int64_t)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec,
+                         .mtime_ns = platform_timespec_ns(platform_stat_mtime(st)),
                          .hash = {0} },
           mode(st.st_mode),
           dev(st.st_dev),
-          ctime_ns((int64_t)st.st_ctimespec.tv_sec * 1000000000LL + st.st_ctimespec.tv_nsec)
+          ctime_ns(platform_timespec_ns(platform_stat_ctime(st)))
     {
     }
 

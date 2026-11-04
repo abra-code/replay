@@ -2,7 +2,9 @@
 // POSIX file operation helpers used by action implementation files.
 // Include only in action .mm / .cpp files — not in public headers.
 
+#if defined(__APPLE__)
 #include <copyfile.h>
+#endif
 #include <fts.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -118,8 +120,15 @@ static inline bool posix_remove_recursive(const std::string &path)
 // Returns 0 on success, -1 on failure (errno set).
 static inline int posix_clone_item(const std::string &src, const std::string &dst)
 {
+#if defined(__APPLE__)
 	return copyfile(src.c_str(), dst.c_str(), nullptr,
 	                COPYFILE_ALL | COPYFILE_CLONE | COPYFILE_NOFOLLOW_SRC | COPYFILE_RECURSIVE);
+#else
+	(void)src;
+	(void)dst;
+	errno = ENOTSUP; // Phase 1 stub: the Linux copier comes in Phase 2
+	return -1;
+#endif
 }
 
 // Moves src to dst. Uses rename(2) for same-volume moves; falls back to clone+delete on EXDEV.

@@ -10,7 +10,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <uuid/uuid.h>
+#include "Platform.h"
 
 #include <dispatch/dispatch.h>
 
@@ -45,7 +45,7 @@ constexpr uint32_t kAlgoBlake3 = 1;
 // Where the published image records its own checksum. replay's own name, not one of the
 // public.fingerprint.* names the gate and fingerprint tools memoize from - see
 // mirror_checksum_xattr for why that distinction is the whole point.
-inline constexpr const char *kStoreChecksumXattrName = "public.replay.store-crc32c";
+inline constexpr const char *kStoreChecksumXattrName = REPLAY_XATTR_PREFIX "public.replay.store-crc32c";
 
 struct FpHeader
 {
@@ -798,10 +798,10 @@ void mirror_checksum_xattr(int fd, uint32_t wholeFileCrc32c, const std::string &
 	memset(&record, 0, sizeof(record));
 	record.inode = st.st_ino;
 	record.size = st.st_size;
-	record.mtime_ns = (int64_t)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
+	record.mtime_ns = platform_timespec_ns(platform_stat_mtime(st));
 	record.hash.crc32c = wholeFileCrc32c;
 
-	if(fsetxattr(fd, kStoreChecksumXattrName, &record, sizeof(record), 0, 0) != 0)
+	if(platform_fset_xattr(fd, kStoreChecksumXattrName, &record, sizeof(record)) != 0)
 	{
 		if((errno != ENOTSUP) && (errno != EPERM) && (errno != EACCES))
 			report(verbose, "cannot record the store checksum in an xattr", path);
@@ -968,14 +968,13 @@ FingerprintStore::Open(const std::string &cacheDir, FileHashAlgorithm algorithm,
 	else
 		return nullptr; // caller error: there is no store format for UNKNOWN or MISMATCH
 
-	// gethostuuid can fail (it is a syscall, and a restrictive sandbox can deny it).
+	// The host id can be missing: gethostuuid is a syscall a restrictive sandbox can deny,
+	// and on Linux /etc/machine-id can be absent or not yet initialized (Platform.h).
 	// An all-zero fallback still works: it only stops distinguishing two machines that
 	// both failed and both share one cache directory, and the worst case there is that
 	// each rewrites the other's store.
 	uint8_t hostUuid[16] = {0};
-	struct timespec wait = {0, 0};
-	if(gethostuuid(hostUuid, &wait) != 0)
-		memset(hostUuid, 0, sizeof(hostUuid));
+	platform_host_uuid(hostUuid);
 
 	char hostHex[33];
 	for(size_t i = 0; i < sizeof(hostUuid); ++i)

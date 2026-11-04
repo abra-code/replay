@@ -1,0 +1,5 @@
+module GlobCpp {
+    umbrella "glob-cpp"
+    textual header "glob-cpp/token.def"
+    export *
+}

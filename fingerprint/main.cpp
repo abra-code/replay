@@ -5,6 +5,7 @@
 //  Created by Tomasz Kukielka on 10/8/25.
 //
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <string>

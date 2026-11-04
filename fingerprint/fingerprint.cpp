@@ -17,9 +17,9 @@
 #include <CoreFoundation/CoreFoundation.h>
 
 #include <assert.h>
+#include <atomic>
 #include <sys/time.h>
 #include <sys/mman.h>
-#include <sys/attr.h>
 #include <sys/xattr.h>
 
 #include "GlobOverlap.h"
@@ -360,7 +360,7 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
                 std::string dir_path = abs_str;
                 dispatch_group_async(task_group, directory_traversal_queue, ^{
                     if (is_exiting()) { return; }
-                    __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns, exclude_patterns);
+                    [[maybe_unused]] int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns, exclude_patterns);
                 });
             }
             else if (S_ISLNK(st.st_mode))
@@ -389,7 +389,7 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
                         std::string dir_path = path;  // Copy the path for capture
                         dispatch_group_async(task_group, directory_traversal_queue, ^{
                             if (is_exiting()) { return; }
-                            __unused int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns, exclude_patterns);
+                            [[maybe_unused]] int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns, exclude_patterns);
                         });
                     }
                     else
@@ -563,7 +563,7 @@ fingerprint::find_and_process_globbed_paths(const std::unordered_set<std::string
     // Plain paths
     if (!plain_paths.empty())
     {
-        __unused int plain_result = find_and_process_paths(plain_paths, {}, {}, exclude_patterns);
+        [[maybe_unused]] int plain_result = find_and_process_paths(plain_paths, {}, {}, exclude_patterns);
     }
 
     // Glob paths
@@ -582,7 +582,7 @@ fingerprint::find_and_process_globbed_paths(const std::unordered_set<std::string
 
             dispatch_group_async(task_group, directory_traversal_queue, ^{
                 if (is_exiting()) return;
-                __unused int find_result = find_files_internal(search_dir, globs, {}, excludes);
+                [[maybe_unused]] int find_result = find_files_internal(search_dir, globs, {}, excludes);
             });
         }
     }
@@ -679,7 +679,7 @@ fingerprint::find_files_internal(std::string search_dir,
                     dispatch_group_async(get_all_tasks_group(), get_directory_traversal_queue(), ^{
                         if (is_exiting())
                             return;
-                        __unused int r = find_files_internal(dir_path, glob_patterns,
+                        [[maybe_unused]] int r = find_files_internal(dir_path, glob_patterns,
                                                               regex_patterns, excludes_copy);
                     });
                 }
