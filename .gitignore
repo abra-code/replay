@@ -6,6 +6,7 @@ xcconfigs/ReplayDistribution.xcconfig
 private
 installer/dist/
 .build
+.build-linux
 yyjson/test
 yyjson/doc
 yyjson/misc

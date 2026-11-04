@@ -1,0 +1,4 @@
+# The one place the Swift version for Linux builds is pinned (private/linux_port_plan.md, Phase 0).
+# Format: one image reference, tag plus multi-architecture digest. Lines starting with # are ignored.
+# To bump: docker pull swift:<version>-noble, then docker inspect --format '{{index .RepoDigests 0}}' swift:<version>-noble
+swift:6.2.4-noble@sha256:e508ef1e4be68087f720de622b91cbf1e32799a7aa96134b35e6f1a1d656db7a

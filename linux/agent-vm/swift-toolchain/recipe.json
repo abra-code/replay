@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "guest": "linux",
+  "description": "The swift.org Swift toolchain in /usr, and the packages replay's Linux build and tests need (build-linux.sh, test suite). For Debian 13 images. The defaults match the Docker pin in linux/swift-image; for another version or platform set swift, platform and sha256 together. A box of it needs no network: the build reads nothing from the internet.",
+  "parameters": {
+    "swift": {
+      "description": "The Swift release, e.g. 6.2.4 (keep it equal to linux/swift-image)",
+      "default": "6.2.4"
+    },
+    "platform": {
+      "description": "swift.org's build for this system: debian12-aarch64 (swift.org has no Debian 13 build of 6.2.4; the Debian 12 build runs on Debian 13)",
+      "default": "debian12-aarch64"
+    },
+    "sha256": {
+      "description": "SHA-256 of that tarball, taken from a download whose swift.org signature was checked with gpg",
+      "default": "065a113020cdf4335f2dae9125f86935354c0e9fc1a9ffa996ddc8b88bc03a40"
+    }
+  },
+  "steps": [
+    {
+      "name": "What the Swift toolchain links against, and the test suite's tools",
+      "user": "root",
+      "run": "apt-get -q -y -o Dpkg::Use-Pty=0 update && apt-get -q -y -o Dpkg::Use-Pty=0 install --no-install-recommends binutils libc6-dev libcurl4-openssl-dev libedit2 libgcc-14-dev libpython3-dev libsqlite3-0 libstdc++-14-dev libxml2-dev libncurses-dev libz3-dev pkg-config tzdata zlib1g-dev attr",
+      "env": { "DEBIAN_FRONTEND": "noninteractive" },
+      "timeoutSeconds": 1800
+    },
+    {
+      "name": "The install script",
+      "user": "root",
+      "copy": "files/install-swift.sh",
+      "to": "/usr/local/libexec/replay-install-swift",
+      "mode": "0755"
+    },
+    {
+      "name": "Swift from swift.org, checked against its SHA-256",
+      "user": "root",
+      "run": "/usr/local/libexec/replay-install-swift \"$AGENT_VM_PARAM_SWIFT\" \"$AGENT_VM_PARAM_PLATFORM\" \"$AGENT_VM_PARAM_SHA256\"",
+      "timeoutSeconds": 1800
+    }
+  ],
+  "update": [
+    {
+      "name": "The packages, the distribution's newest",
+      "user": "root",
+      "run": "apt-get -q -y -o Dpkg::Use-Pty=0 update && apt-get -q -y -o Dpkg::Use-Pty=0 install --no-install-recommends --only-upgrade binutils libc6-dev libcurl4-openssl-dev libedit2 libgcc-14-dev libpython3-dev libsqlite3-0 libstdc++-14-dev libxml2-dev libncurses-dev libz3-dev pkg-config tzdata zlib1g-dev attr",
+      "env": { "DEBIAN_FRONTEND": "noninteractive" },
+      "timeoutSeconds": 1800
+    },
+    {
+      "name": "Swift, when the parameters name another release",
+      "user": "root",
+      "run": "/usr/local/libexec/replay-install-swift \"$AGENT_VM_PARAM_SWIFT\" \"$AGENT_VM_PARAM_PLATFORM\" \"$AGENT_VM_PARAM_SHA256\"",
+      "timeoutSeconds": 1800
+    }
+  ],
+  "checks": [
+    "swift --version",
+    "test -f /usr/lib/swift/CoreFoundation/CoreFoundation.h && echo CoreFoundation headers in /usr/lib/swift",
+    "test -f /usr/lib/swift/linux/libFoundation.so && echo runtime in /usr/lib/swift/linux",
+    "getfattr --version"
+  ]
+}
