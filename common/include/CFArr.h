@@ -65,7 +65,7 @@ class CFMutableArr : public CFArrayBase<CFMutableArrayRef>
 {
 public:
 	explicit CFMutableArr(CFIndex maxCount = 0) noexcept
-		: CFArrayBase<CFMutableArrayRef>(::CFArrayCreateMutable(kCFAllocatorDefault, maxCount, &kCFTypeArrayCallBacks))
+		: CFArrayBase<CFMutableArrayRef>(::CFArrayCreateMutable(kCFAllocatorDefault, maxCount, &kCFTypeArrayCallBacks), kCFObjDontRetain)
 	{
 	}
 
