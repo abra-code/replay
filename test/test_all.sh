@@ -46,8 +46,6 @@ linux_skip_reason() {
             echo "the sandbox is not ported and fails closed (Phase 5a)" ;;
         test_mcp_server.py)
             echo "MCP server mode starts sandboxed, and the sandbox fails closed (Phase 5a)" ;;
-        test_replay_execute_stress.py)
-            echo "blocking tasks ramp up to full concurrency too slowly on Linux libdispatch (Phase 2b)" ;;
         test_replay.sh)
             echo "its playlists clone, and clone uses copyfile, not ported (Phase 2b)" ;;
         test_sandbox_discover.py)
