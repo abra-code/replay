@@ -1,6 +1,6 @@
 #include "FingerprintStore.h"
 
-#include "FileHashing.h" // crc32_impl
+#include "FileHashing.h" // crc32_impl; blake3 for the derived host id
 #include "FileInfo.h"
 #include "LogStream.h"
 #include "PosixFileOps.h" // posix_mkdir_p
@@ -27,7 +27,8 @@ namespace fpstore
 // ---------------------------------------------------------------------------
 // On-disk format
 //
-//   fingerprints-<hostuuid32hex>-<algo>.bin
+//   fingerprints-<hostid32hex>-<algo>.bin   (host id: store_host_id; macOS stores from
+//                                            before it may carry the raw gethostuuid)
 //   FpHeader | capacity * FpSlot | FpTrailer
 //
 // The magics are stored as native-endian uint64 on purpose: a store written on a
@@ -111,7 +112,7 @@ struct FpTrailer
 // ---------------------------------------------------------------------------
 // The journal
 //
-//   fingerprints-<hostuuid32hex>-<algo>.jrnl
+//   fingerprints-<hostid32hex>-<algo>.jrnl
 //   FpJournalHeader | batch*        where batch = FpBatchHeader | n * FpSlot | FpBatchTrailer
 //
 // A separate file, so the table's format above is untouched and a reader that ignores
@@ -957,6 +958,49 @@ FingerprintStore::~FingerprintStore()
 		close(mFd);
 }
 
+// The store's host id: 16 bytes that are stable on one machine and different between
+// machines. Nothing reads it back as a UUID, so it is derived rather than the raw machine
+// id, which then appears in no file name or header (private/fingerprint_store_design.md
+// 4.8, plan D8). BLAKE3's key-derivation mode with a fixed context string per source keeps
+// an id derived from a host name from ever equaling one derived from a machine id.
+static void derive_host_id(const char *context, const void *material, size_t length, uint8_t hostId[16])
+{
+	blake3_hasher hasher;
+	blake3_hasher_init_derive_key(&hasher, context);
+	blake3_hasher_update(&hasher, material, length);
+	blake3_hasher_finalize(&hasher, hostId, 16);
+}
+
+// Fills hostId, and rawUuid with the machine id it came from (all zeros when there was
+// none). The machine id can be missing: gethostuuid is a syscall a restrictive sandbox can
+// deny, and on Linux /etc/machine-id is empty in containers (Platform.h). The host name
+// stands in then; in a container it is normally the container's id, so containers sharing
+// a cache directory still get a store each. All zeros only when both are missing: such
+// machines share one store if they share a cache directory, and with it each other's
+// entries, which is the collision the host scoping exists to prevent - so this is the
+// last resort, not a routine path.
+static void store_host_id(uint8_t hostId[16], uint8_t rawUuid[16])
+{
+	if(platform_host_uuid(rawUuid))
+	{
+		derive_host_id("replay 2026-11-04 fingerprint store host id from machine id", rawUuid, 16, hostId);
+		return;
+	}
+	char name[256] = {0};
+	if((gethostname(name, sizeof(name) - 1) == 0) && (name[0] != '\0'))
+	{
+		derive_host_id("replay 2026-11-04 fingerprint store host id from host name", name, strlen(name), hostId);
+		return;
+	}
+	memset(hostId, 0, 16);
+}
+
+static void hex16(const uint8_t bytes[16], char hex[33])
+{
+	for(size_t i = 0; i < 16; ++i)
+		snprintf(hex + (i * 2), 3, "%02x", bytes[i]);
+}
+
 std::unique_ptr<FingerprintStore>
 FingerprintStore::Open(const std::string &cacheDir, FileHashAlgorithm algorithm, bool verbose)
 {
@@ -968,17 +1012,9 @@ FingerprintStore::Open(const std::string &cacheDir, FileHashAlgorithm algorithm,
 	else
 		return nullptr; // caller error: there is no store format for UNKNOWN or MISMATCH
 
-	// The host id can be missing: gethostuuid is a syscall a restrictive sandbox can deny,
-	// and on Linux /etc/machine-id can be absent or not yet initialized (Platform.h).
-	// An all-zero fallback still works: it only stops distinguishing two machines that
-	// both failed and both share one cache directory, and the worst case there is that
-	// each rewrites the other's store.
-	uint8_t hostUuid[16] = {0};
-	platform_host_uuid(hostUuid);
-
-	char hostHex[33];
-	for(size_t i = 0; i < sizeof(hostUuid); ++i)
-		snprintf(hostHex + (i * 2), 3, "%02x", hostUuid[i]);
+	uint8_t hostUuid[16] = {0}; // the id this store is scoped to: in its name and header
+	uint8_t rawUuid[16] = {0};
+	store_host_id(hostUuid, rawUuid);
 
 	// Everything that allocates goes inside the guard, path construction included:
 	// the contract this promises is that running without a memo is always available as
@@ -991,13 +1027,37 @@ FingerprintStore::Open(const std::string &cacheDir, FileHashAlgorithm algorithm,
 		// shared mount then accumulates one store per machine instead of two machines
 		// rewriting each other's wholesale every run. The algorithm scopes it too, so
 		// switching --cache-hash leaves the store for the other algorithm intact.
-		std::string stem = cacheDir;
-		if(!stem.empty() && (stem.back() != '/'))
-			stem += '/';
-		stem += "fingerprints-";
-		stem += hostHex;
-		stem += '-';
-		stem += algorithm_name(algorithmTag);
+		std::string dir = cacheDir;
+		if(!dir.empty() && (dir.back() != '/'))
+			dir += '/';
+		auto stem_for = [&](const uint8_t id[16]) {
+			char hex[33];
+			hex16(id, hex);
+			return dir + "fingerprints-" + hex + "-" + algorithm_name(algorithmTag);
+		};
+		std::string stem = stem_for(hostUuid);
+
+#if defined(__APPLE__)
+		// Stores written before the id was derived carry the raw gethostuuid value in their
+		// name and header. Such a store stays in use - nothing is migrated - while no store
+		// under the new name exists: an older replay sharing this cache directory keeps
+		// reading and writing that file, and moving the data would split the two versions
+		// into two stores, each re-hashing what the other recorded. Clearing the cache
+		// directory moves to the new name. Not for an all-zero raw id: that name is the
+		// shared-store case the derived id removes.
+		static const uint8_t kZeroId[16] = {0};
+		if(memcmp(rawUuid, kZeroId, sizeof(kZeroId)) != 0)
+		{
+			std::string legacyStem = stem_for(rawUuid);
+			struct stat st;
+			if((stat((stem + ".bin").c_str(), &st) != 0) && (errno == ENOENT) &&
+			   (stat((legacyStem + ".bin").c_str(), &st) == 0))
+			{
+				stem = legacyStem;
+				memcpy(hostUuid, rawUuid, sizeof(hostUuid));
+			}
+		}
+#endif
 
 		store.reset(new FingerprintStore(cacheDir, stem + ".bin", stem + ".jrnl",
 			algorithmTag, hostUuid, verbose));

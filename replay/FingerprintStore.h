@@ -17,8 +17,10 @@
 //   - The key has to carry st_dev as well as st_ino, because inode numbers are only
 //     unique within a device and the record no longer lives on the device.
 //   - The store is machine-local (inode numbers are), while the manifest it sits beside
-//     is shareable. The host UUID is in both the file name and the header, so a cache
-//     directory on a shared mount just accumulates one store per machine.
+//     is shareable. A host id derived from the machine id, or from the host name when
+//     there is none (FingerprintStore.cpp, store_host_id), is in both the file name and
+//     the header, so a cache directory on a shared mount just accumulates one store per
+//     machine.
 //
 // It also lets the validation tuple include st_ctime, which the xattr backend cannot
 // afford: setxattr bumps ctime itself, so a ctime-validating xattr record would

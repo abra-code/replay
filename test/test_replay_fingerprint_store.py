@@ -54,6 +54,10 @@ Scenarios:
       public.fingerprint.* one the other tools would trust in place of reading it -
       and replay still catches a rotted index, because what it verifies is the
       trailer inside the file rather than any record beside it
+  23. the store is named by a host id derived from the machine id (or the host
+      name), equal to the one in its header and not the raw id; on macOS a store
+      under the legacy raw-UUID name keeps being used, and the new name wins when
+      both exist
 
 Usage: python3 test_replay_fingerprint_store.py [/path/to/replay]
 Exit:  0 = all checks passed, 1 = one or more failures
@@ -557,6 +561,103 @@ def test_foreign_host():
         check("the rebuilt store verifies and holds the files again",
               rebuilt.crc_ok and rebuilt.count == distinct_files(2),
               f"crc_ok={rebuilt.crc_ok} count={rebuilt.count}")
+
+
+def raw_machine_id():
+    """This machine's raw id as 32 lowercase hex digits, the value replay derives its
+    store id from; None when there is none (an empty /etc/machine-id in a container)."""
+    if sys.platform.startswith("linux"):
+        try:
+            text = Path("/etc/machine-id").read_text().strip().lower()
+        except OSError:
+            return None
+        return text if len(text) == 32 else None
+    # gethostuuid() returns the IOPlatformUUID.
+    proc = subprocess.run(["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                          capture_output=True, text=True, timeout=30)
+    for line in proc.stdout.splitlines():
+        if "IOPlatformUUID" in line:
+            return line.split('"')[-2].replace("-", "").lower()
+    return None
+
+
+def test_host_id():
+    print("\n=== Scenario 23: the store is named by a derived host id; macOS keeps legacy stores ===")
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td).resolve()
+        playlist, _, _, inputs = make_tree(d, 2)
+        cache = d / "cache"
+        args = ["--cache", "--cache-dir", cache, "-v"]
+
+        run(args + [playlist])
+        path = store_path(cache)
+        if not check("one store was created", path is not None, str(store_paths(cache))):
+            return
+        name_hex = path.name.split("-")[1]
+        store = Store(path)
+        check("the name's host id is the header's", store.host.hex() == name_hex,
+              f"{name_hex} vs {store.host.hex()}")
+        check("the host id is not all zeros", name_hex != "0" * 32, name_hex)
+        raw = raw_machine_id()
+        if raw is None:
+            print("  note: no machine id here; the id comes from the host name")
+        else:
+            check("the raw machine id appears nowhere in the name", raw not in path.name, path.name)
+
+        if sys.platform.startswith("linux") or raw is None:
+            print("  legacy store names: macOS only")
+            return
+
+        # A store from before the derived id: the raw gethostuuid in name and header.
+        # Turn the new store into one, then check that replay keeps using it.
+        legacy = cache / path.name.replace(name_hex, raw)
+        image = bytearray(path.read_bytes())
+        image[HOSTUUID_OFF:HOSTUUID_OFF + 16] = bytes.fromhex(raw)
+        body = bytes(image[:len(image) - FP_TRAILER.size])
+        FP_TRAILER.pack_into(image, len(image) - FP_TRAILER.size, TRAILER_MAGIC, crc32c(body), 0)
+        legacy.write_bytes(bytes(image))
+        path.unlink()
+        journal = journal_path(cache)
+        if journal is not None:
+            journal.unlink()
+
+        r = run(args + [playlist])
+        check("a legacy store is read: memo hits, nothing computed",
+              memo(r)[0] > 0 and memo(r)[1] == 0 and memo(r)[2] == str(legacy),
+              f"{memo(r)} in: {r.stderr}")
+        check("no store under the new name is created beside it",
+              store_paths(cache) == [legacy], str(store_paths(cache)))
+        check("the legacy store keeps the raw id in its header",
+              Store(legacy).host.hex() == raw, Store(legacy).host.hex())
+
+        # A run that records something writes it under the legacy name, with the raw id:
+        # the run above changed nothing, so it wrote nothing.
+        inputs[0].write_text("payload 0 v2")
+        r = run(args + [playlist])
+        legacy_journal = legacy.with_suffix(".jrnl")
+        check("a change is recorded in the legacy store",
+              memo(r)[1] > 0 and memo(r)[2] == str(legacy), f"{memo(r)} in: {r.stderr}")
+        check("its journal has the legacy name and the raw id in its header",
+              journal_path(cache) == legacy_journal and Journal(legacy_journal).host.hex() == raw,
+              f"{journal_path(cache)} {Journal(legacy_journal).host.hex()}")
+        check("still nothing under the new name", store_paths(cache) == [legacy],
+              str(store_paths(cache)))
+
+        # Both present: the new name wins, the legacy file is left alone.
+        image[HOSTUUID_OFF:HOSTUUID_OFF + 16] = bytes.fromhex(name_hex)
+        body = bytes(image[:len(image) - FP_TRAILER.size])
+        FP_TRAILER.pack_into(image, len(image) - FP_TRAILER.size, TRAILER_MAGIC, crc32c(body), 0)
+        path.write_bytes(bytes(image))
+        legacy_before = legacy.read_bytes()
+        legacy_journal_before = legacy_journal.read_bytes() if legacy_journal.exists() else b""
+        r = run(args + [playlist])
+        # Hits come only from the new-name store; it predates the change above, so the
+        # changed input and its output are computed again.
+        check("with both present the new name is used: memo hits",
+              memo(r)[0] > 0 and memo(r)[2] == str(path), f"{memo(r)} in: {r.stderr}")
+        check("the legacy store is not touched",
+              legacy.read_bytes() == legacy_before and
+              (legacy_journal.read_bytes() if legacy_journal.exists() else b"") == legacy_journal_before)
 
 
 def test_algorithm_split():
@@ -1425,6 +1526,7 @@ def main() -> int:
     test_pre_nonce_table_upgrades_once()
     test_changed_existing_files_stay_in_journal()
     test_checksum_xattr_mirror()
+    test_host_id()
 
     print("\n========================================")
     print(f"  Passed: {_pass}  Failed: {_fail}")
