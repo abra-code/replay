@@ -74,8 +74,10 @@
 		1DCA0E062FC0A10100AA0006 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ab_neon_crc32c_v3s4x2e_v2.c,
 				ab_neon_eor3_crc32c_v9s3x2e_s3.c,
 				ab_sse_crc32c_v4s3x3k4096e.c,
+				generate-variants.sh,
 			);
 			target = 1D19043324DE9EE900276D83 /* replay */;
 		};

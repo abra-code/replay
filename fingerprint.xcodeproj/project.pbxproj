@@ -131,8 +131,10 @@
 		1DFF72922ED31E4600860A62 /* Exceptions for "fast-crc32" folder in "fast-crc32" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ab_neon_crc32c_v3s4x2e_v2.c,
 				ab_neon_eor3_crc32c_v9s3x2e_s3.c,
 				ab_sse_crc32c_v4s3x3k4096e.c,
+				generate-variants.sh,
 			);
 			target = 1DFF72582ECF2D5500860A62 /* fast-crc32 */;
 		};
