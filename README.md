@@ -85,7 +85,7 @@ A macOS tool to execute a list of declared actions.
 Key features:
 - declared actions (aka playlist) with automatic dependency detection
 - stdio [MCP server](mcp_tool_schemas.md) mode with optional sandbox
-- hard sandboxing via macOS Seatbelt (kernel-enforced filesystem and network restrictions) - shared by `replay` and `gate` - [readme](sandbox/README.md)
+- hard sandboxing via macOS Seatbelt (kernel-enforced filesystem and network restrictions), and on Linux via Landlock with a system call filter - shared by `replay` and `gate` - [readme](sandbox/README.md)
 - concurrent operations for fastest execution
 - serial operations if sequence is required
 - designed to improve performance of shell scripts running a series of slow tasks, which underutilize the CPU, storage or network resources
@@ -170,20 +170,24 @@ Options:
                      Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.
                      Tool paths in "execute" actions must be absolute (e.g. /usr/bin/python3),
                      not bare names - $PATH lookup happens after the sandbox is active.
-                     Violations return EPERM to the caller;
-                     To discover path requirements, use sandbox/sandbox-discover.py
-                     To stream violations in real time run:
+                     Violations return EPERM (macOS) or EACCES (Linux) to the caller.
+                     macOS: to discover path requirements, use sandbox/sandbox-discover.py;
+                     to stream violations in real time run:
                        log stream --style compact --predicate 'subsystem == "com.apple.sandbox" || sender == "Sandbox"'
+                     Linux: --verbose lists every rule; sandbox/README.md says what differs.
   --sandbox-profile FILE  JSON file with full sandbox spec; merged with --allow-read/--allow-write.
                      Implicitly enables --sandbox.
   --allow-read PATH    Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.
   --allow-write PATH   Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.
   --deny-network       With sandbox active, deny outbound network (allowed by default).
+                     Not supported on Linux yet.
   --mcp-server       Start an MCP (Model Context Protocol) stdio server.
                      Use --allow-read PATH for read-only dirs and --allow-write PATH for
                      read-write dirs (repeatable). Both flags imply --sandbox. A
                      --sandbox-profile JSON file's read_only/read_write dirs are also
                      included in the allowed set.
+                     On Linux kernels below Landlock ABI 9 (Linux 7.1) the commands it
+                     runs cannot create Unix sockets (see sandbox/README.md).
                      The FIRST explicit --allow-read/--allow-write dir is the project
                      (working) directory (or the first profile read_write dir if none
                      are given): tools with an optional 'directory' param (e.g. grep_files)
@@ -196,7 +200,7 @@ Options:
                      accepts every path); execute_command runs unconfined. For a
                      server that already runs in an isolated machine, and for commands
                      that apply a sandbox of their own, which a sandboxed process
-                     cannot do. Not combinable with --deny-network or --sandbox.
+                     cannot do on macOS. Not combinable with --deny-network or --sandbox.
   -V, --version      Display version.
   -h, --help         Display this help.
 
@@ -342,7 +346,8 @@ Incremental execution cache:
   With --sandbox, the cache directory is granted read-write in the sandbox automatically. The default
   sidecar memoization lives there, so it keeps working when the input trees are read-only. Choosing
   --cache-memo xattr under a sandbox means every memoization write to an input is denied and logged
-  as a kernel sandbox violation; the run stays correct, just noisier and slower.
+  as a kernel sandbox violation; the run stays correct, just noisier and slower. On Linux that
+  combination is refused: the sandbox denies every xattr write.
 
   --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action on stdout
   without executing or writing anything - a "what would rebuild" query (no summary line, since
@@ -616,6 +621,10 @@ Sandbox profile JSON schema (--sandbox-profile FILE):
   Third-party tools (Homebrew, Python frameworks) need their prefix in read_only
   because dyld must open their framework or library files at startup.
 
+  On Linux the baseline grants the system folders (/usr, /etc, /proc and others) in place
+  of bsd.sb, extra_rules is refused, and allow_network and allow_fork cannot be false yet.
+  See sandbox/README.md.
+
 See also:
 
   dispatch --help
@@ -818,15 +827,19 @@ OPTIONS:
   --sandbox             Enable hard sandbox. Use --allow-read, --allow-write, --sandbox-profile
                          for additional paths. The wrapped command (after --) must use an
                          absolute path (e.g. /usr/bin/clang), not a bare name - $PATH lookup
-                         happens after the sandbox is active. Violations return EPERM to
-                         the caller; to discover path requirements, use
-                         sandbox/sandbox-discover.py. To stream violations in real time run:
+                         happens after the sandbox is active. Violations return EPERM
+                         (macOS) or EACCES (Linux) to the caller. macOS: to discover path
+                         requirements, use sandbox/sandbox-discover.py; to stream
+                         violations in real time run:
                            log stream --style compact --predicate 'subsystem == "com.apple.sandbox" || sender == "Sandbox"'
+                         Linux: --verbose lists every rule; sandbox/README.md says what
+                         differs.
   --sandbox-profile=FILE  JSON sandbox spec; merged with --allow-read/--allow-write.
                          Implicitly enables --sandbox.
   --allow-read=PATH      Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.
   --allow-write=PATH     Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.
   --deny-network         With sandbox active, deny outbound network (allowed by default).
+                         Not supported on Linux yet.
   -v, --verbose          Verbose output
   -h, --help             Print this help message
   -V, --version          Display version
@@ -854,4 +867,8 @@ Sandbox profile JSON schema (--sandbox-profile=FILE):
   process-exec* covers launching them and bsd.sb covers their system dylibs.
   Third-party tools (Homebrew, Python frameworks) need their prefix in read_only
   because dyld must open their framework or library files at startup.
+
+  On Linux the baseline grants the system folders (/usr, /etc, /proc and others) in place
+  of bsd.sb, extra_rules is refused, and allow_network and allow_fork cannot be false yet.
+  See sandbox/README.md.
 ```

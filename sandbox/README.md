@@ -1,6 +1,8 @@
 # Sandbox Reference
 
-`replay` and `gate` can self-sandbox at startup using macOS Seatbelt (TrustedBSD MAC). The policy is kernel-enforced: once applied it covers the process and every child process it spawns; there is no way to escape or weaken it from user space.
+`replay` and `gate` can self-sandbox at startup: on macOS with Seatbelt (TrustedBSD MAC), on Linux with Landlock and a system call filter. The policy is kernel-enforced: once applied it covers the process and every child process it spawns; there is no way to escape or weaken it from user space.
+
+The flags and the JSON profile are the same on both systems. Most of this document describes macOS; the [Linux](#linux) section at the end says what is different there.
 
 ---
 
@@ -37,7 +39,7 @@ replay --sandbox --allow-write ~/project/build --deny-network actions.json
 | `--allow-read <path>` | directory | Grants `file-read*` on the directory and all descendants. Implicitly enables `--sandbox`. |
 | `--allow-write <path>` | directory | Grants `file-read*` and `file-write*` on the directory and all descendants. Implicitly enables `--sandbox`. |
 | `--sandbox-profile <file>` | JSON file | Loads a profile file (see JSON schema below). Implicitly enables `--sandbox`. |
-| `--deny-network` | — | Denies all outbound and inbound network connections. Without this flag network is allowed. |
+| `--deny-network` | - | Denies all outbound and inbound network connections. Without this flag network is allowed. Not supported on Linux yet. |
 
 All flags may be repeated. At least one sandbox flag must be present to activate the sandbox — without any flags the process runs unsandboxed.
 
@@ -63,13 +65,13 @@ All fields are optional.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `import_baseline` | bool | `true` | Import `bsd.sb` (see below). Rarely needs to be `false`. |
+| `import_baseline` | bool | `true` | Import `bsd.sb` (see below; on Linux, the Linux baseline). Rarely needs to be `false`. |
 | `read_only` | string array | `[]` | Directories where `file-read*` is allowed (recursively). |
 | `read_write` | string array | `[]` | Directories where `file-read*` and `file-write*` are allowed (recursively). |
-| `allow_network` | bool | `true` | Allow all network operations. Set to `false` to deny. Equivalent of `--deny-network`. |
+| `allow_network` | bool | `true` | Allow all network operations. Set to `false` to deny. Equivalent of `--deny-network`. `false` is not supported on Linux yet. |
 | `allow_exec` | bool | `true` | Allow `process-exec*` (launch any executable). See Execution below. |
-| `allow_fork` | bool | `true` | Allow `process-fork` (fork without exec). |
-| `extra_rules` | string array | `[]` | Raw SBPL rules appended verbatim at the end of the profile. Use as an escape hatch for rules not expressible via the structured fields. |
+| `allow_fork` | bool | `true` | Allow `process-fork` (fork without exec). `false` is not supported on Linux yet. |
+| `extra_rules` | string array | `[]` | Raw SBPL rules appended verbatim at the end of the profile. Use as an escape hatch for rules not expressible via the structured fields. macOS only: a profile with it is refused on Linux. |
 
 ### Example: read-only source, read-write output
 
@@ -102,7 +104,7 @@ All fields are optional.
 
 ---
 
-## What `bsd.sb` covers
+## What `bsd.sb` covers (macOS)
 
 When `import_baseline` is `true` (the default), the profile imports Apple's `bsd.sb` baseline. This baseline pre-allows several things needed for normal process operation:
 
@@ -183,9 +185,9 @@ The profile always emits an explicit network rule — `(allow network*)` by defa
 
 ---
 
-## Discovering path requirements
+## Discovering path requirements (macOS)
 
-Use `sandbox/sandbox-discover.py` to capture sandbox violations and emit a profile.
+Use `sandbox/sandbox-discover.py` to capture sandbox violations and emit a profile. It reads the macOS system log and has no Linux version yet; on Linux, see [Diagnosing sandbox violations](#diagnosing-sandbox-violations).
 
 1. **System log** — reads the kernel's violation records from a live `log stream` while the command runs (a `log show` just after the run misses records on recent macOS). Only file violations become grants.
 2. **Stderr** — parses the command's own error output for "Operation not permitted" / "permission denied" messages and extracts the denied paths (quoted, or bare before the error text). This catches violations the kernel's per-process log rate-limiter suppressed, and ones it does not log at all.
@@ -245,7 +247,9 @@ Additional flags:
 
 ---
 
-## Tools that start a sandbox of their own (Swift, Xcode)
+## Tools that start a sandbox of their own (Swift, Xcode; macOS)
+
+This section is about macOS. Linux lets a sandboxed process apply a sandbox of its own.
 
 macOS does not let a sandboxed process apply another sandbox. A tool that confines its own helpers with `sandbox-exec` therefore fails under `replay`, `gate` or any other Seatbelt sandbox, whatever directories the profile allows. The sign is this line in the tool's output, usually followed by an error that does not mention the sandbox at all:
 
@@ -312,9 +316,11 @@ Signing with a certificate from the keychain and anything that talks to a simula
 log stream --style compact --predicate 'subsystem == "com.apple.sandbox" || sender == "Sandbox"'
 ```
 
+On Linux there is no log of denials that an ordinary user can read. `--verbose` prints the sandbox before it is applied: the Landlock version, every rule with its rights and the reason it is there, and the gaps that apply on that kernel. A denied operation fails with "Permission denied" (EACCES), so the error message of the failing tool usually names the path.
+
 ---
 
-## Path matching rules
+## Path matching rules (macOS)
 
 - All paths are matched with `(subpath ...)` — the rule covers the given directory and every file or directory below it recursively.
 - Paths are canonicalized via `realpath(3)` before being written into the SBPL profile. Symlinks in the path are resolved. If the path does not exist yet (e.g. an output directory to be created), canonicalization falls back to the raw path.
@@ -322,7 +328,7 @@ log stream --style compact --predicate 'subsystem == "com.apple.sandbox" || send
 
 ---
 
-## Rule precedence
+## Rule precedence (macOS)
 
 Seatbelt uses a simple precedence model:
 
@@ -350,6 +356,86 @@ This lets a base profile define most of the policy while the caller adds a singl
 
 ## Failure behavior
 
-If any sandbox flag or profile is supplied and sandbox initialization fails (invalid JSON, `sandbox_init_with_parameters` returns an error, or the SPI is unavailable), the tool exits immediately with a non-zero status before processing any actions. There is no fallback to an unsandboxed run.
+If any sandbox flag or profile is supplied and sandbox initialization fails (invalid JSON, `sandbox_init_with_parameters` returns an error, or the SPI is unavailable; on Linux, a kernel without a usable Landlock, or an option Linux does not support), the tool exits immediately with a non-zero status before processing any actions. There is no fallback to an unsandboxed run.
 
-Sandbox violations at runtime do not terminate the process — the offending syscall returns `EPERM` to the caller, which surfaces as a normal I/O error.
+Sandbox violations at runtime do not terminate the process - the offending syscall returns `EPERM` (macOS) or `EACCES` (Linux) to the caller, which surfaces as a normal I/O error.
+
+---
+
+## Linux
+
+On Linux the sandbox is built from two kernel features: Landlock, the kernel's file system sandbox, which limits what the process and its children may read, write and run; and a system call filter (seccomp), which denies a few calls Landlock does not cover. Both are applied at startup, before any action runs, and every child inherits them. The flags and the JSON profile are the same as on macOS; this section lists what differs.
+
+### Kernel requirements
+
+Landlock has grown in versions (its ABI, application binary interface, version). The sandbox needs version 3 or newer, which is Linux 6.2 or newer, with Landlock enabled. Otherwise `replay` and `gate` refuse to start sandboxed and say why: the kernel was built without Landlock, Landlock is built in but not enabled at boot (the `lsm=` kernel parameter), the Landlock calls are blocked by the system call filter of the container the tool runs in, or the version is too old. To run without the sandbox, leave out the sandbox options (for the MCP server, pass `--no-sandbox`).
+
+Newer versions close gaps:
+
+| Landlock version | Linux | What it adds here |
+|---|---|---|
+| 3 | 6.2 | The minimum: renames across folders, and control of truncating files. |
+| 6 | 6.12 | Signals only to processes inside the same sandbox. In MCP server mode, abstract Unix sockets only inside the sandbox. |
+| 8 | 7.0 | The sandbox is applied to all threads at once. |
+| 9 | 7.1 | Connecting to a Unix socket by path only inside the write grants (see Unix sockets below). |
+
+In November 2026, Ubuntu 24.04 runs 6.8 (version 4) on servers and 7.0 (version 8) on desktops, Ubuntu 26.04 7.0 (version 8), Debian 13 6.12 (version 6), and Arch 7.2 (version 10). `--verbose` prints the version of the running kernel.
+
+### What a grant allows
+
+| Grant | Allowed |
+|---|---|
+| `read_only` folder | Reading its files and listing its folders, all the way down. |
+| `read_write` folder | Also creating, writing, truncating, deleting and renaming files and folders, and making links, sockets and named pipes. Not device nodes. |
+| A file instead of a folder | Reading that file (and, for `read_write`, writing and truncating it). |
+| `allow_exec: true` | Running programs anywhere. A program still needs read access to its shared libraries, and a script to the script itself. |
+
+The baseline (`import_baseline`, in place of `bsd.sb`) grants, read-only: `/usr`, and `/bin`, `/sbin`, `/lib`, `/lib32` and `/lib64` where they are real folders; all of `/etc`; all of `/proc`; `/sys/devices/system/cpu`; the folder of the `replay` or `gate` executable; and the folder of every shared library the process has loaded outside those folders (for example a Swift runtime in `/opt`). Read and write: `/dev/null`, `/dev/zero`, `/dev/full`, `/dev/random`, `/dev/urandom`, `/dev/tty` and `/dev/pts`. Not granted, as on macOS: `/tmp`, the home folder, and `/dev/shm`.
+
+Programs installed outside these folders (in `/opt`, `~/.local`, a Python virtual environment) need their folder in `read_only`, as Homebrew tools do on macOS.
+
+### Paths that do not exist yet
+
+Landlock rules need an existing file or folder:
+- A read path inside a write grant needs no rule of its own. Any other read path that does not exist is refused, naming it.
+- A write path that does not exist is replaced by its nearest existing parent folder, with a warning naming both. This keeps an output tree that does not exist yet working. The replacement is never `/`, the home folder, or a folder of the baseline: such a path is refused instead.
+- `/` itself is never granted.
+
+### Differences from macOS
+
+- **Errors:** a denied operation fails with EACCES ("Permission denied"), and a refused hard link with EXDEV ("Invalid cross-device link"). macOS returns EPERM ("Operation not permitted").
+- **Rules belong to the file or folder, not to the path.** Landlock attaches a rule to the file or folder found when the sandbox starts:
+  - A granted folder that is renamed or moved keeps its grant under its new name. A symbolic link in a granted path is followed once, at startup.
+  - A granted folder that an action deletes and creates again keeps working, as long as its parent may be written: the parent's rule covers the new folder.
+  - A file granted by itself (the auto sandbox grants read inputs this way) that something outside the sandbox replaces during the run, for example an editor saving through a temporary file, is a different file, and stays unreadable for the rest of the run.
+- **Links and renames cannot give a file more rights than it has where it is.** A hard link from a read-only input into an output folder fails with EXDEV, and moving a file out of a read-only folder fails with EACCES: writing through such a link would change the read-only input. The auto sandbox grants write on the source folder of `move` and `hardlink` actions, so those keep working.
+- **Not covered by Landlock** on any kernel: file metadata (`stat`, `chmod`, `chown`, timestamps) anywhere on the system, and ioctl calls on devices. Below version 6, signals to any process of the same user; below version 9, connecting to Unix sockets by path (below).
+- **No new privileges.** Programs that gain privileges when they start (set-user-ID programs such as `sudo`, `su` and `passwd`, and programs with file capabilities) run without them.
+- **`> /dev/stderr` opens a new file on Linux** (macOS duplicates the descriptor), so it fails when standard error is a file outside the grants. Write `>&2` instead. A terminal or a pipe works.
+- **Namespace tools do not work sandboxed:** `unshare -r`, rootless podman and bubblewrap write under `/proc/self`, and Landlock refuses the mounts they make.
+- **A sandboxed program may apply a sandbox of its own,** unlike on macOS.
+
+### The system call filter
+
+- **Extended attributes cannot be written or removed**, anywhere, also inside write grants (EACCES); reading them works. Otherwise a sandboxed command could attach a forged checksum memo to an input it may not write, and later runs would trust it. Effects:
+  - `replay --cache-memo xattr` is refused together with the sandbox; the default `sidecar` memo works.
+  - replay's `clone` and `copy` actions do not carry user extended attributes over to the copies (macOS does).
+  - `gate` reads the memos its inputs already have but writes none, so inputs without a memo are hashed again on every sandboxed run.
+  - Commands run by `execute` cannot set them: `cp -a` drops them without a message, `cp --preserve=xattr` fails.
+- **io_uring is unavailable** (ENOSYS), because its own operations would get past the filter. Programs that use it fall back to ordinary calls.
+- **`TIOCSTI` and `TIOCLINUX` are denied** (EACCES). They push characters into a terminal's input, which would let a command type into the user's shell. Other ioctl calls work.
+
+### Unix sockets
+
+From Landlock version 9, a Unix socket with a path can be connected to only inside the write grants. The docker socket, ssh-agent, gpg-agent and the D-Bus session bus are then reachable only if their folder is granted read-write.
+
+Below version 9 the kernel does not check connecting to a Unix socket by path, so a sandboxed command can reach any socket its user may open. Through the D-Bus session bus that is a complete way out (`systemd-run --user` starts a program outside the sandbox). Therefore:
+- **MCP server mode** (`--mcp-server`, where an AI agent chooses the commands): creating a Unix socket fails with EACCES. `socketpair` and other kinds of sockets still work. Commands that talk to a local service fail: ssh-agent, gpg-agent, the docker command, D-Bus clients; `syslog(3)` messages are lost; user and group names known only through SSSD, winbind or systemd's user database do not resolve (`id`, `whoami`, `~user`). From version 6 the MCP server also limits abstract Unix sockets (which have no path) to those made inside the sandbox.
+- **Playlists**, whose commands the user wrote, keep Unix sockets. On those kernels a playlist's commands can reach the services above.
+- A datagram `socketpair` can still send to datagram sockets with a path, such as the system log's (`/dev/log`, the journal), on any version.
+
+### Not supported on Linux yet
+
+- `--deny-network` and `"allow_network": false`, and `"allow_fork": false`: refused.
+- `extra_rules`: these are macOS sandbox rules; a profile that has them is refused.
+- `sandbox-discover.py`.

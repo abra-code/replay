@@ -75,15 +75,19 @@ static void print_usage(std::ostream& stream)
     stream << "  --sandbox             Enable hard sandbox. Use --allow-read, --allow-write, --sandbox-profile\n";
     stream << "                         for additional paths. The wrapped command (after --) must use an\n";
     stream << "                         absolute path (e.g. /usr/bin/clang), not a bare name - $PATH lookup\n";
-    stream << "                         happens after the sandbox is active. Violations return EPERM to\n";
-    stream << "                         the caller; to discover path requirements, use\n";
-    stream << "                         sandbox/sandbox-discover.py. To stream violations in real time run:\n";
+    stream << "                         happens after the sandbox is active. Violations return EPERM\n";
+    stream << "                         (macOS) or EACCES (Linux) to the caller. macOS: to discover path\n";
+    stream << "                         requirements, use sandbox/sandbox-discover.py; to stream\n";
+    stream << "                         violations in real time run:\n";
     stream << "                           log stream --style compact --predicate 'subsystem == \"com.apple.sandbox\" || sender == \"Sandbox\"'\n";
+    stream << "                         Linux: --verbose lists every rule; sandbox/README.md says what\n";
+    stream << "                         differs.\n";
     stream << "  --sandbox-profile=FILE  JSON sandbox spec; merged with --allow-read/--allow-write.\n";
     stream << "                         Implicitly enables --sandbox.\n";
     stream << "  --allow-read=PATH      Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.\n";
     stream << "  --allow-write=PATH     Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.\n";
     stream << "  --deny-network         With sandbox active, deny outbound network (allowed by default).\n";
+    stream << "                         Not supported on Linux yet.\n";
     stream << "  -v, --verbose          Verbose output\n";
     stream << "  -h, --help             Print this help message\n";
     stream << "  -V, --version          Display version\n";
@@ -111,6 +115,10 @@ static void print_usage(std::ostream& stream)
     stream << "  process-exec* covers launching them and bsd.sb covers their system dylibs.\n";
     stream << "  Third-party tools (Homebrew, Python frameworks) need their prefix in read_only\n";
     stream << "  because dyld must open their framework or library files at startup.\n";
+    stream << "\n";
+    stream << "  On Linux the baseline grants the system folders (/usr, /etc, /proc and others) in place\n";
+    stream << "  of bsd.sb, extra_rules is refused, and allow_network and allow_fork cannot be false yet.\n";
+    stream << "  See sandbox/README.md.\n";
     stream << "\n";
 }
 

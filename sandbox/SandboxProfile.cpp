@@ -419,13 +419,14 @@ static bool ApplyLinuxConfig(const Config& config, bool verbose, const std::vect
         else
             why = strerror(abiError);
         fprintf(stderr, "error: the sandbox needs Landlock, the Linux kernel's file system sandbox: %s. "
-                        "Use --no-sandbox to run without it\n", why);
+                        "Leave out the sandbox options (--no-sandbox for the MCP server) to run without it\n", why);
         return false;
     }
     if (abi < landlock::kMinimumAbi)
     {
         fprintf(stderr, "error: the sandbox needs Landlock ABI %d (Linux 6.2 or newer) for cross-folder renames "
-                        "and truncate control; this kernel offers ABI %d. Use --no-sandbox to run without it\n",
+                        "and truncate control; this kernel offers ABI %d. Leave out the sandbox options "
+                        "(--no-sandbox for the MCP server) to run without it\n",
                 landlock::kMinimumAbi, abi);
         return false;
     }
