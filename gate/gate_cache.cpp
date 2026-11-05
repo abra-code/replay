@@ -231,7 +231,7 @@ static void populate_cache_cfdict(const CacheEntry& entry, CFMutableDict& dict)
 // Serialize a CFDictionary to a binary plist file. Returns 0 on success.
 static int serialize_dict_to_plist(CFDictionaryRef dict, const std::string& path)
 {
-    CFErrorRef error = nullptr;
+    CFObj<CFErrorRef> error;
     CFObj<CFDataRef> data(CFPropertyListCreateData(kCFAllocatorDefault, dict,
         kCFPropertyListBinaryFormat_v1_0, 0, &error));
     if (data == nullptr)
@@ -239,7 +239,6 @@ static int serialize_dict_to_plist(CFDictionaryRef dict, const std::string& path
         std::cerr << "error: failed to serialize plist";
         if (error != nullptr)
         {
-            CFObj<CFErrorRef> err_guard(error);
             CFObj<CFStringRef> desc(CFErrorCopyDescription(error));
             std::cerr << ": " << CFStr::ToString(desc);
         }
@@ -278,17 +277,13 @@ static CFMutableDict load_plist_as_cfdict(const std::string& path)
     if (data == nullptr)
         return {};
 
-    CFErrorRef error = nullptr;
+    CFObj<CFErrorRef> error;
     CFPropertyListFormat plist_format;
     CFMutableDict dict((CFMutableDictionaryRef)CFPropertyListCreateWithData(
         kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &plist_format, &error), kCFObjDontRetain);
 
     if (dict == nullptr)
-    {
-        if (error != nullptr)
-            CFRelease(error);
         return {};
-    }
 
     return dict;
 }

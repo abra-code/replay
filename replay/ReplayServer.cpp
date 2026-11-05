@@ -39,16 +39,15 @@ SendCallbackMessage(ReplayContext *context, SInt32 messageID)
 static inline ActionStep
 ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 {
-	CFDictionaryRef replayMessage = NULL;
+	CFObj<CFPropertyListRef> rawMessage;
+	CFDictionaryRef replayMessage = NULL; // borrowed from rawMessage
 	if((inData != NULL) && (CFDataGetLength(inData) > 0))
 	{//CFData containing property list dictionary
-		CFErrorRef error = NULL;
-		CFPropertyListRef rawMessage = CFPropertyListCreateWithData(kCFAllocatorDefault, inData, kCFPropertyListImmutable, NULL, &error);
-		if(rawMessage == NULL)
+		CFObj<CFErrorRef> error;
+		rawMessage.Adopt(CFPropertyListCreateWithData(kCFAllocatorDefault, inData, kCFPropertyListImmutable, NULL, &error));
+		if(rawMessage == nullptr)
 		{
-			if(error != NULL)
-				CFRelease(error);
-			LogError("error: corrupt mesage - cannot unpack property list dictionary from data\n");
+			LogError("error: corrupt message - cannot unpack property list dictionary from data\n");
 			if(context->stopOnError)
 				context->lastError.set("error: corrupt message - cannot unpack property list dictionary from data", 1);
 		}
@@ -57,17 +56,14 @@ ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 			replayMessage = CFType<CFDictionaryRef>::DynamicCast(rawMessage);
 			if(replayMessage == NULL)
 			{
-				CFRelease(rawMessage);
 				LogError("error: invalid message - cannot unpack property list dictionary from data\n");
 				if(context->stopOnError)
 					context->lastError.set("error: invalid message - cannot unpack property list dictionary from data", 1);
 			}
 		}
 	}
-	// ActionStep ctor retains; replayMessage raw pointer released by going out of scope
-	// via the CFObj wrapper below -> net retain = 1 in ActionStep.
-	CFObj<CFDictionaryRef> owned(replayMessage);
-	return ActionStep((CFDictionaryRef)owned);
+	// ActionStep retains the dictionary; rawMessage releases this function's reference.
+	return ActionStep(replayMessage);
 }
 
 

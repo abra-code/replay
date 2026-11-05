@@ -1144,7 +1144,7 @@ int fingerprint::save_snapshot_plist(const std::string& path, const SnapshotMeta
 
     CFMutableDict root_dict = build_snapshot_dictionary(metadata);
 
-    CFErrorRef error = nullptr;
+    CFObj<CFErrorRef> error;
     CFObj<CFDataRef> plist_data(CFPropertyListCreateData(kCFAllocatorDefault, root_dict,
         kCFPropertyListBinaryFormat_v1_0, 0, &error));
     root_dict = nullptr;
@@ -1344,15 +1344,14 @@ CFMutableDictionaryRef fingerprint::load_snapshot(const std::string& path) noexc
         return nullptr;
     }
 
-    CFErrorRef error_raw = nullptr;
+    CFObj<CFErrorRef> error;
     CFPropertyListFormat format;
     CFObj<CFMutableDictionaryRef> snapshot((CFMutableDictionaryRef)CFPropertyListCreateWithData(
-        kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &format, &error_raw));
+        kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &format, &error));
     data = nullptr;
 
     if (snapshot == nullptr)
     {
-        CFObj<CFErrorRef> error(error_raw);
         std::cerr << "Error: failed to parse snapshot file: " << path << "\n";
         if (error != nullptr)
         {

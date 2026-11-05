@@ -17,49 +17,47 @@
 #include "CFDict.h"
 
 // Convert a parsed yyjson value into a CoreFoundation object.
-// Returns a +1-retained CF object the caller owns. Returns nullptr on failure.
+// Returns the CF object, or null on failure.
 // All containers are created mutable so callers (compare_snapshots, cache_lookup)
 // can resort / mutate them in place — matching the prior NSJSONReadingMutableContainers
 // behavior.
-static CFTypeRef yyjson_to_cf(Json::Val v) noexcept
+static CFObj<CFTypeRef> yyjson_to_cf(Json::Val v) noexcept
 {
     if (!v.valid())
-        return nullptr;
+        return CFObj<CFTypeRef>();
 
     if (v.is_str())
     {
         auto sv = v.get_str();
         if (!sv)
-            return nullptr;
-        return CFStr(*sv).Detach();
+            return CFObj<CFTypeRef>();
+        return CFObj<CFTypeRef>(CFStr(*sv).Detach());
     }
     if (v.is_sint())
     {
         int64_t n = *v.get_sint();
-        return CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt64Type, &n);
+        return CFObj<CFTypeRef>(CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt64Type, &n));
     }
     if (v.is_uint())
     {
         // CFNumber has no unsigned type; squeeze into SInt64.
         // All numeric fields we round-trip fit in 63 bits.
         int64_t n = (int64_t)*v.get_uint();
-        return CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt64Type, &n);
+        return CFObj<CFTypeRef>(CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt64Type, &n));
     }
     if (v.is_real())
     {
         double d = *v.get_real();
-        return CFNumberCreate(kCFAllocatorDefault, kCFNumberFloat64Type, &d);
+        return CFObj<CFTypeRef>(CFNumberCreate(kCFAllocatorDefault, kCFNumberFloat64Type, &d));
     }
     if (v.is_bool())
     {
         CFBooleanRef b = *v.get_bool() ? kCFBooleanTrue : kCFBooleanFalse;
-        CFRetain(b);
-        return b;
+        return CFObj<CFTypeRef>(b, kCFObjRetain);
     }
     if (v.is_null())
     {
-        CFRetain(kCFNull);
-        return kCFNull;
+        return CFObj<CFTypeRef>(kCFNull, kCFObjRetain);
     }
     if (v.is_arr())
     {
@@ -71,7 +69,7 @@ static CFTypeRef yyjson_to_cf(Json::Val v) noexcept
             if (cf != nullptr)
                 arr.AppendValue(cf);
         }
-        return arr.Detach();
+        return CFObj<CFTypeRef>(arr.Detach());
     }
     if (v.is_obj())
     {
@@ -90,10 +88,10 @@ static CFTypeRef yyjson_to_cf(Json::Val v) noexcept
             if (cf_val != nullptr)
                 dict.SetValue(cf_key, (CFTypeRef)cf_val);
         }
-        return dict.Detach();
+        return CFObj<CFTypeRef>(dict.Detach());
     }
 
-    return nullptr;
+    return CFObj<CFTypeRef>();
 }
 
 int write_json_doc_to_file(const Json::MutableDoc& doc, const char* path)
@@ -132,5 +130,5 @@ CFMutableDict load_json_file_as_cfdict(const char* path, bool quiet)
         return {};
     }
 
-    return CFMutableDict((CFMutableDictionaryRef)yyjson_to_cf(root), kCFObjDontRetain);
+    return CFMutableDict((CFMutableDictionaryRef)yyjson_to_cf(root).Detach(), kCFObjDontRetain);
 }

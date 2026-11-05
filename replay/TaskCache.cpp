@@ -360,17 +360,13 @@ static CFMutableDict load_plist_file_as_cfdict(const std::string &path)
 	if(data == nullptr)
 		return {};
 
-	CFErrorRef error = nullptr;
+	CFObj<CFErrorRef> error;
 	CFPropertyListFormat plistFormat;
 	CFObj<CFTypeRef> plist(CFPropertyListCreateWithData(
 		kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &plistFormat, &error));
 
 	if(plist == nullptr)
-	{
-		if(error != nullptr)
-			CFRelease(error);
 		return {};
-	}
 
 	// A corrupt manifest must be treated as empty, never trusted to be a dictionary:
 	// blindly casting an array or a string here and calling CFDictionaryGetValueIfPresent
@@ -383,13 +379,11 @@ static CFMutableDict load_plist_file_as_cfdict(const std::string &path)
 
 static int write_plist_dict_to_file(CFDictionaryRef dict, const std::string &path)
 {
-	CFErrorRef error = nullptr;
+	CFObj<CFErrorRef> error;
 	CFObj<CFDataRef> data(CFPropertyListCreateData(kCFAllocatorDefault, dict,
 		kCFPropertyListBinaryFormat_v1_0, 0, &error));
 	if(data == nullptr)
 	{
-		if(error != nullptr)
-			CFRelease(error);
 		LogError("error: failed to serialize cache manifest plist\n");
 		return EXIT_FAILURE;
 	}
