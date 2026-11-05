@@ -11,6 +11,7 @@
 #include <future>
 #include <memory>
 #include <cstdint>
+#include <sys/types.h>
 
 // Serializes stdout/stderr output from concurrent tasks onto a dedicated thread.
 // Optionally enforces task-index ordering so output appears in playlist order
@@ -45,6 +46,14 @@ public:
     // the next playlist run.
     void flush();
 
+#if defined(__linux__)
+    // The kernel's id of the output thread. It starts before the sandbox and stays
+    // outside it, which is safe because it only writes to streams that are already
+    // open; the Linux sandbox lets exactly this thread through its thread check
+    // (private/linux_phase5a_sandbox_design.md, section 2).
+    pid_t threadId() const { return _threadId; }
+#endif
+
 private:
     struct WorkItem {
         int64_t actionIndex = -1;
@@ -55,13 +64,16 @@ private:
     };
 
     void enqueue(WorkItem&& item);
-    void threadMain();
+    void threadMain(std::promise<void> started);
     void processItem(WorkItem& item);
     static void printStrings(FILE* stream, const std::vector<std::string>& strings);
     void tryPrintPending();
     void drainPendingForFlush();
 
     std::thread _thread;
+#if defined(__linux__)
+    pid_t _threadId = 0; // set by the thread before the constructor returns
+#endif
     std::mutex _mutex;
     std::condition_variable _cv;
     std::deque<WorkItem> _queue;

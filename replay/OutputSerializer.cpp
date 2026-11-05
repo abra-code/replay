@@ -13,6 +13,14 @@
 #include "OutputSerializer.h"
 #include <cassert>
 #include <cstdio>
+#include <pthread.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
+// At most 15 characters: the Linux limit for a thread name.
+static const char *const kThreadName = "replay-output";
 
 // ---------------------------------------------------------------------------
 // Singleton
@@ -30,7 +38,14 @@ OutputSerializer& OutputSerializer::shared()
 
 OutputSerializer::OutputSerializer()
 {
-    _thread = std::thread(&OutputSerializer::threadMain, this);
+    // Wait until the thread has named itself and recorded its id, so threadId() is
+    // valid as soon as the serializer exists. The promise moves into the thread: the
+    // wait can return while set_value() is still running there, so the promise must
+    // not be a local of this constructor that is destroyed when it returns.
+    std::promise<void> started;
+    std::future<void> startedFuture = started.get_future();
+    _thread = std::thread(&OutputSerializer::threadMain, this, std::move(started));
+    startedFuture.wait();
 }
 
 OutputSerializer::~OutputSerializer()
@@ -207,8 +222,20 @@ void OutputSerializer::processItem(WorkItem& item)
 // Worker thread entry point
 // ---------------------------------------------------------------------------
 
-void OutputSerializer::threadMain()
+void OutputSerializer::threadMain(std::promise<void> started)
 {
+    // A name shows in debuggers and in /proc/<pid>/task/<tid>/comm, where the Linux
+    // sandbox's thread check reports what it found.
+#if defined(__APPLE__)
+    pthread_setname_np(kThreadName);
+#else
+    pthread_setname_np(pthread_self(), kThreadName);
+#endif
+#if defined(__linux__)
+    _threadId = (pid_t)syscall(SYS_gettid);
+#endif
+    started.set_value(); // releases the constructor
+
     std::unique_lock<std::mutex> lock(_mutex);
     while (true)
     {
