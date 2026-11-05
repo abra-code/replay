@@ -134,6 +134,12 @@
 				ab_neon_crc32c_v3s4x2e_v2.c,
 				ab_neon_eor3_crc32c_v9s3x2e_s3.c,
 				ab_sse_crc32c_v4s3x3k4096e.c,
+				crc32c_hw.c,
+				crc32c_neon.c,
+				crc32c_neon_eor3.c,
+				crc32c_portable.c,
+				crc32c_select.c,
+				crc32c_sse.c,
 				generate-variants.sh,
 			);
 			target = 1DFF72582ECF2D5500860A62 /* fast-crc32 */;

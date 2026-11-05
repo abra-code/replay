@@ -83,6 +83,7 @@ run_suite() {
     TEST_NAMES+=("$name")
 }
 
+run_suite "$SCRIPT_DIR/test_crc32c_variants.sh"
 run_suite "$SCRIPT_DIR/test_fingerprint.sh"        "$BUILD_DIR/fingerprint"
 run_suite "$SCRIPT_DIR/test_gate.sh"               "$BUILD_DIR/gate"
 run_suite "$SCRIPT_DIR/test_gate_auto_sandbox.sh" "$BUILD_DIR/gate"
