@@ -42,6 +42,7 @@ constexpr uint64_t kTruncate    = 1ULL << 14; // ABI 3
 constexpr uint64_t kIoctlDev    = 1ULL << 15; // ABI 5, never handled (design section 4)
 constexpr uint64_t kResolveUnix = 1ULL << 16; // ABI 9
 
+constexpr uint64_t kScopeAbstractUnix = 1ULL << 0; // ABI 6
 constexpr uint64_t kScopeSignal = 1ULL << 1;  // ABI 6
 
 // The lowest ABI the sandbox accepts: cross-folder rename (2) and truncate control (3).

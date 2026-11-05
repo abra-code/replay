@@ -440,11 +440,20 @@ static bool ApplyLinuxConfig(const Config& config, bool verbose, const std::vect
     for (const auto& warning : ruleset.warnings)
         fprintf(stderr, "%s\n", warning.c_str());
 
+    // Landlock limits connecting to Unix sockets from ABI 9; below that the filter denies
+    // creating them, when asked (the MCP server).
+    bool denyUnixSockets = config.deny_unix_sockets && abi < 9;
+
     if (verbose)
         fprintf(stdout, "%s"
                         "Also denied everywhere: extended attribute writes and removals, io_uring, "
-                        "and pushing input into a terminal (TIOCSTI, TIOCLINUX).\n\n",
-                landlock::Describe(ruleset).c_str());
+                        "and pushing input into a terminal (TIOCSTI, TIOCLINUX).\n%s\n",
+                landlock::Describe(ruleset).c_str(),
+                denyUnixSockets ? "Also denied: creating Unix sockets (socketpair stays allowed), since this "
+                                  "kernel's Landlock cannot limit connecting to them.\n"
+                : config.deny_unix_sockets ? "Also denied: connecting to abstract Unix sockets made outside the "
+                                             "sandbox.\n"
+                : "");
 
     if (!landlock::Apply(ruleset, allowed_threads, error))
     {
@@ -453,7 +462,7 @@ static bool ApplyLinuxConfig(const Config& config, bool verbose, const std::vect
     }
     // After Landlock, which set no-new-privileges. A failure here leaves the process
     // half sandboxed; the callers exit on false.
-    if (!seccomp::ApplyFilter(error))
+    if (!seccomp::ApplyFilter(denyUnixSockets, error))
     {
         fprintf(stderr, "error: cannot apply the sandbox: %s\n", error.c_str());
         return false;
@@ -481,7 +490,8 @@ bool InitializeSandbox(const std::string& profile_path,
                   const std::vector<std::string>& allow_write,
                   bool allow_network,
                   bool verbose,
-                  const std::vector<pid_t>& allowed_threads)
+                  const std::vector<pid_t>& allowed_threads,
+                  bool deny_unix_sockets)
 {
     Config cfg;
     if (!profile_path.empty())
@@ -494,6 +504,7 @@ bool InitializeSandbox(const std::string& profile_path,
     for (const auto& p : allow_write)
         cfg.read_write.push_back(p);
     cfg.allow_network = allow_network;
+    cfg.deny_unix_sockets = deny_unix_sockets;
     AddSystemAutoAllows(cfg);
     return ApplyConfig(cfg, verbose, allowed_threads);
 }

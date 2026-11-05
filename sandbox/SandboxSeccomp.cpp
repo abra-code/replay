@@ -15,6 +15,7 @@
 #include <linux/filter.h>
 #include <linux/seccomp.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -49,13 +50,24 @@ constexpr uint32_t kCompatSetxattr = 226, kCompatLsetxattr = 227, kCompatFsetxat
 constexpr uint32_t kCompatRemovexattr = 235, kCompatLremovexattr = 236, kCompatFremovexattr = 237;
 constexpr uint32_t kCompatIoctl = 54;
 
+// Creating a socket on the compat entry: a direct socket call (i386 from Linux 4.3,
+// which glibc may not use, and Arm EABI) and, on i386 only, the older socketcall
+// multiplexer, whose first argument names the operation and whose socket arguments
+// sit in memory the filter cannot read, so its SYS_SOCKET operation is denied for
+// every address family. Arm EABI has no socketcall.
+constexpr uint32_t kSysSocket = 1; // socketcall operation number, from <linux/net.h>
+
 #if defined(__x86_64__)
 constexpr uint32_t kNativeArch = AUDIT_ARCH_X86_64;
 constexpr uint32_t kCompatArch = AUDIT_ARCH_I386;
+constexpr uint32_t kCompatSocket = 359;
+constexpr uint32_t kCompatSocketcall = 102;
 constexpr bool kHasX32 = true; // x32 calls arrive with the native arch and bit 30 set
 #elif defined(__aarch64__)
 constexpr uint32_t kNativeArch = AUDIT_ARCH_AARCH64;
 constexpr uint32_t kCompatArch = AUDIT_ARCH_ARM;
+constexpr uint32_t kCompatSocket = 281;
+constexpr uint32_t kCompatSocketcall = 0; // none
 constexpr bool kHasX32 = false;
 #else
 #error The sandbox's system call filter supports x86_64 and aarch64 only
@@ -70,6 +82,7 @@ constexpr uint32_t Errno(int err)
 
 constexpr uint32_t kOffsetNr = offsetof(struct seccomp_data, nr);
 constexpr uint32_t kOffsetArch = offsetof(struct seccomp_data, arch);
+constexpr uint32_t kOffsetArg0Low = offsetof(struct seccomp_data, args);
 // The ioctl request is the second argument. The kernel takes it as an unsigned int,
 // so only its low 32 bits count, which on these little-endian architectures come first.
 constexpr uint32_t kOffsetArg1Low = offsetof(struct seccomp_data, args) + sizeof(uint64_t);
@@ -77,7 +90,16 @@ constexpr uint32_t kOffsetArg1Low = offsetof(struct seccomp_data, args) + sizeof
 // The checks for one architecture entry, with the system call number in the
 // accumulator: each listed number returns its answer, ioctl looks at its request, and
 // everything else is allowed.
+// A call denied only when the low 32 bits of its first argument have one value.
+struct ArgCheck
+{
+    uint32_t nr;
+    uint32_t arg0;
+    uint32_t answer;
+};
+
 std::vector<sock_filter> Section(const std::vector<std::pair<uint32_t, uint32_t>>& denied,
+                                 const std::vector<ArgCheck>& argChecks,
                                  uint32_t ioctlNr, bool x32)
 {
     std::vector<sock_filter> code;
@@ -92,6 +114,16 @@ std::vector<sock_filter> Section(const std::vector<std::pair<uint32_t, uint32_t>
         code.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, entry.first, 0, 1));
         code.push_back(BPF_STMT(BPF_RET | BPF_K, entry.second));
     }
+    // Each block returns for its call (loading the argument replaces the number in the
+    // accumulator), so a call that is not its own skips it with the number intact.
+    for (const auto& check : argChecks)
+    {
+        code.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, check.nr, 0, 4));     // another call: past the block
+        code.push_back(BPF_STMT(BPF_LD | BPF_W | BPF_ABS, kOffsetArg0Low));
+        code.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, check.arg0, 0, 1));   // another value: to the ALLOW
+        code.push_back(BPF_STMT(BPF_RET | BPF_K, check.answer));
+        code.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW));
+    }
     // ioctl: deny TIOCSTI and TIOCLINUX, allow every other request. Jump offsets count
     // from the next instruction.
     code.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ioctlNr, 0, 5));     // not ioctl: to the last ALLOW
@@ -104,24 +136,40 @@ std::vector<sock_filter> Section(const std::vector<std::pair<uint32_t, uint32_t>
     return code;
 }
 
-std::vector<sock_filter> BuildProgram()
+std::vector<sock_filter> BuildProgram(bool denyUnixSockets)
 {
     const uint32_t deny = Errno(EACCES);
     const uint32_t missing = Errno(ENOSYS);
+
+    // socket(AF_UNIX, ...) gives EACCES, which socket(2) documents as "permission to
+    // create a socket of the specified type is denied". socketpair is not checked: its
+    // stream and seqpacket sockets are connected to each other and reach nothing else,
+    // but a datagram one can still send to (or connect to) any datagram Unix socket,
+    // such as the journal's or /dev/log (a known gap; D-Bus, docker and the agents
+    // listen on stream sockets).
+    std::vector<ArgCheck> nativeChecks;
+    std::vector<ArgCheck> compatChecks;
+    if (denyUnixSockets)
+    {
+        nativeChecks.push_back({__NR_socket, AF_UNIX, deny});
+        compatChecks.push_back({kCompatSocket, AF_UNIX, deny});
+        if (kCompatSocketcall != 0)
+            compatChecks.push_back({kCompatSocketcall, kSysSocket, deny});
+    }
 
     std::vector<sock_filter> native = Section({
         {__NR_setxattr, deny}, {__NR_lsetxattr, deny}, {__NR_fsetxattr, deny},
         {__NR_removexattr, deny}, {__NR_lremovexattr, deny}, {__NR_fremovexattr, deny},
         {kSetxattrat, deny}, {kRemovexattrat, deny},
         {kIoUringSetup, missing}, {kIoUringEnter, missing}, {kIoUringRegister, missing},
-    }, __NR_ioctl, kHasX32);
+    }, nativeChecks, __NR_ioctl, kHasX32);
 
     std::vector<sock_filter> compat = Section({
         {kCompatSetxattr, deny}, {kCompatLsetxattr, deny}, {kCompatFsetxattr, deny},
         {kCompatRemovexattr, deny}, {kCompatLremovexattr, deny}, {kCompatFremovexattr, deny},
         {kSetxattrat, deny}, {kRemovexattrat, deny},
         {kIoUringSetup, missing}, {kIoUringEnter, missing}, {kIoUringRegister, missing},
-    }, kCompatIoctl, false);
+    }, compatChecks, kCompatIoctl, false);
 
     // arch == native: the native section; arch == compat: the compat section; any
     // other architecture cannot occur, and is killed rather than allowed.
@@ -140,9 +188,9 @@ static_assert(sizeof(sock_filter) == 8, "unexpected sock_filter layout");
 }  // namespace
 
 
-bool ApplyFilter(std::string& error)
+bool ApplyFilter(bool denyUnixSockets, std::string& error)
 {
-    std::vector<sock_filter> program = BuildProgram();
+    std::vector<sock_filter> program = BuildProgram(denyUnixSockets);
     // Each jump over a section must fit the 8-bit offset; the sections are a few dozen
     // instructions.
     if (program.size() > 250)

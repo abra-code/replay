@@ -10,7 +10,10 @@
 //      system call filter, and programs fall back to ordinary calls;
 //    - the terminal ioctls TIOCSTI and TIOCLINUX are denied (EACCES): they push
 //      characters into a terminal's input, which would let a child type into the
-//      user's shell.
+//      user's shell;
+//    - when asked (the MCP server on a kernel below Landlock ABI 9), creating Unix
+//      sockets is denied (EACCES), since Landlock there cannot limit connecting to them
+//      (section 9).
 //  Internal to the sandbox module; Linux only.
 //
 
@@ -28,7 +31,7 @@ namespace seccomp
 // Installs the filter on all threads of the process. The process must already have
 // no-new-privileges set (the Landlock step sets it). False with `error` on failure;
 // the caller must not continue.
-bool ApplyFilter(std::string& error);
+bool ApplyFilter(bool denyUnixSockets, std::string& error);
 
 }  // namespace seccomp
 }  // namespace sandbox

@@ -1097,23 +1097,19 @@ int main(int argc, const char * argv[])
 	if(sandboxRequested)
 	{
 #if defined(__linux__)
-		// Until the Unix socket rule for MCP mode exists (private/linux_phase5a_sandbox_design.md,
-		// question 6), the server keeps refusing to start sandboxed on Linux.
-		if(mcpServerMode)
-		{
-			LogError("error: MCP server mode with the sandbox is not available on Linux yet; "
-			         "use --no-sandbox to run it unsandboxed\n");
-			safe_exit(EXIT_FAILURE);
-		}
-
 		// The Linux sandbox covers only the calling thread and the threads started after
 		// it. The output thread, started at the top of main, is stopped (after printing
 		// what is queued) and started again inside the sandbox, so no thread of replay
 		// stays outside; the sandbox then checks that no other thread runs.
 		context.outputSerializer->stopThread();
 #endif
+		// In MCP server mode an AI agent chooses the commands, so on a Linux kernel whose
+		// Landlock cannot limit connecting to Unix sockets (below ABI 9) the sandbox denies
+		// creating them: through the D-Bus session bus a child could otherwise start a
+		// program outside the sandbox (private/linux_phase5a_sandbox_design.md, section 9).
+		// Playlists, whose commands the user wrote, keep them. macOS ignores the flag.
 		bool sandboxed = sandbox::InitializeSandbox(sandboxProfilePath, sandboxAllowRead, sandboxAllowWrite,
-		                                            !sandboxDenyNetwork, context.verbose);
+		                                            !sandboxDenyNetwork, context.verbose, {}, mcpServerMode);
 #if defined(__linux__)
 		context.outputSerializer->startThread();
 #endif

@@ -160,18 +160,12 @@ run_stdin "[execute]	/bin/true" --sandbox-profile "$WORK_DIR/no_fork.json"
 test "$rc" -ne 0
 check $? "allow_fork false is refused (not supported on Linux yet)" "$out"
 
-out="$("$REPLAY" --mcp-server --allow-write "$ALLOWED" < /dev/null 2>&1)"
-rc=$?
-test "$rc" -ne 0
-check $? "the MCP server refuses to start sandboxed until its Unix socket rule exists" "$out"
-case "$out" in *"MCP server mode with the sandbox is not available on Linux yet"*) r=0 ;; *) r=1 ;; esac
-check $r "the MCP refusal says why" "$out"
-
 echo ""
 echo "=== 5. the --verbose listing ==="
 run_stdin "[execute]	/bin/true" --verbose --allow-write "$ALLOWED"
 case "$out" in *"Sandbox (Linux Landlock, ABI "*) r=0 ;; *) r=1 ;; esac
 check $r "it names Landlock and its ABI" "$out"
+ABI="$(printf '%s\n' "$out" | /usr/bin/sed -n 's/^Sandbox (Linux Landlock, ABI \([0-9]*\)).*/\1/p' | /usr/bin/head -n 1)"
 case "$out" in *"  read-write: $ALLOWED  [granted]"*) r=0 ;; *) r=1 ;; esac
 check $r "it lists the write grant" "$out"
 case "$out" in *"  read-only: /usr  [baseline]"*) r=0 ;; *) r=1 ;; esac
@@ -223,6 +217,10 @@ else
     check $r "TIOCSTI is denied (EACCES, not the kernel's ENOTTY)" "sandboxed: $out; unsandboxed: $plain"
     case "$out" in *"TIOCGWINSZ ENOTTY"*) r=0 ;; *) r=1 ;; esac
     check $r "other ioctls reach the kernel (TIOCGWINSZ gives ENOTTY)" "$out"
+    # Option c of the design's question 6: playlists, whose commands the user wrote,
+    # keep Unix sockets (pinned, as a gap below ABI 9).
+    case "$NL$out$NL" in *"${NL}socket-unix ok$NL"*) r=0 ;; *) r=1 ;; esac
+    check $r "a playlist command can create a Unix socket" "$out"
 fi
 
 # A playlist file: in stdin mode replay ignores --cache and never gets that far.
@@ -264,7 +262,43 @@ else
 fi
 
 echo ""
-echo "=== 8. documented gaps, pinned ==="
+echo "=== 8. Unix sockets in MCP server mode ==="
+# An AI agent chooses the MCP server's commands, so below Landlock ABI 9, which cannot
+# limit connecting to Unix sockets by path, the sandbox denies creating them there.
+if [ ! -x "$WORK_DIR/probe" ]; then
+    echo "  skipped: no system call probe (section 7)"
+else
+    call="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"execute_command\",\"arguments\":{\"command\":\"$WORK_DIR/probe $ALLOWED/probe.txt\"}}}"
+    out="$(printf '%s\n' \
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{}}}' \
+        '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+        "$call" \
+        | "$REPLAY" --allow-write "$ALLOWED" --allow-read "$WORK_DIR/probe" --mcp-server 2>&1)"
+    rc=$?
+    test "$rc" -eq 0
+    check $? "the MCP server starts sandboxed" "rc $rc; $out"
+    case "$ABI" in
+        ''|*[!0-9]*) check 1 "the Landlock ABI is known (section 5)" "ABI '$ABI'" ;;
+        *)
+            if [ "$ABI" -lt 9 ]; then
+                case "$out" in *"socket-unix EACCES"*) r=0 ;; *) r=1 ;; esac
+                check $r "below ABI 9, an MCP command cannot create a Unix socket (EACCES)" "$out"
+            else
+                case "$out" in *"socket-unix ok"*) r=0 ;; *) r=1 ;; esac
+                check $r "from ABI 9, an MCP command can create a Unix socket (Landlock limits connecting)" "$out"
+            fi
+            ;;
+    esac
+    case "$out" in *"socketpair-unix ok"*) r=0 ;; *) r=1 ;; esac
+    check $r "socketpair stays allowed in MCP mode" "$out"
+    case "$out" in *"socket-inet ok"*) r=0 ;; *) r=1 ;; esac
+    check $r "other address families stay allowed in MCP mode" "$out"
+    case "$out" in *"setxattr EACCES"*) r=0 ;; *) r=1 ;; esac
+    check $r "the rest of the filter applies in MCP mode too" "$out"
+fi
+
+echo ""
+echo "=== 9. documented gaps, pinned ==="
 /bin/chmod 644 "$OUTSIDE/secret.txt"
 run_stdin "[execute]	/bin/chmod	600	$OUTSIDE/secret.txt" --allow-write "$ALLOWED"
 mode="$(/usr/bin/stat -c %a "$OUTSIDE/secret.txt")"

@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/xattr.h>
 #include <unistd.h>
@@ -85,5 +86,27 @@ int main(int argc, char **argv)
     struct winsize ws;
     errno = 0;
     report("TIOCGWINSZ", ioctl(0, TIOCGWINSZ, &ws)); // control: allowed, ENOTTY
+
+    // Unix sockets: denied in MCP server mode on kernels below Landlock ABI 9, allowed
+    // otherwise; socketpair and other address families are always allowed.
+    errno = 0;
+    int s = socket(AF_UNIX, SOCK_STREAM, 0);
+    report("socket-unix", s);
+    if (s >= 0)
+        close(s);
+    int pair[2];
+    errno = 0;
+    int pairResult = socketpair(AF_UNIX, SOCK_STREAM, 0, pair);
+    report("socketpair-unix", pairResult);
+    if (pairResult == 0)
+    {
+        close(pair[0]);
+        close(pair[1]);
+    }
+    errno = 0;
+    s = socket(AF_INET, SOCK_DGRAM, 0);
+    report("socket-inet", s);
+    if (s >= 0)
+        close(s);
     return 0;
 }

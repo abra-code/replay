@@ -241,6 +241,13 @@ bool BuildRules(const Config& config, int abi, RuleSet& out, std::string& error)
     result.abi = abi;
     result.handledAccess = HandledFor(abi);
     result.scoped = (abi >= 6) ? kScopeSignal : 0;
+    // Abstract Unix sockets have no path, so the path right of ABI 9 does not cover
+    // them; the scope limits connecting to sockets made inside the sandbox. Only when
+    // Unix sockets are limited (the MCP server): from ABI 9 it is what keeps a command
+    // from, for example, the X server's abstract socket. Below ABI 9 the filter denies
+    // creating Unix sockets anyway. For playlists it belongs with the network (5b).
+    if (config.deny_unix_sockets && abi >= 6)
+        result.scoped |= kScopeAbstractUnix;
 
     // 1. Write grants. A missing path falls back to its nearest existing folder, but
     //    never to one too broad to grant in its place.

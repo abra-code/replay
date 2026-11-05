@@ -56,6 +56,14 @@ struct Config
     bool allow_exec    = true;
     bool allow_fork    = true;
     std::vector<std::string> extra_rules;  // raw SBPL strings appended verbatim
+    // Linux only, not read from JSON: on a kernel whose Landlock cannot limit connecting
+    // to Unix sockets by path (below ABI 9), deny creating Unix sockets at all. Set for the
+    // MCP server, where an AI agent chooses the commands: through the D-Bus session bus
+    // a child could otherwise start a program outside the sandbox. From ABI 6 it also
+    // limits connecting to abstract Unix sockets (which have no path) to those made
+    // inside the sandbox. On ABI 9 and newer, Unix sockets inside the write grants stay
+    // reachable either way. macOS ignores it.
+    bool deny_unix_sockets = false;
 
     bool empty() const
     {
@@ -104,12 +112,14 @@ bool ApplyConfig(const Config& config, bool verbose = false,
 // Load optional JSON profile, merge allow_read/allow_write/allow_network
 // All failures return false.
 // If verbose is true, prints the SBPL profile (macOS) or the rule list (Linux) to
-// stdout before applying. allowed_threads as for ApplyConfig.
+// stdout before applying. allowed_threads as for ApplyConfig; deny_unix_sockets as in
+// Config.
 bool InitializeSandbox(const std::string& profile_path,
                   const std::vector<std::string>& allow_read,
                   const std::vector<std::string>& allow_write,
                   bool allow_network,
                   bool verbose = false,
-                  const std::vector<pid_t>& allowed_threads = {});
+                  const std::vector<pid_t>& allowed_threads = {},
+                  bool deny_unix_sockets = false);
 
 }  // namespace sandbox
