@@ -23,6 +23,7 @@
 #include "CFArr.h"
 #include "CFDict.h"
 #include "ChildProcess.h"
+#include "IpcPort.h"
 
 static bool
 StartChildProcess(const std::string &toolPath, const std::vector<std::string> &arguments)
@@ -45,8 +46,8 @@ StartChildProcess(const std::string &toolPath, const std::vector<std::string> &a
 }
 
 
-static CFDataRef
-CallbackProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef /*inData*/, void * /*info*/)
+static CFObj<CFDataRef>
+CallbackProc(int32_t inMessageID, CFDataRef /*inData*/)
 {
 	if (inMessageID == kCallbackMessageHeartbeat)
 	{
@@ -54,55 +55,39 @@ CallbackProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef /*inDat
 	}
 	else if (inMessageID == kCallbackMessageExiting)
 	{
-		CFMessagePortInvalidate(inLocalPort);
+		// the port is invalidated by FinalizeCallbackListener once the run loop returns
 		CFRunLoopStop(CFRunLoopGetCurrent());
 	}
 
-	return nullptr;
+	return CFObj<CFDataRef>(); // no reply
 }
 
 
-static CFRunLoopSourceRef
+static std::unique_ptr<ipc::Port>
 StartCallbackListener(const std::string &batchName)
 {
-	CFStr batchStr(batchName);
-	CFStr portName = CFStr::Format(kDispatchListenerPortFormat, GetAppGroupIdentifier(), (CFStringRef)batchStr);
-	if (portName == nullptr)
-	{
-		fprintf(stderr, "error: could not create port name\n");
-		exit(EXIT_FAILURE);
-	}
-
-	CFMessagePortContext messagePortContext = { 0, nullptr, nullptr, nullptr, nullptr };
-	CFObj<CFMessagePortRef> localPort(
-		CFMessagePortCreateLocal(kCFAllocatorDefault, portName, CallbackProc, &messagePortContext, nullptr),
-		kCFObjDontRetain);
+	std::unique_ptr<ipc::Port> localPort = ipc::Port::CreateLocal(DispatchListenerPortName(batchName), CallbackProc);
 	if (localPort == nullptr)
 	{
 		fprintf(stderr, "error: could not create a local message port\n");
 		exit(EXIT_FAILURE);
 	}
 
-	CFObj<CFRunLoopSourceRef> runLoopSource(
-		CFMessagePortCreateRunLoopSource(kCFAllocatorDefault, localPort, 0),
-		kCFObjDontRetain);
-	if (runLoopSource == nullptr)
+	if (!localPort->AddToCurrentRunLoop())
 	{
 		fprintf(stderr, "error: could not create a runloop source\n");
 		exit(EXIT_FAILURE);
 	}
-
-	CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
-	return runLoopSource.Detach();
+	return localPort;
 }
 
 static void
-FinalizeCallbackListener(CFRunLoopSourceRef runLoopSource)
+FinalizeCallbackListener(std::unique_ptr<ipc::Port> &callbackListener)
 {
-	if (runLoopSource != nullptr)
+	if (callbackListener != nullptr)
 	{
-		CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
-		CFRelease(runLoopSource);
+		callbackListener->Invalidate();
+		callbackListener.reset();
 	}
 }
 
@@ -129,11 +114,11 @@ StartProcessExitMonitoring(int pid)
 }
 
 
-static CFMessagePortRef
-StartReplayAndOpenRemotePort(const std::string &pathToDispatch, CFStringRef portName,
+static std::unique_ptr<ipc::Port>
+StartReplayAndOpenRemotePort(const std::string &pathToDispatch, const std::string &portName,
                              const std::vector<std::string> &arguments, bool ensureResponse)
 {
-	CFMessagePortRef remotePort = nullptr;
+	std::unique_ptr<ipc::Port> remotePort;
 
 	// replay is expected to be in the same directory as dispatch
 	std::string replayPath;
@@ -151,7 +136,7 @@ StartReplayAndOpenRemotePort(const std::string &pathToDispatch, CFStringRef port
 		for (int i = 0; i < 30; i++)
 		{
 			// retry opening the communication port with "replay"
-			remotePort = CFMessagePortCreateRemote(kCFAllocatorDefault, portName);
+			remotePort = ipc::Port::CreateRemote(portName);
 			if (remotePort != nullptr)
 				break;
 			usleep(100000); // sleep 0.1 sec
@@ -175,16 +160,12 @@ StartReplayAndOpenRemotePort(const std::string &pathToDispatch, CFStringRef port
 	{ // try sending a test message to see if we get a response
 		for (int i = 0; i < 10; i++)
 		{
-			CFDataRef replayReplyData = nullptr;
-			int result = CFMessagePortSendRequest(remotePort, kReplayMessageStartServer, nullptr,
-				10/*send timeout*/, 10/*rcv timeout*/, kCFRunLoopDefaultMode, &replayReplyData);
+			CFObj<CFDataRef> replayReplyData;
+			int result = remotePort->SendRequest(kReplayMessageStartServer, nullptr,
+				10/*send timeout*/, 10/*rcv timeout*/, &replayReplyData);
 
 			if (result == 0)
-			{
-				if (replayReplyData != nullptr)
-					CFRelease(replayReplyData);
 				break;
-			}
 			usleep(100000); // sleep 0.1 sec
 		}
 	}
@@ -194,7 +175,7 @@ StartReplayAndOpenRemotePort(const std::string &pathToDispatch, CFStringRef port
 
 
 static int
-SendActionsFromStdIn(CFMessagePortRef remotePort)
+SendActionsFromStdIn(ipc::Port &remotePort)
 {
 	int result = 0;
 	char *line = nullptr;
@@ -205,8 +186,8 @@ SendActionsFromStdIn(CFMessagePortRef remotePort)
 		CFObj<CFDataRef> lineData(CFDataCreate(kCFAllocatorDefault, (const UInt8 *)line, linelen));
 		if (lineData != nullptr)
 		{
-			result = CFMessagePortSendRequest(remotePort, kReplayMessageQueueActionLine, lineData,
-				10/*send timeout*/, 0/*rcv timeout*/, nullptr, nullptr);
+			result = remotePort.SendRequest(kReplayMessageQueueActionLine, lineData,
+				10/*send timeout*/, 0/*rcv timeout*/, nullptr);
 			if (result != 0)
 			{
 				fprintf(stderr, "error: could not send dispatch request to \"replay\": %d\n", result);
@@ -348,13 +329,7 @@ int main(int argc, const char *argv[])
 		return EXIT_SUCCESS;
 	}
 
-	CFStr batchStr(batchName);
-	CFStr portName = CFStr::Format(kReplayServerPortFormat, GetAppGroupIdentifier(), (CFStringRef)batchStr);
-	if (portName == nullptr)
-	{
-		fprintf(stderr, "error: could not create port name\n");
-		exit(EXIT_FAILURE);
-	}
+	std::string portName = ReplayServerPortName(batchName);
 
 	bool isSrcDestAction = false;
 	Action action = kActionInvalid;
@@ -364,9 +339,7 @@ int main(int argc, const char *argv[])
 		action = ActionFromName(std::string_view(argv[2]), isSrcDestAction);
 	}
 
-	CFObj<CFMessagePortRef> remotePort(
-		CFMessagePortCreateRemote(kCFAllocatorDefault, portName),
-		kCFObjDontRetain); // should return non-null if remote server port already created
+	std::unique_ptr<ipc::Port> remotePort = ipc::Port::CreateRemote(portName); // non-null if the server already runs
 	if (remotePort == nullptr)
 	{
 		if (action != kActionWait)
@@ -392,8 +365,7 @@ int main(int argc, const char *argv[])
 			if (!dispatchPath.empty())
 				pathToDispatch = dispatchPath;
 
-			remotePort.Adopt(StartReplayAndOpenRemotePort(pathToDispatch, portName, arguments, ensureResponse),
-				kCFObjDontRetain);
+			remotePort = StartReplayAndOpenRemotePort(pathToDispatch, portName, arguments, ensureResponse);
 		}
 		else
 		{
@@ -411,11 +383,11 @@ int main(int argc, const char *argv[])
 	if (argc == 2)
 	{ // this is the mode where only "dispatch batch_name" is used and the action description
 	  // is read-in from stdin in the delimited format the same as "replay" uses
-		result = SendActionsFromStdIn(remotePort);
+		result = SendActionsFromStdIn(*remotePort);
 		exit((result == 0) ? EXIT_SUCCESS : EXIT_FAILURE);
 	}
 
-	CFRunLoopSourceRef callbackListenerRef = nullptr;
+	std::unique_ptr<ipc::Port> callbackListener;
 	CFMutableDict actionDescription;
 	{
 		CFStr actionNameStr(actionName);
@@ -753,7 +725,7 @@ int main(int argc, const char *argv[])
 			case kActionWait:
 			{
 				// when we sit waiting, we expect callback messages from "replay"
-				callbackListenerRef = StartCallbackListener(batchName);
+				callbackListener = StartCallbackListener(batchName);
 				msgid = kReplayMessageFinishAndWaitForAllActions;
 			}
 			break;
@@ -766,13 +738,13 @@ int main(int argc, const char *argv[])
 		}
 	}
 
-	CFDataRef replayReplyData = nullptr;
+	CFObj<CFDataRef> replayReplyData;
 	CFObj<CFDataRef> plistData(CFPropertyListCreateData(kCFAllocatorDefault, actionDescription,
 		kCFPropertyListBinaryFormat_v1_0, 0, nullptr));
 	if (plistData != nullptr)
 	{
-		result = CFMessagePortSendRequest(remotePort, msgid, plistData,
-			10/*send timeout*/, 10/*rcv timeout*/, kCFRunLoopDefaultMode, &replayReplyData);
+		result = remotePort->SendRequest(msgid, plistData,
+			10/*send timeout*/, 10/*rcv timeout*/, &replayReplyData);
 		plistData.Release();
 		if (result != 0)
 		{
@@ -784,10 +756,9 @@ int main(int argc, const char *argv[])
 	int replayPID = 0;
 	if (replayReplyData != nullptr)
 	{
-		CFErrorRef error = nullptr;
+		CFObj<CFErrorRef> error;
 		CFObj<CFPropertyListRef> replyPlist(CFPropertyListCreateWithData(kCFAllocatorDefault, replayReplyData,
 			kCFPropertyListImmutable, nullptr, &error));
-		CFRelease(replayReplyData);
 		CFDictionaryRef replyDict = nullptr;
 		if ((replyPlist != nullptr) && CFType<CFDictionaryRef>::DynamicCast(replyPlist, replyDict))
 		{
@@ -796,10 +767,6 @@ int main(int argc, const char *argv[])
 			int64_t pid64 = 0;
 			if (replayReply.GetValue(CFSTR("pid"), pid64))
 				replayPID = (int)pid64;
-		}
-		else if (error != nullptr)
-		{
-			CFRelease(error);
 		}
 	}
 
@@ -816,7 +783,7 @@ int main(int argc, const char *argv[])
 		// it is done with kCallbackMessageExiting message
 		CFRunLoopRun();
 
-		FinalizeCallbackListener(callbackListenerRef);
+		FinalizeCallbackListener(callbackListener);
 	}
 
 	exit(EXIT_SUCCESS);

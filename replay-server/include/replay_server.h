@@ -5,15 +5,23 @@
 //  Copyright © 2020 Tomasz Kukielka. All rights reserved.
 //
 
-#include <CoreFoundation/CoreFoundation.h>
+#pragma once
+
+#include <string>
 
 #define REPLAY_GROUP_ID "group"
-#define GetAppGroupIdentifier() CFSTR(REPLAY_GROUP_ID)
 
-// Macros, not file-scope variables: on Linux CFSTR is a statement expression, which
-// C++ does not allow at file scope.
-#define kReplayServerPortFormat CFSTR("%@.replay-port.%@")
-#define kDispatchListenerPortFormat CFSTR("%@.dispatch-port.%@")
+// The two ports of a batch (common/include/IpcPort.h): the server's, and the one
+// dispatch's "wait" listens on for the server's exit.
+inline std::string ReplayServerPortName(const std::string &batchName)
+{
+	return std::string(REPLAY_GROUP_ID ".replay-port.") + batchName;
+}
+
+inline std::string DispatchListenerPortName(const std::string &batchName)
+{
+	return std::string(REPLAY_GROUP_ID ".dispatch-port.") + batchName;
+}
 
 enum ReplayMessage
 {

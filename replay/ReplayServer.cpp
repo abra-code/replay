@@ -15,19 +15,6 @@
 #include "CFStr.h"
 #include "CFDict.h"
 
-CFMessagePortRef
-CreateCallbackPort(const std::string &batchName)
-{
-	CFStr batchStr(batchName);
-	CFStr portName = CFStr::Format(kDispatchListenerPortFormat, CFSTR(REPLAY_GROUP_ID), (CFStringRef)batchStr);
-	if (portName == nullptr)
-	{
-		LogError("error: could not create port name %s\n", batchName.c_str());
-		return nullptr;
-	}
-	return CFMessagePortCreateRemote(kCFAllocatorDefault, portName);
-}
-
 void
 SendCallbackMessage(ReplayContext *context, SInt32 messageID)
 {
@@ -45,7 +32,7 @@ SendCallbackMessage(ReplayContext *context, SInt32 messageID)
 	CFObj<CFDataRef> plistData(CFPropertyListCreateData(kCFAllocatorDefault, callbackInfo, kCFPropertyListBinaryFormat_v1_0, 0, nullptr));
 	if (plistData != nullptr)
 	{
-		/*int result =*/ CFMessagePortSendRequest(context->callbackPort, messageID, plistData, 5/*send timeout*/, 0/*rcv timeout*/, nullptr, nullptr);
+		/*int result =*/ context->callbackPort->SendRequest(messageID, plistData, 5/*send timeout*/, 0/*rcv timeout*/, nullptr);
 	}
 }
 
@@ -84,12 +71,9 @@ ActionDictionaryFromData(ReplayContext *context, CFDataRef inData)
 }
 
 
-static CFDataRef
-ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef inData, void *info)
+static CFObj<CFDataRef>
+ReplayListenerProc(ReplayContext *context, int32_t inMessageID, CFDataRef inData)
 {
-#pragma unused(inLocalPort)
-
-	ReplayContext *context = (ReplayContext *)info;
 	bool stopLoop = false;
 	ActionStep actionDescription;
 
@@ -119,7 +103,7 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 		case kReplayMessageFinishAndWaitForAllActions:
 		{
 			assert(!context->batchName.empty());
-			context->callbackPort = CreateCallbackPort(context->batchName);
+			context->callbackPort = ipc::Port::CreateRemote(DispatchListenerPortName(context->batchName));
 			stopLoop = true;
 		}
 		break;
@@ -168,46 +152,33 @@ ReplayListenerProc(CFMessagePortRef inLocalPort, SInt32 inMessageID, CFDataRef i
 	if (context->lastError.hasError())
 		replayReply.SetValue(CFSTR("lastError"), CFStr(context->lastError.description()));
 
-	return CFPropertyListCreateData(kCFAllocatorDefault, replayReply, kCFPropertyListBinaryFormat_v1_0, 0, nullptr);
+	return CFObj<CFDataRef>(CFPropertyListCreateData(kCFAllocatorDefault, replayReply, kCFPropertyListBinaryFormat_v1_0, 0, nullptr));
 }
 
 
 void
 StartServerAndRunLoop(ReplayContext *context)
 {
-	CFObj<CFMessagePortRef> localPort;
 	assert(!context->batchName.empty());
-	CFStr batchStr(context->batchName);
-	CFStr portName = CFStr::Format(kReplayServerPortFormat, CFSTR(REPLAY_GROUP_ID), (CFStringRef)batchStr);
-	if (portName == nullptr)
-	{
-		LogError("error: could not create port name %s\n", context->batchName.c_str());
-		safe_exit(EXIT_FAILURE);
-	}
-
-	CFMessagePortContext messagePortContext = { 0, (void *)context, NULL, NULL, NULL };
-	localPort.Adopt(CFMessagePortCreateLocal(kCFAllocatorDefault, portName, ReplayListenerProc, &messagePortContext, NULL));
-	if(localPort == NULL)
+	std::unique_ptr<ipc::Port> localPort = ipc::Port::CreateLocal(ReplayServerPortName(context->batchName),
+		[context](int32_t messageId, CFDataRef data) { return ReplayListenerProc(context, messageId, data); });
+	if(localPort == nullptr)
 	{
 		LogError("error: could not create a local message port\n");
 		safe_exit(EXIT_FAILURE);
 	}
 
-	CFObj<CFRunLoopSourceRef> runLoopSource(CFMessagePortCreateRunLoopSource(kCFAllocatorDefault, localPort, 0));
-	if(runLoopSource == NULL)
+	if(!localPort->AddToCurrentRunLoop())
 	{
 		LogError("error: could not create a runloop source\n");
 		safe_exit(EXIT_FAILURE);
 	}
 
-	CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
-
 	StartReceivingActions(context);
 
 	CFRunLoopRun(); //the runloop will be stopped when we receive kReplayMessageFinishAndWaitForAllActions from "dispatch"
 
-	CFMessagePortInvalidate(localPort);
-	CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
+	localPort->Invalidate();
 
 	FinishReceivingActionsAndWait(context);
 

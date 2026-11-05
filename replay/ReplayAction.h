@@ -3,7 +3,7 @@
 #include "LogStream.h"
 #include "ActionStep.h"
 #include "TaskCacheTypes.h"
-#include <CoreFoundation/CFMessagePort.h>
+#include "IpcPort.h"
 #include <dispatch/dispatch.h>
 
 #include <atomic>
@@ -109,7 +109,7 @@ typedef struct
 	intptr_t councurrencyLimit; //maximum number of tasks allowed to be executed concurrently. 0 = unlimited
 	intptr_t actionCounter; //counter incremented with each serially created action
 	std::string batchName; //when running in server mode the batch name is provided for unique message port name
-	CFMessagePortRef callbackPort; //the port to report back progress status and finish event
+	std::unique_ptr<ipc::Port> callbackPort; //the port to report back progress status and finish event
 	bool concurrent;
 	bool analyzeDependencies;
 	bool verbose;

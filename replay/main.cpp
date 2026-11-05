@@ -692,7 +692,6 @@ int main(int argc, const char * argv[])
 	context.councurrencyLimit = 0; //unlimited
 	context.actionCounter = -1;
 	context.batchName = {};
-	context.callbackPort = NULL;
 	context.concurrent = true;
 	context.analyzeDependencies = true;
 	context.verbose = false;
