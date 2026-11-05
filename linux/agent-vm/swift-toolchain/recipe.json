@@ -20,7 +20,7 @@
     {
       "name": "What the Swift toolchain links against, and the test suite's tools",
       "user": "root",
-      "run": "apt-get -q -y -o Dpkg::Use-Pty=0 update && apt-get -q -y -o Dpkg::Use-Pty=0 install --no-install-recommends binutils libc6-dev libcurl4-openssl-dev libedit2 libgcc-14-dev libpython3-dev libsqlite3-0 libstdc++-14-dev libxml2-dev libncurses-dev libz3-dev pkg-config tzdata zlib1g-dev attr zip",
+      "run": "apt-get -q -y -o Dpkg::Use-Pty=0 update && apt-get -q -y -o Dpkg::Use-Pty=0 install --no-install-recommends binutils libc6-dev libcurl4-openssl-dev libedit2 libgcc-14-dev libpython3-dev libsqlite3-0 libstdc++-14-dev libxml2-dev libncurses-dev libz3-dev pkg-config tzdata zlib1g-dev attr zip python3-jsonschema",
       "env": { "DEBIAN_FRONTEND": "noninteractive" },
       "timeoutSeconds": 1800
     },
@@ -42,7 +42,7 @@
     {
       "name": "The packages, the distribution's newest",
       "user": "root",
-      "run": "apt-get -q -y -o Dpkg::Use-Pty=0 update && apt-get -q -y -o Dpkg::Use-Pty=0 install --no-install-recommends --only-upgrade binutils libc6-dev libcurl4-openssl-dev libedit2 libgcc-14-dev libpython3-dev libsqlite3-0 libstdc++-14-dev libxml2-dev libncurses-dev libz3-dev pkg-config tzdata zlib1g-dev attr zip",
+      "run": "apt-get -q -y -o Dpkg::Use-Pty=0 update && apt-get -q -y -o Dpkg::Use-Pty=0 install --no-install-recommends --only-upgrade binutils libc6-dev libcurl4-openssl-dev libedit2 libgcc-14-dev libpython3-dev libsqlite3-0 libstdc++-14-dev libxml2-dev libncurses-dev libz3-dev pkg-config tzdata zlib1g-dev attr zip python3-jsonschema",
       "env": { "DEBIAN_FRONTEND": "noninteractive" },
       "timeoutSeconds": 1800
     },

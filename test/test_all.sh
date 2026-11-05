@@ -41,8 +41,6 @@ linux_skip_reason() {
     case "$1" in
         test_dispatch.sh)
             echo "IPC between dispatch and replay is not ported (Phase 4)" ;;
-        test_mcp_server.py)
-            echo "MCP server mode on Linux waits for its Unix socket rule (Phase 5a, step 5)" ;;
         test_sandbox_discover.py)
             echo "sandbox-discover.py is macOS only (later, not in the plan)" ;;
     esac

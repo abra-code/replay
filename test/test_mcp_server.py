@@ -15,6 +15,9 @@ import tempfile
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+sys.path.insert(0, str(Path(__file__).parent.resolve()))
+from xattr_support import IS_LINUX  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -1919,6 +1922,12 @@ def test_stress_concurrent_leak_detection(tmpdir: str) -> None:
         check(f"stress test: received all {num_iterations} responses",
               len(responses) == num_iterations, f"got {len(responses)}")
 
+        if IS_LINUX:
+            # leaks(1) is macOS only; on Linux the LeakSanitizer build covers this
+            # (private/linux_port_plan.md, Phase 2b).
+            print("  skipped on Linux: the leaks tool is macOS only (use the LeakSanitizer build)")
+            return
+
         print("\n--- Running leaks analysis ---")
         leaks_proc = subprocess.run(
             ["leaks", str(proc.pid)],
@@ -2900,12 +2909,13 @@ def test_no_sandbox(tmpdir: str) -> None:
 
     # Under the kernel sandbox, which drops a "/" grant, an allowed "/" covers only "/":
     # neither a path outside the list nor a system file the sandbox baseline can read.
+    system_file = "/etc/os-release" if IS_LINUX else "/System/Library/CoreServices/SystemVersion.plist"
     boxed = run_mcp([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
          "params": {"name": "read_file", "arguments": {"path": f"{outside}/note.txt"}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "read_file",
-                    "arguments": {"path": "/System/Library/CoreServices/SystemVersion.plist"}}},
+                    "arguments": {"path": system_file}}},
     ], [project], extra_args=["--allow-read", "/"], sequential=True)
     check("sandboxed, allowed /: read_file outside the list is refused",
           "outside the allowed directories" in json.dumps(boxed[1]), str(boxed[1]))
