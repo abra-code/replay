@@ -31,6 +31,20 @@ def xattr_names(path) -> list:
     return proc.stdout.split()
 
 
+def set_xattr(path, name: str, value: bytes) -> bool:
+    """Sets the xattr with macOS name `name` on path; False if it cannot be set
+    (for example on a file system without user xattrs)."""
+    if IS_LINUX:
+        try:
+            os.setxattr(str(path), PLATFORM_PREFIX + name, value)
+        except OSError:
+            return False
+        return True
+    proc = subprocess.run(["/usr/bin/xattr", "-wx", name, value.hex(), str(path)],
+                          capture_output=True, text=True, timeout=10)
+    return proc.returncode == 0
+
+
 def get_xattr(path, name: str):
     """The value of the xattr with macOS name `name` on path, as bytes, or None
     when it is missing or cannot be read."""

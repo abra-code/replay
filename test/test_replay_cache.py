@@ -1275,13 +1275,8 @@ test_output_states()
 test_early_cutoff()
 test_create_file()
 test_create_directory()
-# Both scenarios clone. The test_all.sh Linux skip list sets this until clone is ported.
-SKIP_CLONE = os.environ.get("REPLAY_TEST_SKIP_CLONE", "")
-if SKIP_CLONE:
-    print(f"\nskipping test_link_actions and test_glob_clone: {SKIP_CLONE}")
-else:
-    test_link_actions()
-    test_glob_clone()
+test_link_actions()
+test_glob_clone()
 test_global_cache_env()
 test_declared_env()
 test_refresh_and_dry_run()

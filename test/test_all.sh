@@ -32,7 +32,6 @@ if [ "$HOST_OS" = "Linux" ]; then
     # skips its section when the variable is set and prints the reason, which names
     # the plan phase (private/linux_port_plan.md) that removes it.
     export REPLAY_TEST_SKIP_IPC="IPC between dispatch and replay is not ported to Linux (Phase 4)"
-    export REPLAY_TEST_SKIP_CLONE="clone uses copyfile, not ported to Linux (Phase 2b)"
 fi
 
 # Whole suites that cannot pass on Linux yet, with the reason and the plan phase
@@ -46,8 +45,6 @@ linux_skip_reason() {
             echo "the sandbox is not ported and fails closed (Phase 5a)" ;;
         test_mcp_server.py)
             echo "MCP server mode starts sandboxed, and the sandbox fails closed (Phase 5a)" ;;
-        test_replay.sh)
-            echo "its playlists clone, and clone uses copyfile, not ported (Phase 2b)" ;;
         test_sandbox_discover.py)
             echo "sandbox-discover.py is macOS only (later, not in the plan)" ;;
     esac
@@ -109,6 +106,7 @@ run_suite "$SCRIPT_DIR/test_replay_stress_playlist.py" "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_execute_stress.py"  "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_cache_manifest.py"  "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_cache.py"           "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_replay_clone.py"           "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_cache_sandbox.py"   "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_fingerprint_store.py" "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_readme_help_sync.py"       "$BUILD_DIR/replay"

@@ -372,10 +372,6 @@ EOF
 # Per-scenario per-iteration files live under WORK_DIR; the trap cleans up.
 # ============================================================================
 
-if test -n "${REPLAY_TEST_SKIP_CLONE:-}"; then
-	echo "skipping parent_then_edit: $REPLAY_TEST_SKIP_CLONE"
-fi
-
 iter=1
 while [ "$iter" -le "$REPEAT_COUNT" ]; do
 	scenario_straddle "$iter"
@@ -385,9 +381,7 @@ while [ "$iter" -le "$REPEAT_COUNT" ]; do
 	scenario_fanout "$iter"
 	scenario_parallel_independent "$iter"
 	scenario_mixed_pre_post "$iter"
-	if test -z "${REPLAY_TEST_SKIP_CLONE:-}"; then
-		scenario_parent_then_edit "$iter"
-	fi
+	scenario_parent_then_edit "$iter"
 	iter=$((iter+1))
 done
 

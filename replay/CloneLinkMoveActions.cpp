@@ -31,8 +31,9 @@ CloneItem(const std::string &fromPath, const std::string &toPath, ReplayContext 
 		int rc = posix_clone_item(fromPath, toPath);
 		isSuccessful = (rc == 0);
 
-		// --force removes the destination and tries again, which cannot help when cloning is not
-		// supported at all (ENOTSUP: the Linux stub until Phase 2) and would only lose the destination.
+		// --force removes the destination and tries again, which cannot help when the source is
+		// something that cannot be copied (ENOTSUP: a FIFO, socket or device) and would only lose
+		// the destination.
 		if(!isSuccessful && context->force && (errno != ENOTSUP))
 		{
 			if(!posix_remove_recursive(toPath))

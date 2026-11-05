@@ -115,8 +115,14 @@ static inline bool posix_remove_recursive(const std::string &path)
 	return ok;
 }
 
+#if !defined(__APPLE__)
+// LinuxCopyItem.cpp: the same behavior as the copyfile call below, on Linux.
+int linux_copy_item(const std::string &srcPath, const std::string &dstPath);
+#endif
+
 // Clones src to dst using copyfile(3) with APFS clone-on-write when on the same volume.
 // Falls back to a full data copy across volumes. COPYFILE_RECURSIVE handles directory trees.
+// On Linux, linux_copy_item clones where the file system can (btrfs, XFS, bcachefs).
 // Returns 0 on success, -1 on failure (errno set).
 static inline int posix_clone_item(const std::string &src, const std::string &dst)
 {
@@ -124,10 +130,7 @@ static inline int posix_clone_item(const std::string &src, const std::string &ds
 	return copyfile(src.c_str(), dst.c_str(), nullptr,
 	                COPYFILE_ALL | COPYFILE_CLONE | COPYFILE_NOFOLLOW_SRC | COPYFILE_RECURSIVE);
 #else
-	(void)src;
-	(void)dst;
-	errno = ENOTSUP; // Phase 1 stub: the Linux copier comes in Phase 2
-	return -1;
+	return linux_copy_item(src, dst);
 #endif
 }
 
