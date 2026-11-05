@@ -332,6 +332,15 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
 
     CompiledExcludes compiled_excludes = compile_excludes(exclude_patterns);
 
+    // A block captures a reference parameter as a reference, so the traversal blocks
+    // below must not use glob_patterns, regex_patterns or exclude_patterns directly:
+    // they run after this function returns, and a caller may pass temporaries
+    // (find_and_process_globbed_paths passes {} for both pattern sets). A local object
+    // is copied into each block instead.
+    const std::unordered_set<std::string> globs = glob_patterns;
+    const std::unordered_set<std::string> regexes = regex_patterns;
+    const std::unordered_set<std::string> excludes = exclude_patterns;
+
     // Resolve and normalize all paths
     for (const auto& input : paths)
     {
@@ -360,7 +369,7 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
                 std::string dir_path = abs_str;
                 dispatch_group_async(task_group, directory_traversal_queue, ^{
                     if (is_exiting()) { return; }
-                    [[maybe_unused]] int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns, exclude_patterns);
+                    [[maybe_unused]] int find_result = find_files_internal(dir_path, globs, regexes, excludes);
                 });
             }
             else if (S_ISLNK(st.st_mode))
@@ -389,7 +398,7 @@ fingerprint::find_and_process_paths(const std::unordered_set<std::string>& paths
                         std::string dir_path = path;  // Copy the path for capture
                         dispatch_group_async(task_group, directory_traversal_queue, ^{
                             if (is_exiting()) { return; }
-                            [[maybe_unused]] int find_result = find_files_internal(dir_path, glob_patterns, regex_patterns, exclude_patterns);
+                            [[maybe_unused]] int find_result = find_files_internal(dir_path, globs, regexes, excludes);
                         });
                     }
                     else
@@ -675,12 +684,16 @@ fingerprint::find_files_internal(std::string search_dir,
                     if (g_verbose)
                         std::cerr << "Symlink chain leads to directory: " << path << '\n';
                     std::string dir_path = path;
+                    // Copies, not the reference parameters: the block runs after this
+                    // call returns, and the sets it was given may be gone by then.
+                    std::unordered_set<std::string> globs_copy = glob_patterns;
+                    std::unordered_set<std::string> regexes_copy = regex_patterns;
                     std::unordered_set<std::string> excludes_copy = exclude_patterns;
                     dispatch_group_async(get_all_tasks_group(), get_directory_traversal_queue(), ^{
                         if (is_exiting())
                             return;
-                        [[maybe_unused]] int r = find_files_internal(dir_path, glob_patterns,
-                                                              regex_patterns, excludes_copy);
+                        [[maybe_unused]] int r = find_files_internal(dir_path, globs_copy,
+                                                              regexes_copy, excludes_copy);
                     });
                 }
                 else
