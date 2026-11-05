@@ -34,7 +34,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from xattr_support import xattr_names
+from xattr_support import IS_LINUX, xattr_names
 
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 REPO_DIR       = SCRIPT_DIR.parent
@@ -44,7 +44,17 @@ REPLAY         = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_REPLAY
 XATTR_NAMES = ("public.fingerprint.crc32c", "public.fingerprint.blake3")
 # Strings that must never appear on stderr of a cached sandboxed run: the xattr
 # memoization write path degrades silently on permission failures.
-NOISE = ("setxattr", "lchmod", "EPERM", "Operation not permitted", "Warning:")
+# Denials read EPERM on macOS (Seatbelt) and EACCES on Linux (Landlock).
+NOISE = ("setxattr", "lchmod", "EPERM", "Operation not permitted", "EACCES", "Permission denied", "Warning:")
+
+# The Linux sandbox denies every extended attribute write, so replay refuses
+# --cache-memo xattr together with --sandbox there (scenarios 3 and 3b check that).
+XATTR_MEMO_REFUSAL = "--cache-memo xattr cannot be used with the sandbox on Linux"
+
+
+def check_xattr_memo_refused(label: str, proc) -> None:
+    check(f"{label}: Linux refuses --cache-memo xattr with --sandbox", proc.returncode != 0, proc.stderr)
+    check(f"{label}: the refusal says why", XATTR_MEMO_REFUSAL in proc.stderr, proc.stderr)
 
 _pass = 0
 _fail = 0
@@ -202,6 +212,10 @@ def test_sandbox_xattr_explicit_on():
         args = ["--sandbox", "--cache-memo", "xattr", "--cache-dir", cache]
 
         r1 = run(args + [playlist])
+        if IS_LINUX:
+            check_xattr_memo_refused("scenario 3", r1)
+            check("scenario 3: nothing ran", not out_file.exists(), str(out_file))
+            return
         check("run 1 exits 0 despite denied input xattr writes", r1.returncode == 0, r1.stderr)
         check("run 1 executed the task", summary(r1) == (0, 1, 0), r1.stderr)
         check("run 1 stderr free of xattr noise", stderr_noise(r1) == "",
@@ -232,6 +246,11 @@ def test_sandbox_xattr_readonly_input_mode_preserved():
         args = ["--sandbox", "--cache-memo", "xattr", "--cache-dir", cache]
 
         r1 = run(args + [playlist])
+        if IS_LINUX:
+            check_xattr_memo_refused("scenario 3b", r1)
+            mode1 = in_file.stat().st_mode & 0o7777
+            check("scenario 3b: input mode unchanged", mode1 == 0o444, oct(mode1))
+            return
         check("run 1 exits 0 with a chmod 444 input", r1.returncode == 0, r1.stderr)
         check("run 1 stderr free of xattr noise", stderr_noise(r1) == "",
               f"found {stderr_noise(r1)!r} in: {r1.stderr}")

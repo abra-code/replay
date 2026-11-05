@@ -17,6 +17,7 @@
 #include "Platform.h"
 #if defined(__linux__)
 #include "SandboxLandlock.h"
+#include "SandboxSeccomp.h"
 #endif
 
 
@@ -440,9 +441,19 @@ static bool ApplyLinuxConfig(const Config& config, bool verbose, const std::vect
         fprintf(stderr, "%s\n", warning.c_str());
 
     if (verbose)
-        fprintf(stdout, "%s\n", landlock::Describe(ruleset).c_str());
+        fprintf(stdout, "%s"
+                        "Also denied everywhere: extended attribute writes and removals, io_uring, "
+                        "and pushing input into a terminal (TIOCSTI, TIOCLINUX).\n\n",
+                landlock::Describe(ruleset).c_str());
 
     if (!landlock::Apply(ruleset, allowed_threads, error))
+    {
+        fprintf(stderr, "error: cannot apply the sandbox: %s\n", error.c_str());
+        return false;
+    }
+    // After Landlock, which set no-new-privileges. A failure here leaves the process
+    // half sandboxed; the callers exit on false.
+    if (!seccomp::ApplyFilter(error))
     {
         fprintf(stderr, "error: cannot apply the sandbox: %s\n", error.c_str());
         return false;

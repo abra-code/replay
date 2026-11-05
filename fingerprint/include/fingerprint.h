@@ -41,7 +41,8 @@ enum class XattrMode {
     On,      // use cache if valid
     Off,     // never read/write xattrs
     Refresh, // force recompute + write/update xattr
-    Clear    // don't use xattr + delete existing ones
+    Clear,   // don't use xattr + delete existing ones
+    ReadOnly // use cache if valid, never write (gate under the Linux sandbox, which denies xattr writes)
 };
 
 struct SnapshotMetadata

@@ -190,7 +190,81 @@ case "$out" in *"built-tool-ran"*) r=0 ;; *) r=1 ;; esac
 check $r "a program in a write folder runs (execute is allowed everywhere)" "$out"
 
 echo ""
-echo "=== 7. documented gaps, pinned ==="
+echo "=== 7. the system call filter ==="
+PROBE_LOG="$WORK_DIR/probe-build.log"
+if [ -x /usr/bin/clang ]; then
+    /usr/bin/clang -O1 -Wall -o "$WORK_DIR/probe" "$SCRIPT_DIR/sandbox_syscall_probe.c" > "$PROBE_LOG" 2>&1
+    status=$?
+else
+    status=127
+fi
+if [ "$status" -ne 0 ]; then
+    if [ "$status" -eq 127 ]; then
+        echo "  skipped: no /usr/bin/clang to build the probe"
+    else
+        check 1 "building the system call probe" "$(/bin/cat "$PROBE_LOG")"
+    fi
+else
+    echo "probe" > "$ALLOWED/probe.txt"
+    # Unsandboxed, for comparison: xattrs work (where the file system allows them).
+    plain="$("$WORK_DIR/probe" "$ALLOWED/probe.txt" < /dev/null 2>&1)"
+    NL=$'\n'
+    run_stdin "[execute]	$WORK_DIR/probe	$ALLOWED/probe.txt" --allow-write "$ALLOWED" --allow-read "$WORK_DIR/probe"
+    for call in setxattr lsetxattr removexattr lremovexattr fsetxattr fremovexattr setxattrat removexattrat; do
+        # Whole lines: "setxattr EACCES" is also the tail of "fsetxattr EACCES".
+        case "$NL$out$NL" in *"$NL$call EACCES$NL"*) r=0 ;; *) r=1 ;; esac
+        check $r "$call is denied with EACCES, even inside a write grant" "sandboxed: $out; unsandboxed: $plain"
+    done
+    case "$out" in *"getxattr ENODATA"*|*"getxattr ENOTSUP"*) r=0 ;; *) r=1 ;; esac
+    check $r "getxattr still works (reading memos is allowed)" "$out"
+    case "$out" in *"io_uring_setup ENOSYS"*) r=0 ;; *) r=1 ;; esac
+    check $r "io_uring is unavailable (ENOSYS)" "sandboxed: $out; unsandboxed: $plain"
+    case "$out" in *"TIOCSTI EACCES"*) r=0 ;; *) r=1 ;; esac
+    check $r "TIOCSTI is denied (EACCES, not the kernel's ENOTTY)" "sandboxed: $out; unsandboxed: $plain"
+    case "$out" in *"TIOCGWINSZ ENOTTY"*) r=0 ;; *) r=1 ;; esac
+    check $r "other ioctls reach the kernel (TIOCGWINSZ gives ENOTTY)" "$out"
+fi
+
+# A playlist file: in stdin mode replay ignores --cache and never gets that far.
+cat > "$WORK_DIR/memo.json" << EOF
+[{ "action": "execute", "tool": "/bin/true" }]
+EOF
+out="$("$REPLAY" --sandbox --cache-dir "$ALLOWED/cache" --cache-memo xattr "$WORK_DIR/memo.json" 2>&1)"
+rc=$?
+test "$rc" -ne 0
+check $? "--cache-memo xattr with the sandbox is refused" "$out"
+case "$out" in *"cannot be used with the sandbox on Linux"*) r=0 ;; *) r=1 ;; esac
+check $r "the refusal says why" "$out"
+
+# gate writes its memo by making a read-only input writable for the call and restoring
+# the mode afterwards, which changes the input's ctime. Under the sandbox the write
+# could only fail, so gate must not try: the input's ctime stays put.
+GATE="$(/usr/bin/dirname -- "$REPLAY")/gate"
+if [ ! -x "$GATE" ]; then
+    echo "  skipped: no gate next to replay"
+else
+    for name in ro-plain ro-sandboxed; do
+        echo "$name" > "$ALLOWED/$name.txt"
+        /bin/chmod 444 "$ALLOWED/$name.txt"
+    done
+    before="$(/usr/bin/stat -c '%z' "$ALLOWED/ro-plain.txt")"
+    /bin/sleep 0.05
+    out="$("$GATE" -c "$ALLOWED/gate-cache-plain" -i "$ALLOWED/ro-plain.txt" -- /bin/true 2>&1)"
+    after="$(/usr/bin/stat -c '%z' "$ALLOWED/ro-plain.txt")"
+    test "$before" != "$after"
+    check $? "control: unsandboxed gate writes its memo, changing a read-only input's ctime" "before $before, after $after; $out"
+
+    before="$(/usr/bin/stat -c '%z %a' "$ALLOWED/ro-sandboxed.txt")"
+    /bin/sleep 0.05
+    out="$("$GATE" --sandbox --allow-write "$ALLOWED" -c "$ALLOWED/gate-cache-sandboxed" -i "$ALLOWED/ro-sandboxed.txt" -- /bin/true 2>&1)"
+    rc=$?
+    after="$(/usr/bin/stat -c '%z %a' "$ALLOWED/ro-sandboxed.txt")"
+    test "$rc" -eq 0 && test "$before" = "$after"
+    check $? "sandboxed gate leaves a read-only input's ctime and mode alone" "rc $rc, before $before, after $after; $out"
+fi
+
+echo ""
+echo "=== 8. documented gaps, pinned ==="
 /bin/chmod 644 "$OUTSIDE/secret.txt"
 run_stdin "[execute]	/bin/chmod	600	$OUTSIDE/secret.txt" --allow-write "$ALLOWED"
 mode="$(/usr/bin/stat -c %a "$OUTSIDE/secret.txt")"

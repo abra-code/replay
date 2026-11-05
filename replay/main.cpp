@@ -1005,6 +1005,17 @@ int main(int argc, const char * argv[])
 		}
 
 		// Configuration for the fingerprint code shared with gate/fingerprint.
+#if defined(__linux__)
+		// The Linux sandbox denies every extended attribute write, so this backend could
+		// only fail there (private/linux_phase5a_sandbox_design.md, section 6). The
+		// default sidecar keeps working: it lives in the cache folder.
+		if(sandboxRequested && context.cacheMemo == CacheMemo::Xattr)
+		{
+			LogError("error: --cache-memo xattr cannot be used with the sandbox on Linux, which denies extended "
+			         "attribute writes; use the default --cache-memo sidecar\n");
+			return EXIT_FAILURE;
+		}
+#endif
 		g_hash = context.cacheHash;
 		g_verbose = context.verbose;
 		g_memo_backend = context.cacheMemo;

@@ -156,7 +156,7 @@ static void process_matched_file_async(std::string path, FileInfo info) noexcept
                 clear_xattr_fileinfo(path, fileInfo);
                 // force recompute, don't write
             }
-            else if (g_xattr_mode == XattrMode::On)
+            else if (g_xattr_mode == XattrMode::On || g_xattr_mode == XattrMode::ReadOnly)
             {
                 // Only here do we try to read and possibly skip hashing
                 bool cache_hit = read_xattr_fileinfo(path, fileInfo);
@@ -168,7 +168,7 @@ static void process_matched_file_async(std::string path, FileInfo info) noexcept
                 else
                 {
                     needs_hash = true;
-                    write_xattr = true;   // cache miss, compute and store
+                    write_xattr = (g_xattr_mode == XattrMode::On); // cache miss, compute and store
                 }
             }
             else if (g_xattr_mode == XattrMode::Refresh)

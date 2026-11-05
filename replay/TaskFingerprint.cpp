@@ -363,11 +363,11 @@ bool hash_one_file(HashedFile &entry)
 	{
 		clear_xattr_fileinfo(entry.path, entry.info);
 	}
-	else if(g_xattr_mode == XattrMode::On)
+	else if(g_xattr_mode == XattrMode::On || g_xattr_mode == XattrMode::ReadOnly)
 	{
 		bool cacheHit = read_xattr_fileinfo(entry.path, entry.info);
 		needsHash = !cacheHit;
-		writeXattr = !cacheHit;
+		writeXattr = !cacheHit && (g_xattr_mode == XattrMode::On);
 	}
 	else if(g_xattr_mode == XattrMode::Refresh)
 	{

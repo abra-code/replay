@@ -41,8 +41,6 @@ linux_skip_reason() {
     case "$1" in
         test_dispatch.sh)
             echo "IPC between dispatch and replay is not ported (Phase 4)" ;;
-        test_replay_cache_sandbox.py)
-            echo "its xattr scenarios need the sandbox's xattr denial, which is not ported yet (Phase 5a, step 3)" ;;
         test_mcp_server.py)
             echo "MCP server mode on Linux waits for its Unix socket rule (Phase 5a, step 5)" ;;
         test_sandbox_discover.py)

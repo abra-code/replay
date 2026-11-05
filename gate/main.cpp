@@ -502,6 +502,13 @@ int main(int argc, char* argv[])
 
         if (!sandbox::InitializeSandbox(sandbox_profile_path, sandbox_allow_read, sandbox_allow_write, !sandbox_deny_network, g_verbose))
             return 2;
+#if defined(__linux__)
+        // The Linux sandbox denies xattr writes (seccomp), so a memo write could only fail,
+        // after write_xattr_fileinfo had flipped a read-only input writable and back, which
+        // bumps its ctime on every run. Keep reading existing memos, write none.
+        if (g_xattr_mode == XattrMode::On)
+            g_xattr_mode = XattrMode::ReadOnly;
+#endif
     }
 
     // Warn when an exclude can't possibly match any input root. Helps catch
