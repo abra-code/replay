@@ -28,6 +28,7 @@ PASS=0
 FAIL=0
 BATCH="dispatch-err-test-$$"
 TEST_DIR=$(/usr/bin/mktemp -d)
+if [ -z "$TEST_DIR" ] || [ ! -d "$TEST_DIR" ]; then echo "error: mktemp failed for TEST_DIR" >&2; exit 1; fi
 trap "/bin/rm -rf '$TEST_DIR'" EXIT
 
 pass() { PASS=$((PASS + 1)); echo "  PASS: $1"; }

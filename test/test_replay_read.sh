@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 success_counter=0
 failure_counter=0
@@ -66,6 +66,7 @@ if [ ! -x "$REPLAY_TOOL" ]; then
 fi
 
 WORK_DIR=$(/usr/bin/mktemp -d /tmp/replay_read_test.XXXXXX)
+if [ -z "$WORK_DIR" ] || [ ! -d "$WORK_DIR" ]; then echo "error: mktemp failed for WORK_DIR" >&2; exit 1; fi
 TEXT_FILE="$WORK_DIR/hello.txt"
 BINARY_FILE="$WORK_DIR/data.bin"
 BLOB_OUT_FILE="$WORK_DIR/blob_out.bin"
@@ -220,7 +221,7 @@ EOF
 verify_succeeded "$?" "create blob (JSON): replay exited successfully"
 test -f "$BLOB_OUT_FILE"
 verify_succeeded "$?" "create blob (JSON): output file exists"
-written_b64=$(base64 < "$BLOB_OUT_FILE")
+written_b64=$(/usr/bin/base64 < "$BLOB_OUT_FILE" | /usr/bin/tr -d '\n')
 test "$written_b64" = "$BINARY_B64"
 verify_succeeded "$?" "create blob (JSON): file content matches base64 (got: $written_b64)"
 
@@ -235,7 +236,7 @@ printf '[create file blob=true]\t%s\t%s\n' "$BLOB_STREAM_OUT" "$BINARY_B64" | "$
 verify_succeeded "$?" "create blob (stream): replay exited successfully"
 test -f "$BLOB_STREAM_OUT"
 verify_succeeded "$?" "create blob (stream): output file exists"
-written_b64=$(base64 < "$BLOB_STREAM_OUT")
+written_b64=$(/usr/bin/base64 < "$BLOB_STREAM_OUT" | /usr/bin/tr -d '\n')
 test "$written_b64" = "$BINARY_B64"
 verify_succeeded "$?" "create blob (stream): file content matches base64 (got: $written_b64)"
 

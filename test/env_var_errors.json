@@ -4,15 +4,15 @@
     {
       "action": "clone",
       "from": "${REPLAY_TEST_FILES_DIR}/test-clone.txt",
-      "to": "/Users/${USER}/${VARIABLE_NOT_DEFINED}/test-clone.txt",
+      "to": "${HOME}/${VARIABLE_NOT_DEFINED}/test-clone.txt",
     },
   ],
   "move":
   [
     {
       "action": "move",
-      "from": "/Users/${USER}/${VARIABLE_NOT_DEFINED}/test-move.txt",
-      "to": "/Users/${USER}/${REPLAY_TEST}/test-moved.txt",
+      "from": "${HOME}/${VARIABLE_NOT_DEFINED}/test-move.txt",
+      "to": "${HOME}/${REPLAY_TEST}/test-moved.txt",
     },
   ],
   "hardlink":
@@ -20,7 +20,7 @@
     {
       "action": "hardlink",
       "from": "${VARIABLE_NOT_DEFINED}/test-hardlink.txt",
-      "to": "/Users/${USER}/${REPLAY_TEST}/test-hardlink.txt",
+      "to": "${HOME}/${REPLAY_TEST}/test-hardlink.txt",
     },
   ],
   "symlink":
@@ -28,7 +28,7 @@
     {
       "action": "symlink",
       "from": "${REPLAY_TEST_FILES_DIR}/test-symlink.txt",
-      "to": "/Users/${USER}/${VARIABLE_NOT_DEFINED}/test-symlink.txt",
+      "to": "${HOME}/${VARIABLE_NOT_DEFINED}/test-symlink.txt",
     },
   ],
   "clone":

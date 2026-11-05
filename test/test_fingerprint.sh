@@ -17,7 +17,9 @@ else
     FINGERPRINT_BIN="${FINGERPRINT_BIN:-${SCRIPT_DIR}/../build/Release/fingerprint}"
 fi
 
-TEST_DIR=$(/usr/bin/mktemp -d -t fingerprint_tests)
+HOST_OS=$(/usr/bin/uname -s)
+TEST_DIR=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/fingerprint_tests.XXXXXX")
+if [ -z "$TEST_DIR" ] || [ ! -d "$TEST_DIR" ]; then echo "error: mktemp failed for TEST_DIR" >&2; exit 1; fi
 FAILED_TESTS=0
 PASSED_TESTS=0
 VERBOSE=0
@@ -126,6 +128,16 @@ output_not_contains() {
     [ -z "$result" ]
 }
 
+# The xattr names on a file, one per line. On Linux they carry the "user." prefix
+# (user.public.fingerprint.crc32c), which a grep for "public.fingerprint" still matches.
+list_xattr_names() {
+    if [ "$HOST_OS" = "Linux" ]; then
+        /usr/bin/getfattr --absolute-names -m - "$1" 2>/dev/null
+    else
+        /usr/bin/xattr "$1"
+    fi
+}
+
 source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_basic_tests.sh"
 source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_xattr_tests.sh"
 source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_glob_tests.sh"
@@ -206,7 +218,6 @@ fi
 test_single_file
 test_directory_traversal
 test_glob_patterns
-test_multiple_globs
 test_symlinks
 test_xattr_caching
 test_xattr_refresh

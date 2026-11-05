@@ -315,7 +315,7 @@ test_list_output_format() {
     local output=$(${FINGERPRINT_BIN} -l --hash=crc32c "$TEST_DIR/list_test.txt" 2>&1)
     
     # Should have format: <8-char-hex-hash><tab><path>
-    if echo "$output" | /usr/bin/grep -E '^[0-9a-f]{8}\t.*list_test\.txt'; then
+    if echo "$output" | /usr/bin/grep -E $'^[0-9a-f]{8}\t.*list_test\\.txt'; then
         log_pass "CRC32C list output format correct"
     else
         log_fail "Invalid CRC32C list output format"
@@ -325,7 +325,7 @@ test_list_output_format() {
     local output=$(${FINGERPRINT_BIN} -l --hash=blake3 "$TEST_DIR/list_test.txt" 2>&1)
     
     # Should have format: <16-char-hex-hash><tab><path>
-    if echo "$output" | /usr/bin/grep -E '^[0-9a-f]{16}\t.*list_test\.txt'; then
+    if echo "$output" | /usr/bin/grep -E $'^[0-9a-f]{16}\t.*list_test\\.txt'; then
         log_pass "BLAKE3 list output format correct"
     else
         log_fail "Invalid BLAKE3 list output format"

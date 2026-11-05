@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 success_counter=0
 failure_counter=0
@@ -65,6 +65,7 @@ if [ ! -x "$REPLAY_TOOL" ]; then
 fi
 
 WORK_DIR=$(/usr/bin/mktemp -d /tmp/replay_edit_test.XXXXXX)
+if [ -z "$WORK_DIR" ] || [ ! -d "$WORK_DIR" ]; then echo "error: mktemp failed for WORK_DIR" >&2; exit 1; fi
 
 cleanup()
 {

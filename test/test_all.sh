@@ -14,15 +14,63 @@ NC='\033[0m'
 
 SUITES_PASS=0
 SUITES_FAIL=0
+SUITES_SKIP=0
 
 declare -a TEST_NAMES
 declare -a TEST_RESULTS
+
+HOST_OS="$(/usr/bin/uname -s)"
+
+if [ "$HOST_OS" = "Linux" ]; then
+    # On kernels with 16 KiB or 64 KiB pages the Swift runtime, which CoreFoundation
+    # loads, prints two "unable to protect ... swift-backtrace" lines on stderr at every
+    # start. They land in output the suites compare. Turning the backtracer off stops
+    # them; it only affects crash reports. A value set by the caller is kept.
+    export SWIFT_BACKTRACE="${SWIFT_BACKTRACE:-enable=no}"
+
+    # Sections of otherwise passing suites that cannot pass on Linux yet. Each suite
+    # skips its section when the variable is set and prints the reason, which names
+    # the plan phase (private/linux_port_plan.md) that removes it.
+    export REPLAY_TEST_SKIP_IPC="IPC between dispatch and replay is not ported to Linux (Phase 4)"
+    export REPLAY_TEST_SKIP_CLONE="clone uses copyfile, not ported to Linux (Phase 2b)"
+fi
+
+# Whole suites that cannot pass on Linux yet, with the reason and the plan phase
+# (private/linux_port_plan.md) that removes the entry. Prints nothing for a suite
+# that runs.
+linux_skip_reason() {
+    case "$1" in
+        test_dispatch.sh)
+            echo "IPC between dispatch and replay is not ported (Phase 4)" ;;
+        test_replay_sandbox.sh|test_replay_auto_sandbox.sh|test_gate_auto_sandbox.sh|test_replay_cache_sandbox.py)
+            echo "the sandbox is not ported and fails closed (Phase 5a)" ;;
+        test_mcp_server.py)
+            echo "MCP server mode starts sandboxed, and the sandbox fails closed (Phase 5a)" ;;
+        test_replay_execute_stress.py)
+            echo "blocking tasks ramp up to full concurrency too slowly on Linux libdispatch (Phase 2b)" ;;
+        test_replay.sh)
+            echo "its playlists clone, and clone uses copyfile, not ported (Phase 2b)" ;;
+        test_sandbox_discover.py)
+            echo "sandbox-discover.py is macOS only (later, not in the plan)" ;;
+    esac
+}
 
 run_suite() {
     local script="$1"
     shift
     local name
     name="$(basename "$script")"
+    if [ "$HOST_OS" = "Linux" ]; then
+        local reason
+        reason="$(linux_skip_reason "$name")"
+        if [ -n "$reason" ]; then
+            printf "${YELLOW}  SKIPPED on Linux: %s: %s${NC}\n" "$name" "$reason"
+            SUITES_SKIP=$((SUITES_SKIP + 1))
+            TEST_RESULTS+=("SKIP")
+            TEST_NAMES+=("$name")
+            return
+        fi
+    fi
     printf '\n'
     printf "${BOLD}${CYAN}========================================${NC}\n"
     printf "${BOLD}${CYAN}  %s${NC}\n" "$name"
@@ -81,6 +129,8 @@ for i in "${!TEST_NAMES[@]}"; do
     color="${GREEN}"
     if [ "$result" = "FAIL" ]; then
         color="${RED}"
+    elif [ "$result" = "SKIP" ]; then
+        color="${YELLOW}"
     fi
     printf "%-45s ${color}%s${NC}\n" "$name" "$result"
 done
@@ -88,11 +138,11 @@ printf '\n'
 
 if [ "$SUITES_FAIL" -eq 0 ]; then
     printf "${BOLD}${GREEN}========================================${NC}\n"
-    printf "${BOLD}${GREEN}  Suites: %d passed, %d failed${NC}\n" "$SUITES_PASS" "$SUITES_FAIL"
+    printf "${BOLD}${GREEN}  Suites: %d passed, %d failed, %d skipped${NC}\n" "$SUITES_PASS" "$SUITES_FAIL" "$SUITES_SKIP"
     printf "${BOLD}${GREEN}========================================${NC}\n"
 else
     printf "${BOLD}${RED}========================================${NC}\n"
-    printf "${BOLD}${RED}  Suites: %d passed, %d failed${NC}\n" "$SUITES_PASS" "$SUITES_FAIL"
+    printf "${BOLD}${RED}  Suites: %d passed, %d failed, %d skipped${NC}\n" "$SUITES_PASS" "$SUITES_FAIL" "$SUITES_SKIP"
     printf "${BOLD}${RED}========================================${NC}\n"
 fi
 

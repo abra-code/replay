@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 success_counter=0
 failure_counter=0
@@ -79,7 +79,17 @@ fi
 echo "DISPATCH = $DISPATCH"
 
 
-export REPLAY_TEST_FILES_DIR="$REPLAY_TEST_DIR_PATH/Test Files"
+# Work on a copy of the fixtures, made in $HOME next to the folder the playlists write to
+# ($HOME/Replay). The hard links they make then stay on one file system (on Linux the
+# repository can be a shared folder or a bind mount, and /tmp a tmpfs), and the links
+# they leave behind point at the copy, never at the tracked files in the repository.
+FIXTURES_DIR=$(/usr/bin/mktemp -d "$HOME/.replay-test-fixtures.XXXXXX")
+if [ -z "$FIXTURES_DIR" ] || [ ! -d "$FIXTURES_DIR" ]; then echo "error: mktemp failed for FIXTURES_DIR" >&2; exit 1; fi
+trap '/bin/rm -rf "$FIXTURES_DIR"' EXIT
+/bin/cp -R "$REPLAY_TEST_DIR_PATH/Test Files" "$FIXTURES_DIR/"
+copy_status=$?
+if [ "$copy_status" -ne 0 ]; then echo "error: could not copy the test fixtures to $FIXTURES_DIR" >&2; exit 1; fi
+export REPLAY_TEST_FILES_DIR="$FIXTURES_DIR/Test Files"
 echo "REPLAY_TEST_FILES_DIR = $REPLAY_TEST_FILES_DIR"
 
 export REPLAY_TEST="Replay/Test Files"
@@ -94,10 +104,10 @@ echo ""
 
 echo "dispatch \"ad-hoc\" start --verbose --dry-run"
 echo "dispatch \"ad-hoc\" echo \"hello replay from dispatch\""
-echo "dispatch \"ad-hoc\" clone \"${REPLAY_TEST_FILES_DIR}/test-clone.txt\" \"/Users/${USER}/${REPLAY_TEST}/test-clone.txt\""
-echo "dispatch \"ad-hoc\" move \"/Users/${USER}/${REPLAY_TEST}/test-move.txt\" \"/Users/${USER}/${REPLAY_TEST}/test-moved.txt\""
-echo "dispatch \"ad-hoc\" hardlink \"${REPLAY_TEST_FILES_DIR}/test-hardlink.txt\" \"/Users/${USER}/${REPLAY_TEST}/test-hardlink.txt\""
-echo "dispatch \"ad-hoc\" symlink \"${REPLAY_TEST_FILES_DIR}/test-symlink.txt\" \"/Users/${USER}/${REPLAY_TEST}/test-symlink.txt\""
+echo "dispatch \"ad-hoc\" clone \"${REPLAY_TEST_FILES_DIR}/test-clone.txt\" \"${HOME}/${REPLAY_TEST}/test-clone.txt\""
+echo "dispatch \"ad-hoc\" move \"${HOME}/${REPLAY_TEST}/test-move.txt\" \"${HOME}/${REPLAY_TEST}/test-moved.txt\""
+echo "dispatch \"ad-hoc\" hardlink \"${REPLAY_TEST_FILES_DIR}/test-hardlink.txt\" \"${HOME}/${REPLAY_TEST}/test-hardlink.txt\""
+echo "dispatch \"ad-hoc\" symlink \"${REPLAY_TEST_FILES_DIR}/test-symlink.txt\" \"${HOME}/${REPLAY_TEST}/test-symlink.txt\""
 echo "dispatch \"ad-hoc\" create directory \"${HOME}/${REPLAY_TEST}/test-dir\""
 echo "dispatch \"ad-hoc\" create file \"${HOME}/${REPLAY_TEST}/test-create-expanded.txt\" \"This is test file at ${HOME}/${REPLAY_TEST}\""
 echo "dispatch \"ad-hoc\" delete \"${HOME}/${REPLAY_TEST}/test-delete1.txt\" \"${HOME}/${REPLAY_TEST}/test-delete2.txt\""
@@ -106,10 +116,10 @@ echo "dispatch \"ad-hoc\" wait"
 
 "$DISPATCH" "ad-hoc" start --verbose --dry-run
 "$DISPATCH" "ad-hoc" echo "hello replay from dispatch"
-"$DISPATCH" "ad-hoc" clone "${REPLAY_TEST_FILES_DIR}/test-clone.txt" "/Users/${USER}/${REPLAY_TEST}/test-clone.txt"
-"$DISPATCH" "ad-hoc" move "/Users/${USER}/${REPLAY_TEST}/test-move.txt" "/Users/${USER}/${REPLAY_TEST}/test-moved.txt"
-"$DISPATCH" "ad-hoc" hardlink "${REPLAY_TEST_FILES_DIR}/test-hardlink.txt" "/Users/${USER}/${REPLAY_TEST}/test-hardlink.txt"
-"$DISPATCH" "ad-hoc" symlink "${REPLAY_TEST_FILES_DIR}/test-symlink.txt" "/Users/${USER}/${REPLAY_TEST}/test-symlink.txt"
+"$DISPATCH" "ad-hoc" clone "${REPLAY_TEST_FILES_DIR}/test-clone.txt" "${HOME}/${REPLAY_TEST}/test-clone.txt"
+"$DISPATCH" "ad-hoc" move "${HOME}/${REPLAY_TEST}/test-move.txt" "${HOME}/${REPLAY_TEST}/test-moved.txt"
+"$DISPATCH" "ad-hoc" hardlink "${REPLAY_TEST_FILES_DIR}/test-hardlink.txt" "${HOME}/${REPLAY_TEST}/test-hardlink.txt"
+"$DISPATCH" "ad-hoc" symlink "${REPLAY_TEST_FILES_DIR}/test-symlink.txt" "${HOME}/${REPLAY_TEST}/test-symlink.txt"
 "$DISPATCH" "ad-hoc" create directory "${HOME}/${REPLAY_TEST}/test-dir"
 "$DISPATCH" "ad-hoc" create file "${HOME}/${REPLAY_TEST}/test-create-expanded.txt" "This is test file at ${HOME}/${REPLAY_TEST}"
 "$DISPATCH" "ad-hoc" delete "${HOME}/${REPLAY_TEST}/test-delete1.txt" "${HOME}/${REPLAY_TEST}/test-delete2.txt"
@@ -274,6 +284,7 @@ else
 fi
 
 WORK_DIR=$(/usr/bin/mktemp -d /tmp/dispatch_read_test.XXXXXX)
+if [ -z "$WORK_DIR" ] || [ ! -d "$WORK_DIR" ]; then echo "error: mktemp failed for WORK_DIR" >&2; exit 1; fi
 TEXT_FILE="$WORK_DIR/hello.txt"
 BINARY_FILE="$WORK_DIR/data.bin"
 BLOB_OUT_FILE="$WORK_DIR/blob_out.bin"
@@ -353,7 +364,7 @@ verify_succeeded "$?" "dispatch create blob: wait failed"
 test -f "$BLOB_OUT_FILE"
 verify_succeeded "$?" "dispatch create blob: output file was not created"
 
-written_b64=$(base64 < "$BLOB_OUT_FILE")
+written_b64=$(/usr/bin/base64 < "$BLOB_OUT_FILE" | /usr/bin/tr -d '\n')
 test "$written_b64" = "$BINARY_B64"
 verify_succeeded "$?" "dispatch create blob: file content does not match (got: $written_b64)"
 
@@ -390,6 +401,7 @@ rm -rf "$WORK_DIR"
 
 
 EDIT_WORK_DIR=$(/usr/bin/mktemp -d /tmp/dispatch_edit_test.XXXXXX)
+if [ -z "$EDIT_WORK_DIR" ] || [ ! -d "$EDIT_WORK_DIR" ]; then echo "error: mktemp failed for EDIT_WORK_DIR" >&2; exit 1; fi
 
 echo ""
 echo "------------------------------"

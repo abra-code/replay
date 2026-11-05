@@ -1,8 +1,8 @@
-[clone]	${REPLAY_TEST_FILES_DIR}/test-clone.txt	/Users/${USER}/${REPLAY_TEST}/test-clone.txt
-[move]	/Users/${USER}/${REPLAY_TEST}/test-move.txt	/Users/${USER}/${REPLAY_TEST}/test-moved.txt
-[hardlink]	${REPLAY_TEST_FILES_DIR}/test-hardlink.txt	/Users/${USER}/${REPLAY_TEST}/test-hardlink.txt
-[symlink]	${REPLAY_TEST_FILES_DIR}/test-symlink.txt	/Users/${USER}/${REPLAY_TEST}/test-symlink.txt
-[symlink validate=false]	${REPLAY_TEST_FILES_DIR}/non-existing-file.txt	/Users/${USER}/${REPLAY_TEST}/test-symlink.txt
+[clone]	${REPLAY_TEST_FILES_DIR}/test-clone.txt	${HOME}/${REPLAY_TEST}/test-clone.txt
+[move]	${HOME}/${REPLAY_TEST}/test-move.txt	${HOME}/${REPLAY_TEST}/test-moved.txt
+[hardlink]	${REPLAY_TEST_FILES_DIR}/test-hardlink.txt	${HOME}/${REPLAY_TEST}/test-hardlink.txt
+[symlink]	${REPLAY_TEST_FILES_DIR}/test-symlink.txt	${HOME}/${REPLAY_TEST}/test-symlink.txt
+[symlink validate=false]	${REPLAY_TEST_FILES_DIR}/non-existing-file.txt	${HOME}/${REPLAY_TEST}/test-symlink.txt
 [clone]	${REPLAY_TEST_FILES_DIR}/test-clone-bulk1.txt	${HOME}/${REPLAY_TEST}/test-clone-bulk1.txt
 [clone]	${REPLAY_TEST_FILES_DIR}/test-clone-bulk2.txt	${HOME}/${REPLAY_TEST}/test-clone-bulk2.txt
 [clone]	${REPLAY_TEST_FILES_DIR}/test-clone-bulk3.txt	${HOME}/${REPLAY_TEST}/test-clone-bulk3.txt

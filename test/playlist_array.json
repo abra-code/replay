@@ -2,22 +2,22 @@
 	{
 	  "action": "clone",
 	  "from": "${REPLAY_TEST_FILES_DIR}/test-clone.txt",
-	  "to": "/Users/${USER}/${REPLAY_TEST}/test-clone.txt",
+	  "to": "${HOME}/${REPLAY_TEST}/test-clone.txt",
 	},
 	{
 	  "action": "move",
-	  "from": "/Users/${USER}/${REPLAY_TEST}/test-move.txt",
-	  "to": "/Users/${USER}/${REPLAY_TEST}/test-moved.txt",
+	  "from": "${HOME}/${REPLAY_TEST}/test-move.txt",
+	  "to": "${HOME}/${REPLAY_TEST}/test-moved.txt",
 	},
 	{
 	  "action": "hardlink",
 	  "from": "${REPLAY_TEST_FILES_DIR}/test-hardlink.txt",
-	  "to": "/Users/${USER}/${REPLAY_TEST}/test-hardlink.txt",
+	  "to": "${HOME}/${REPLAY_TEST}/test-hardlink.txt",
 	},
 	{
 	  "action": "symlink",
 	  "from": "${REPLAY_TEST_FILES_DIR}/test-symlink.txt",
-	  "to": "/Users/${USER}/${REPLAY_TEST}/test-symlink.txt",
+	  "to": "${HOME}/${REPLAY_TEST}/test-symlink.txt",
 	},
 	{
 	  "action": "clone",

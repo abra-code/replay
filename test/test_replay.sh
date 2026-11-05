@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 success_counter=0
 failure_counter=0
@@ -69,7 +69,17 @@ fi
 
 REPLAY_TEST_DIR_PATH="$SCRIPT_DIR"
 
-export REPLAY_TEST_FILES_DIR="$REPLAY_TEST_DIR_PATH/Test Files"
+# Work on a copy of the fixtures, made in $HOME next to the folder the playlists write to
+# ($HOME/Replay). The hard links they make then stay on one file system (on Linux the
+# repository can be a shared folder or a bind mount, and /tmp a tmpfs), and the links
+# they leave behind point at the copy, never at the tracked files in the repository.
+FIXTURES_DIR=$(/usr/bin/mktemp -d "$HOME/.replay-test-fixtures.XXXXXX")
+if [ -z "$FIXTURES_DIR" ] || [ ! -d "$FIXTURES_DIR" ]; then echo "error: mktemp failed for FIXTURES_DIR" >&2; exit 1; fi
+trap '/bin/rm -rf "$FIXTURES_DIR"' EXIT
+/bin/cp -R "$REPLAY_TEST_DIR_PATH/Test Files" "$FIXTURES_DIR/"
+copy_status=$?
+if [ "$copy_status" -ne 0 ]; then echo "error: could not copy the test fixtures to $FIXTURES_DIR" >&2; exit 1; fi
+export REPLAY_TEST_FILES_DIR="$FIXTURES_DIR/Test Files"
 echo "REPLAY_TEST_FILES_DIR = $REPLAY_TEST_FILES_DIR"
 
 export REPLAY_TEST="Replay/Test Files"

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Stress test for replay's concurrent dependency analysis.
 # Each iteration runs several race-prone playlists and verifies that the
@@ -87,6 +87,7 @@ if [ "$REPEAT_COUNT" -lt 1 ]; then
 fi
 
 WORK_DIR=$(/usr/bin/mktemp -d /tmp/replay_concurrency_stress.XXXXXX)
+if [ -z "$WORK_DIR" ] || [ ! -d "$WORK_DIR" ]; then echo "error: mktemp failed for WORK_DIR" >&2; exit 1; fi
 cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
@@ -371,6 +372,10 @@ EOF
 # Per-scenario per-iteration files live under WORK_DIR; the trap cleans up.
 # ============================================================================
 
+if test -n "${REPLAY_TEST_SKIP_CLONE:-}"; then
+	echo "skipping parent_then_edit: $REPLAY_TEST_SKIP_CLONE"
+fi
+
 iter=1
 while [ "$iter" -le "$REPEAT_COUNT" ]; do
 	scenario_straddle "$iter"
@@ -380,7 +385,9 @@ while [ "$iter" -le "$REPEAT_COUNT" ]; do
 	scenario_fanout "$iter"
 	scenario_parallel_independent "$iter"
 	scenario_mixed_pre_post "$iter"
-	scenario_parent_then_edit "$iter"
+	if test -z "${REPLAY_TEST_SKIP_CLONE:-}"; then
+		scenario_parent_then_edit "$iter"
+	fi
 	iter=$((iter+1))
 done
 

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 success_counter=0
 failure_counter=0
@@ -65,8 +65,11 @@ if [ ! -x "$REPLAY_TOOL" ]; then
 fi
 
 WORK_DIR=$(/usr/bin/mktemp -d /tmp/replay_sandbox_test.XXXXXX)
+if [ -z "$WORK_DIR" ] || [ ! -d "$WORK_DIR" ]; then echo "error: mktemp failed for WORK_DIR" >&2; exit 1; fi
 DENIED_DIR=$(/usr/bin/mktemp -d /tmp/replay_sandbox_denied.XXXXXX)
+if [ -z "$DENIED_DIR" ] || [ ! -d "$DENIED_DIR" ]; then echo "error: mktemp failed for DENIED_DIR" >&2; exit 1; fi
 EXTRA_DIR=$(/usr/bin/mktemp -d /tmp/replay_sandbox_extra.XXXXXX)
+if [ -z "$EXTRA_DIR" ] || [ ! -d "$EXTRA_DIR" ]; then echo "error: mktemp failed for EXTRA_DIR" >&2; exit 1; fi
 
 cleanup()
 {

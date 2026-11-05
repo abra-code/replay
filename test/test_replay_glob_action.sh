@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 success_counter=0
 failure_counter=0
@@ -69,6 +69,7 @@ REPLAY_PARENT_DIR="$(dirname "$REPLAY_TOOL")"
 DISPATCH="$REPLAY_PARENT_DIR/dispatch"
 
 WORK_DIR=$(/usr/bin/mktemp -d /tmp/replay_glob_run.XXXXXX)
+if [ -z "$WORK_DIR" ] || [ ! -d "$WORK_DIR" ]; then echo "error: mktemp failed for WORK_DIR" >&2; exit 1; fi
 
 cleanup()
 {
@@ -344,7 +345,9 @@ echo "------------------------------"
 echo "dispatch glob"
 echo ""
 
-if test -f "$DISPATCH"; then
+if test -n "${REPLAY_TEST_SKIP_IPC:-}"; then
+	echo "skipping dispatch tests: $REPLAY_TEST_SKIP_IPC"
+elif test -f "$DISPATCH"; then
 	"$REPLAY_TOOL" --start-server globtest1 > "$WORK_DIR/dispatch_glob_out.txt" &
 	sleep 0.3
 

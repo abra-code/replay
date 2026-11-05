@@ -54,6 +54,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from xattr_support import xattr_names
+
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 REPO_DIR       = SCRIPT_DIR.parent
 DEFAULT_REPLAY = REPO_DIR / "build" / "Release" / "replay"
@@ -452,8 +454,7 @@ def test_refresh_and_dry_run():
         ]))
         r7 = cached(playlist2, d / "cache2", "--dry-run")
         check("dry run exits 0 on a new task", r7.returncode == 0, r7.stderr)
-        xattrs = subprocess.run(["/usr/bin/xattr", str(fresh)],
-                                capture_output=True, text=True).stdout
+        xattrs = " ".join(xattr_names(fresh))
         check("dry run writes no memoization xattr", "public.fingerprint" not in xattrs, xattrs)
 
 
@@ -1274,8 +1275,13 @@ test_output_states()
 test_early_cutoff()
 test_create_file()
 test_create_directory()
-test_link_actions()
-test_glob_clone()
+# Both scenarios clone. The test_all.sh Linux skip list sets this until clone is ported.
+SKIP_CLONE = os.environ.get("REPLAY_TEST_SKIP_CLONE", "")
+if SKIP_CLONE:
+    print(f"\nskipping test_link_actions and test_glob_clone: {SKIP_CLONE}")
+else:
+    test_link_actions()
+    test_glob_clone()
 test_global_cache_env()
 test_declared_env()
 test_refresh_and_dry_run()

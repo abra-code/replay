@@ -43,15 +43,15 @@
 			<key>from</key>
 			<string>${REPLAY_TEST_FILES_DIR}/test-clone.txt</string>
 			<key>to</key>
-			<string>/Users/${USER}/${REPLAY_TEST}/test-clone.txt</string>
+			<string>${HOME}/${REPLAY_TEST}/test-clone.txt</string>
 		</dict>
 		<dict>
 			<key>action</key>
 			<string>move</string>
 			<key>from</key>
-			<string>/Users/${USER}/${REPLAY_TEST}/test-move.txt</string>
+			<string>${HOME}/${REPLAY_TEST}/test-move.txt</string>
 			<key>to</key>
-			<string>/Users/${USER}/${REPLAY_TEST}/test-moved.txt</string>
+			<string>${HOME}/${REPLAY_TEST}/test-moved.txt</string>
 		</dict>
 		<dict>
 			<key>action</key>
@@ -59,7 +59,7 @@
 			<key>from</key>
 			<string>${REPLAY_TEST_FILES_DIR}/test-hardlink.txt</string>
 			<key>to</key>
-			<string>/Users/${USER}/${REPLAY_TEST}/test-hardlink.txt</string>
+			<string>${HOME}/${REPLAY_TEST}/test-hardlink.txt</string>
 		</dict>
 		<dict>
 			<key>action</key>
@@ -67,7 +67,7 @@
 			<key>from</key>
 			<string>${REPLAY_TEST_FILES_DIR}/test-symlink.txt</string>
 			<key>to</key>
-			<string>/Users/${USER}/${REPLAY_TEST}/test-symlink.txt</string>
+			<string>${HOME}/${REPLAY_TEST}/test-symlink.txt</string>
 		</dict>
 		<dict>
 			<key>action</key>
@@ -158,7 +158,7 @@
 			<key>action</key>
 			<string>move</string>
 			<key>from</key>
-			<string>/Users/${USER}/${REPLAY_TEST}/test-move.txt</string>
+			<string>${HOME}/${REPLAY_TEST}/test-move.txt</string>
 			<key>to</key>
 			<string>${HOME}/${REPLAY_TEST}/test-force.txt</string>
 		</dict>

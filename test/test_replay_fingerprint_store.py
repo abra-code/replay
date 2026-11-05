@@ -68,6 +68,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from xattr_support import get_xattr, xattr_names
+
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 REPO_DIR       = SCRIPT_DIR.parent
 DEFAULT_REPLAY = REPO_DIR / "build" / "Release" / "replay"
@@ -316,25 +318,15 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def xattr_names(path: Path) -> list:
-    proc = subprocess.run(["/usr/bin/xattr", str(path)],
-                          capture_output=True, text=True, timeout=10)
-    return proc.stdout.split()
-
-
 def has_fingerprint_xattr(path: Path) -> bool:
     return any(n in xattr_names(path) for n in XATTR_NAMES)
 
 
 def read_store_checksum_xattr(path: Path):
     """The 32-byte record the index writes about itself, as (inode, size, mtime_ns,
-    hash), or None. Read through /usr/bin/xattr because os.getxattr is Linux-only."""
-    proc = subprocess.run(["/usr/bin/xattr", "-px", STORE_XATTR_NAME, str(path)],
-                          capture_output=True, text=True, timeout=10)
-    if proc.returncode != 0:
-        return None
-    raw = bytes.fromhex(proc.stdout.replace(" ", "").replace("\n", ""))
-    if len(raw) != 32:
+    hash), or None."""
+    raw = get_xattr(path, STORE_XATTR_NAME)
+    if raw is None or len(raw) != 32:
         return None
     return struct.unpack("<qqqQ", raw)
 

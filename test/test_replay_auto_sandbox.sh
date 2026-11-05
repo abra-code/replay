@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 success_counter=0
 failure_counter=0
@@ -85,6 +85,7 @@ if [ ! -x "$REPLAY_TOOL" ]; then
 fi
 
 WORK_DIR=$(/usr/bin/mktemp -d /tmp/replay_auto_sandbox_test.XXXXXX)
+if [ -z "$WORK_DIR" ] || [ ! -d "$WORK_DIR" ]; then echo "error: mktemp failed for WORK_DIR" >&2; exit 1; fi
 
 cleanup()
 {
@@ -214,6 +215,7 @@ echo "--sandbox: mix of auto-discovered and explicit flags"
 echo ""
 
 EXTRA_DIR=$(/usr/bin/mktemp -d /tmp/replay_auto_sandbox_extra.XXXXXX)
+if [ -z "$EXTRA_DIR" ] || [ ! -d "$EXTRA_DIR" ]; then echo "error: mktemp failed for EXTRA_DIR" >&2; exit 1; fi
 trap 'rm -rf "$EXTRA_DIR"; cleanup' EXIT
 
 cat > "$WORK_DIR/mixed.json" << EOF

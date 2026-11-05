@@ -34,6 +34,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from xattr_support import xattr_names
+
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 REPO_DIR       = SCRIPT_DIR.parent
 DEFAULT_REPLAY = REPO_DIR / "build" / "Release" / "replay"
@@ -101,12 +103,6 @@ def store_files(cache: Path) -> list:
     if not cache.exists():
         return []
     return sorted(p.name for p in cache.glob("fingerprints-*.bin"))
-
-
-def xattr_names(path: Path) -> list:
-    proc = subprocess.run(["/usr/bin/xattr", str(path)],
-                          capture_output=True, text=True, timeout=10)
-    return proc.stdout.split()
 
 
 def has_fingerprint_xattr(path: Path) -> bool:

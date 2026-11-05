@@ -28,7 +28,7 @@ test_xattr_caching() {
     log_info "First run: ${time1}ms, Second run: ${time2}ms"
     
     # Check if xattr was written
-    local xattr_result=$(xattr -l "$TEST_DIR/xattr_file.txt" | /usr/bin/grep "public.fingerprint")
+    local xattr_result=$(list_xattr_names "$TEST_DIR/xattr_file.txt" | /usr/bin/grep "public.fingerprint")
     if [ -n "$xattr_result" ]; then
         log_pass "Xattr was written"
     else
@@ -55,7 +55,7 @@ test_xattr_refresh() {
     log_cmd "${FINGERPRINT_BIN} -v --xattr=refresh \"$TEST_DIR/refresh_file.txt\""
     local output=$(${FINGERPRINT_BIN} -v --xattr=refresh "$TEST_DIR/refresh_file.txt" 2>&1)
     
-    local xattr_result=$(xattr -l "$TEST_DIR/refresh_file.txt" | /usr/bin/grep "public.fingerprint")
+    local xattr_result=$(list_xattr_names "$TEST_DIR/refresh_file.txt" | /usr/bin/grep "public.fingerprint")
     if [ -n "$xattr_result" ]; then
         log_pass "Xattr updated in refresh mode"
     else
@@ -82,7 +82,7 @@ test_xattr_clear() {
     log_cmd "${FINGERPRINT_BIN} --xattr=clear \"$TEST_DIR/clear_file.txt\""
     ${FINGERPRINT_BIN} --xattr=clear "$TEST_DIR/clear_file.txt" > /dev/null 2>&1
     
-    local xattr_result=$(xattr -l "$TEST_DIR/clear_file.txt" | /usr/bin/grep "public.fingerprint")
+    local xattr_result=$(list_xattr_names "$TEST_DIR/clear_file.txt" | /usr/bin/grep "public.fingerprint")
     if [ -n "$xattr_result" ]; then
         log_fail "Xattr should be cleared"
     else

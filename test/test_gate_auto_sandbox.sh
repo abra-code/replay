@@ -85,6 +85,7 @@ if [ ! -x "$GATE_TOOL" ]; then
 fi
 
 WORK_DIR=$(/usr/bin/mktemp -d /tmp/gate_auto_sandbox_test.XXXXXX)
+if [ -z "$WORK_DIR" ] || [ ! -d "$WORK_DIR" ]; then echo "error: mktemp failed for WORK_DIR" >&2; exit 1; fi
 CACHE_DIR="$WORK_DIR/.gate-cache"
 
 cleanup()
@@ -165,6 +166,7 @@ echo "--sandbox: explicit --allow-write for paths outside declared paths"
 echo ""
 
 EXTRA_DIR=$(/usr/bin/mktemp -d /tmp/gate_auto_sandbox_extra.XXXXXX)
+if [ -z "$EXTRA_DIR" ] || [ ! -d "$EXTRA_DIR" ]; then echo "error: mktemp failed for EXTRA_DIR" >&2; exit 1; fi
 trap 'rm -rf "$EXTRA_DIR"; cleanup' EXIT
 
 EXTRA_FILE="$EXTRA_DIR/extra.txt"
@@ -207,6 +209,7 @@ echo "--sandbox: mix of auto-discovered and --allow-read"
 echo ""
 
 READ_DIR=$(/usr/bin/mktemp -d /tmp/gate_auto_sandbox_read.XXXXXX)
+if [ -z "$READ_DIR" ] || [ ! -d "$READ_DIR" ]; then echo "error: mktemp failed for READ_DIR" >&2; exit 1; fi
 trap 'rm -rf "$READ_DIR"; cleanup' EXIT
 
 INPUT6="$WORK_DIR/input6.txt"
@@ -226,6 +229,7 @@ echo "--sandbox: auto-discovers exclude_inputs as read-write"
 echo ""
 
 EXCLUDE_DIR=$(/usr/bin/mktemp -d /tmp/gate_auto_sandbox_exclude.XXXXXX)
+if [ -z "$EXCLUDE_DIR" ] || [ ! -d "$EXCLUDE_DIR" ]; then echo "error: mktemp failed for EXCLUDE_DIR" >&2; exit 1; fi
 INPUT7="$WORK_DIR/input7.txt"
 OUTPUT5="$WORK_DIR/output5.txt"
 printf 'exclude test' > "$INPUT7"
@@ -296,6 +300,7 @@ echo "--sandbox: denied write to path not in inputs/outputs/cache"
 echo ""
 
 DENIED_DIR=$(/usr/bin/mktemp -d /tmp/gate_denied.XXXXXX)
+if [ -z "$DENIED_DIR" ] || [ ! -d "$DENIED_DIR" ]; then echo "error: mktemp failed for DENIED_DIR" >&2; exit 1; fi
 trap 'rm -rf "$DENIED_DIR"; cleanup' EXIT
 
 DENIED_FILE="$DENIED_DIR/denied_auto.txt"
@@ -380,6 +385,7 @@ echo "--sandbox: glob input does not grant write access outside the glob prefix"
 echo ""
 
 GLOB_DENY_OUTSIDE=$(/usr/bin/mktemp -d /tmp/gate_glob_deny.XXXXXX)
+if [ -z "$GLOB_DENY_OUTSIDE" ] || [ ! -d "$GLOB_DENY_OUTSIDE" ]; then echo "error: mktemp failed for GLOB_DENY_OUTSIDE" >&2; exit 1; fi
 trap 'rm -rf "$GLOB_DENY_OUTSIDE"; rm -rf "$DENIED_DIR"; cleanup' EXIT
 
 GLOB_DENY_SRC="$WORK_DIR/glob_deny_src"

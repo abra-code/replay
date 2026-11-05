@@ -17,8 +17,10 @@
 # Notes:
 # - The shared folder is as case-insensitive as the Mac's disk, and slow with many small
 #   files: keep the build products on the box's disk (--scratch-path /home/agent/...).
-# - agent-vm needs the Virtualization framework, so this does not work inside a sandbox that
-#   blocks it (such as an agent's command sandbox).
+# - Inside a command sandbox (such as an agent's): exec reaches the box through its
+#   supervisor's Unix socket, ~/Library/Application Support/agent-vm/Boxes/<box>/control.sock,
+#   which the sandbox must allow. Starting a stopped box and building images (--setup)
+#   start the Virtualization framework, which needs to run outside the sandbox.
 
 BOX="replay-linux"
 SETUP=0
