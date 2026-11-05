@@ -118,7 +118,7 @@ let package = Package(
         .target(
             name: "FastCrc32",
             path: "fast-crc32",
-            exclude: ["ab_sse_crc32c_v4s3x3k4096e.c", "ab_neon_eor3_crc32c_v9s3x2e_s3.c"],
+            exclude: ["ab_sse_crc32c_v4s3x3k4096e.c", "ab_neon_eor3_crc32c_v9s3x2e_s3.c", "ab_neon_crc32c_v3s4x2e_v2.c", "generate-variants.sh"],
             publicHeadersPath: "."
         ),
 
