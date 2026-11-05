@@ -12,8 +12,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <algorithm>
 #include "Platform.h"
+#if defined(__linux__)
+#include "SandboxLandlock.h"
+#endif
 
 
 #if defined(__APPLE__)
@@ -123,10 +127,12 @@ std::vector<std::string> DeduplicatePaths(const std::vector<std::string>& paths)
 // also need to be added so dyld can load adjacent resources — revisit then.
 void AddSystemAutoAllows(Config& cfg)
 {
+#if defined(__APPLE__)
     const char *home = getenv("HOME");
     if (home != nullptr && home[0] != '\0')
         cfg.read_only.push_back(std::string(home) +
             "/Library/Preferences/com.apple.LaunchServices");
+#endif
 
     std::string raw_exe = platform_executable_path();
     if (!raw_exe.empty())
@@ -322,14 +328,22 @@ bool IsAvailable()
 {
 #if defined(__APPLE__)
     return (&sandbox_init_with_parameters != nullptr);
+#elif defined(__linux__)
+    return landlock::Abi(nullptr) >= landlock::kMinimumAbi;
 #else
-    return false; // Phase 1 stub: the Linux sandbox (Landlock and seccomp) comes in Phase 5
+    return false;
 #endif
 }
 
 
 bool ApplyProfile(const std::string& sbpl_profile, bool verbose)
 {
+#if !defined(__APPLE__)
+    (void)sbpl_profile;
+    (void)verbose;
+    fprintf(stderr, "error: SBPL sandbox profiles apply on macOS only\n");
+    return false;
+#endif
     if (!IsAvailable())
     {
         fprintf(stderr, "error: sandbox_init_with_parameters is not available on this system\n");
@@ -359,15 +373,95 @@ bool ApplyProfile(const std::string& sbpl_profile, bool verbose)
     }
     return true;
 #else
-    return false; // unreachable: IsAvailable() is false
+    return false; // unreachable: refused above
 #endif
 }
 
 
-bool ApplyConfig(const Config& config, bool verbose)
+#if defined(__linux__)
+
+// The Linux sandbox (private/linux_phase5a_sandbox_design.md). Fails closed: every
+// failure prints why and returns false, and the callers then exit.
+static bool ApplyLinuxConfig(const Config& config, bool verbose, const std::vector<pid_t>& allowed_threads)
 {
+    // Not available on Linux yet (network and process creation need a system call
+    // filter, a later step) or at all (raw macOS rules).
+    if (!config.allow_network)
+    {
+        fprintf(stderr, "error: denying network access in the sandbox (--deny-network, \"allow_network\": false) "
+                        "is not supported on Linux yet\n");
+        return false;
+    }
+    if (!config.allow_fork)
+    {
+        fprintf(stderr, "error: \"allow_fork\": false is not supported on Linux yet\n");
+        return false;
+    }
+    if (!config.extra_rules.empty())
+    {
+        fprintf(stderr, "error: \"extra_rules\" holds macOS sandbox rules, which do not apply on Linux; "
+                        "remove it from the sandbox profile\n");
+        return false;
+    }
+
+    int abiError = 0;
+    int abi = landlock::Abi(&abiError);
+    if (abi < 0)
+    {
+        const char *why;
+        if (abiError == ENOSYS)
+            why = "this kernel was built without Landlock";
+        else if (abiError == EOPNOTSUPP)
+            why = "Landlock is built into this kernel but not enabled at boot (the \"lsm=\" kernel parameter)";
+        else if (abiError == EPERM)
+            why = "the Landlock system calls are blocked, probably by the system call filter of the container this runs in";
+        else
+            why = strerror(abiError);
+        fprintf(stderr, "error: the sandbox needs Landlock, the Linux kernel's file system sandbox: %s. "
+                        "Use --no-sandbox to run without it\n", why);
+        return false;
+    }
+    if (abi < landlock::kMinimumAbi)
+    {
+        fprintf(stderr, "error: the sandbox needs Landlock ABI %d (Linux 6.2 or newer) for cross-folder renames "
+                        "and truncate control; this kernel offers ABI %d. Use --no-sandbox to run without it\n",
+                landlock::kMinimumAbi, abi);
+        return false;
+    }
+
+    landlock::RuleSet ruleset;
+    std::string error;
+    if (!landlock::BuildRules(config, abi, ruleset, error))
+    {
+        fprintf(stderr, "error: %s\n", error.c_str());
+        return false;
+    }
+    for (const auto& warning : ruleset.warnings)
+        fprintf(stderr, "%s\n", warning.c_str());
+
+    if (verbose)
+        fprintf(stdout, "%s\n", landlock::Describe(ruleset).c_str());
+
+    if (!landlock::Apply(ruleset, allowed_threads, error))
+    {
+        fprintf(stderr, "error: cannot apply the sandbox: %s\n", error.c_str());
+        return false;
+    }
+    return true;
+}
+
+#endif
+
+
+bool ApplyConfig(const Config& config, bool verbose, const std::vector<pid_t>& allowed_threads)
+{
+#if defined(__linux__)
+    return ApplyLinuxConfig(config, verbose, allowed_threads);
+#else
+    (void)allowed_threads; // the macOS sandbox covers the whole process
     std::string profile = GenerateSbplProfile(config);
     return ApplyProfile(profile, verbose);
+#endif
 }
 
 
@@ -375,7 +469,8 @@ bool InitializeSandbox(const std::string& profile_path,
                   const std::vector<std::string>& allow_read,
                   const std::vector<std::string>& allow_write,
                   bool allow_network,
-                  bool verbose)
+                  bool verbose,
+                  const std::vector<pid_t>& allowed_threads)
 {
     Config cfg;
     if (!profile_path.empty())
@@ -389,7 +484,7 @@ bool InitializeSandbox(const std::string& profile_path,
         cfg.read_write.push_back(p);
     cfg.allow_network = allow_network;
     AddSystemAutoAllows(cfg);
-    return ApplyConfig(cfg, verbose);
+    return ApplyConfig(cfg, verbose, allowed_threads);
 }
 
 }  // namespace sandbox

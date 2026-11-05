@@ -118,6 +118,19 @@ static void ExtractPathsFromAction(const ActionStep& action,
     {
         AddFieldToSandbox(action, "items", env, true, reads, writes);
     }
+#if defined(__linux__)
+    else if (t == "hardlink")
+    {
+        // Landlock refuses a hard link that would give the file rights it lacks where
+        // it is (EXDEV), so a link from a read-only folder into a writable one fails.
+        // Writing through a hard link changes the source anyway, so its folder is
+        // granted write, as for "move" (private/linux_phase5a_sandbox_design.md, 8).
+        AddFieldToSandbox(action, "from",                  env, true, reads, writes);
+        AddFieldToSandbox(action, "items",                 env, true, reads, writes);
+        AddFieldToSandbox(action, "to",                    env, true, reads, writes);
+        AddFieldToSandbox(action, "destination directory", env, true, reads, writes);
+    }
+#endif
     else if (t == "clone"    || t == "copy" ||
              t == "hardlink" || t == "symlink")
     {

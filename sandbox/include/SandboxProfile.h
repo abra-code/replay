@@ -42,6 +42,7 @@
 
 #include <string>
 #include <vector>
+#include <sys/types.h>
 
 namespace sandbox
 {
@@ -77,8 +78,9 @@ bool LoadConfigFromJsonFile(const std::string& path, Config& out);
 // granting subpath access on root would unlock the entire filesystem.
 std::string GenerateSbplProfile(const Config& config);
 
-// Returns true if sandbox_init_with_parameters is linked at runtime.
-// On macOS this is normally always true; check is for robustness only.
+// Returns true if the sandbox can be applied: on macOS, if sandbox_init_with_parameters
+// is linked at runtime (normally always true; the check is for robustness only); on
+// Linux, if the kernel offers Landlock at ABI 3 or newer.
 bool IsAvailable();
 
 // Apply an already-built SBPL profile to the current process. Once this
@@ -88,17 +90,26 @@ bool IsAvailable();
 // If verbose is true, prints the SBPL profile to stdout before applying.
 bool ApplyProfile(const std::string& sbpl_profile, bool verbose = false);
 
-// Convenience: GenerateSbplProfile + ApplyProfile.
-// If verbose is true, prints the SBPL profile to stdout before applying.
-bool ApplyConfig(const Config& config, bool verbose = false);
+// macOS: GenerateSbplProfile + ApplyProfile. Linux: Landlock rules built from the
+// config (private/linux_phase5a_sandbox_design.md), applied to this process and every
+// process it starts.
+// If verbose is true, prints the SBPL profile (macOS) or the rule list (Linux) to
+// stdout before applying.
+// allowed_threads (Linux): threads that may keep running outside the sandbox, by
+// kernel id; any other thread besides the caller makes the call fail. Ignored on macOS,
+// whose sandbox covers the whole process.
+bool ApplyConfig(const Config& config, bool verbose = false,
+                 const std::vector<pid_t>& allowed_threads = {});
 
 // Load optional JSON profile, merge allow_read/allow_write/allow_network
 // All failures return false.
-// If verbose is true, prints the SBPL profile to stdout before applying.
+// If verbose is true, prints the SBPL profile (macOS) or the rule list (Linux) to
+// stdout before applying. allowed_threads as for ApplyConfig.
 bool InitializeSandbox(const std::string& profile_path,
                   const std::vector<std::string>& allow_read,
                   const std::vector<std::string>& allow_write,
                   bool allow_network,
-                  bool verbose = false);
+                  bool verbose = false,
+                  const std::vector<pid_t>& allowed_threads = {});
 
 }  // namespace sandbox

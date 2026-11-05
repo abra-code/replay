@@ -3,6 +3,16 @@
 success_counter=0
 failure_counter=0
 
+HOST_OS="$(/usr/bin/uname -s)"
+# Where curl's TLS library reads its configuration: /private/etc/ssl on macOS. On Linux
+# it is /etc/ssl, already readable through the sandbox baseline; granting it again is
+# harmless.
+if [ "$HOST_OS" = "Darwin" ]; then
+	SSL_DIR="/private/etc/ssl"
+else
+	SSL_DIR="/etc/ssl"
+fi
+
 verify_succeeded()
 {
 	result=$1
@@ -340,11 +350,11 @@ verify_succeeded "$?" "execute write denied: destination file not created in den
 
 # ===========================================================================
 echo "------------------------------"
-echo "--allow-read /private/etc/ssl: curl HTTPS succeeds (requires network)"
+echo "--allow-read $SSL_DIR: curl HTTPS succeeds (requires network)"
 echo ""
-# curl/LibreSSL reads /private/etc/ssl/openssl.cnf during TLS initialisation.
-# Without this path in the sandbox it fails with "Operation not permitted"
-# before the first byte is sent. Verifies the fix is in place.
+# curl's TLS library reads its configuration (openssl.cnf) under $SSL_DIR during TLS
+# initialization. Without that path in the sandbox it fails before the first byte is
+# sent. Verifies the grant is enough.
 
 cat > "$WORK_DIR/curl_https.json" << EOF
 [{
@@ -358,10 +368,10 @@ cat > "$WORK_DIR/curl_https.json" << EOF
 EOF
 output=$("$REPLAY_TOOL" \
 	--allow-write "$WORK_DIR" \
-	--allow-read /private/etc/ssl \
+	--allow-read "$SSL_DIR" \
 	"$WORK_DIR/curl_https.json" 2>/dev/null)
 echo "$output" | /usr/bin/grep -qF "http_code=200"
-verify_succeeded "$?" "curl HTTPS: /private/etc/ssl allows TLS init (got: $output)"
+verify_succeeded "$?" "curl HTTPS: $SSL_DIR allows TLS init (got: $output)"
 
 
 # ===========================================================================
@@ -369,8 +379,10 @@ echo "------------------------------"
 echo "--deny-network: curl reports http_code=000 (no connection)"
 echo ""
 # Uses --write-out to capture the result via stdout (bypasses execute action's
-# async exit-code race). /private/etc/ssl is added so curl gets past TLS init
-# and reaches the actual network call, which (deny network*) then blocks.
+# async exit-code race). $SSL_DIR is added so curl gets past TLS init and reaches
+# the actual network call, which the sandbox then blocks.
+# On Linux, denying the network needs a system call filter that does not exist yet,
+# so replay must refuse the option, with a message, instead of running unconfined.
 
 cat > "$WORK_DIR/curl_denied.json" << EOF
 [{
@@ -382,13 +394,26 @@ cat > "$WORK_DIR/curl_denied.json" << EOF
                  "http://example.com"]
 }]
 EOF
-output=$("$REPLAY_TOOL" \
-	--allow-write "$WORK_DIR" \
-	--allow-read /private/etc/ssl \
-	--deny-network \
-	"$WORK_DIR/curl_denied.json" 2>/dev/null)
-echo "$output" | /usr/bin/grep -qF "http_code=000"
-verify_succeeded "$?" "network denied: curl reports http_code=000 (got: $output)"
+if [ "$HOST_OS" = "Darwin" ]; then
+	output=$("$REPLAY_TOOL" \
+		--allow-write "$WORK_DIR" \
+		--allow-read "$SSL_DIR" \
+		--deny-network \
+		"$WORK_DIR/curl_denied.json" 2>/dev/null)
+	echo "$output" | /usr/bin/grep -qF "http_code=000"
+	verify_succeeded "$?" "network denied: curl reports http_code=000 (got: $output)"
+else
+	output=$("$REPLAY_TOOL" \
+		--allow-write "$WORK_DIR" \
+		--deny-network \
+		"$WORK_DIR/curl_denied.json" 2>&1)
+	status=$?
+	verify_failed "$status" "network denied: Linux refuses --deny-network (exit status $status)"
+	echo "$output" | /usr/bin/grep -qF "not supported on Linux yet"
+	verify_succeeded "$?" "network denied: the refusal says why (got: $output)"
+	echo "$output" | /usr/bin/grep -qF "http_code="
+	verify_failed "$?" "network denied: curl never ran (got: $output)"
+fi
 
 
 # ===========================================================================
@@ -397,35 +422,48 @@ echo "path deduplication: nested paths collapse to common parents"
 echo ""
 
 DEDUP_DIR="$WORK_DIR/dedup_test"
-mkdir -p "$DEDUP_DIR/src"
+mkdir -p "$DEDUP_DIR/src/utils"
 mkdir -p "$DEDUP_DIR/include"
 mkdir -p "$DEDUP_DIR/build"
+# The playlist's read inputs exist, as in a real build: on Linux a read path must exist
+# when the sandbox starts (the rule binds to the file), and the run is refused otherwise.
+echo "int main() { return 0; }" > "$DEDUP_DIR/src/main.cpp"
+echo "// helper" > "$DEDUP_DIR/src/utils/helper.cpp"
+echo "// header" > "$DEDUP_DIR/include/header.h"
 
-# Resolve symlinks (e.g., /tmp -> /private/tmp) to match what SBPL will show
+# Resolve symlinks (e.g., /tmp -> /private/tmp) to match what the profile will show
 DEDUP_DIR_RESOLVED=$(cd "$DEDUP_DIR" && pwd -P)
 
 # Use the static playlist - replay will expand ${WORK_DIR}
 export WORK_DIR="$DEDUP_DIR"
 output=$("$REPLAY_TOOL" --verbose --sandbox "$SCRIPT_DIR/playlists/nested_paths.json" 2>&1)
 
-# Extract just the SBPL profile section (after "Sandbox profile:" up to action output)
-sbpl_section=$(echo "$output" | sed -n '/Sandbox profile:/,/^\[.*\]/p' | sed '$d')
-# echo "sbpl_section:\n${sbpl_section}\n"
+# The profile section --verbose prints, and the read-write and read-only paths in it.
+# macOS prints the SBPL profile ("Sandbox profile:" up to the action output); Linux
+# prints its Landlock rules, one "  read-write: <path>  [why]" or "  read-only: ..." line
+# each, between "Sandbox (Linux Landlock" and "Not covered by the sandbox".
+if [ "$HOST_OS" = "Darwin" ]; then
+	sbpl_section=$(echo "$output" | sed -n '/Sandbox profile:/,/^\[.*\]/p' | sed '$d')
+	rw_only_section=$(echo "$sbpl_section" | sed -n '/; read-write allowed/,/; /p' | grep "file-read\* file-write")
+	rw_paths=$(echo "$rw_only_section" | sed 's/.*(subpath "\(.*\)").*/\1/')
+	ro_only_section=$(echo "$sbpl_section" | sed -n '/; read-only allowed/,/; read-write/p' | grep "file-read\*" | grep -v "file-read\* file-write")
+	ro_paths=$(echo "$ro_only_section" | sed 's/.*(subpath "\(.*\)").*/\1/')
+else
+	sbpl_section=$(echo "$output" | sed -n '/^Sandbox (Linux Landlock/,/^Not covered by the sandbox/p')
+	rw_paths=$(echo "$sbpl_section" | sed -n 's/^  read-write: \(.*\)  \[.*\]$/\1/p')
+	ro_paths=$(echo "$sbpl_section" | sed -n 's/^  read-only: \(.*\)  \[.*\]$/\1/p')
+fi
+
+# Guard the checks below, several of which only look for something to be absent: an
+# empty or unparsed section would pass them all.
+test -n "$rw_paths" && test -n "$ro_paths"
+verify_succeeded "$?" "dedup: the verbose output lists read-write and read-only paths (got: $output)"
 
 # Verify that the directory appears (may be deduplicated to parent)
 echo "$sbpl_section" | /usr/bin/grep -q "$DEDUP_DIR_RESOLVED"
-verify_succeeded "$?" "dedup: dedup_test directory appears in SBPL"
+verify_succeeded "$?" "dedup: dedup_test directory appears in the profile"
 echo "$sbpl_section" | /usr/bin/grep -qF "$DEDUP_DIR_RESOLVED/build"
-verify_succeeded "$?" "dedup: build directory appears in SBPL"
-
-# Verify read-write paths are not duplicated in read-only section
-# Extract read-only paths (lines with "file-read*" only)
-rw_only_section=$(echo "$sbpl_section" | sed -n '/; read-write allowed/,/; /p' | grep "file-read\* file-write")
-rw_paths=$(echo "$rw_only_section" | sed 's/.*(subpath "\(.*\)").*/\1/')
-
-# Extract read-only paths
-ro_only_section=$(echo "$sbpl_section" | sed -n '/; read-only allowed/,/; read-write/p' | grep "file-read\*" | grep -v "file-read\* file-write")
-ro_paths=$(echo "$ro_only_section" | sed 's/.*(subpath "\(.*\)").*/\1/')
+verify_succeeded "$?" "dedup: build directory appears in the profile"
 
 # Check: no read-write path should be a parent of any read-only path (or exact match)
 # This is handled by the sandbox module internally, but verify it's working

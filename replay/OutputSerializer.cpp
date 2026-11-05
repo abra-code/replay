@@ -38,23 +38,38 @@ OutputSerializer& OutputSerializer::shared()
 
 OutputSerializer::OutputSerializer()
 {
+    startThread();
+}
+
+OutputSerializer::~OutputSerializer()
+{
+    stopThread();
+}
+
+void OutputSerializer::startThread()
+{
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _stopping = false;
+    }
     // Wait until the thread has named itself and recorded its id, so threadId() is
-    // valid as soon as the serializer exists. The promise moves into the thread: the
-    // wait can return while set_value() is still running there, so the promise must
-    // not be a local of this constructor that is destroyed when it returns.
+    // valid as soon as this returns. The promise moves into the thread: the wait can
+    // return while set_value() is still running there, so the promise must not be a
+    // local of this function that is destroyed when it returns.
     std::promise<void> started;
     std::future<void> startedFuture = started.get_future();
     _thread = std::thread(&OutputSerializer::threadMain, this, std::move(started));
     startedFuture.wait();
 }
 
-OutputSerializer::~OutputSerializer()
+void OutputSerializer::stopThread()
 {
     {
         std::lock_guard<std::mutex> lock(_mutex);
         _stopping = true;
         _cv.notify_one();
     }
+    // The thread prints everything queued before it ends (threadMain).
     if (_thread.joinable())
         _thread.join();
 }

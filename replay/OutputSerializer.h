@@ -46,11 +46,16 @@ public:
     // the next playlist run.
     void flush();
 
+    // Stop the output thread once it has printed everything queued, and start a new
+    // one. The Linux sandbox covers only the threads started after it, so replay stops
+    // this thread before applying the sandbox and starts it again afterwards; no thread
+    // then stays outside (private/linux_phase5a_sandbox_design.md, section 2). Output
+    // scheduled in between waits in the queue; flush() must not be called in between.
+    void stopThread();
+    void startThread();
+
 #if defined(__linux__)
-    // The kernel's id of the output thread. It starts before the sandbox and stays
-    // outside it, which is safe because it only writes to streams that are already
-    // open; the Linux sandbox lets exactly this thread through its thread check
-    // (private/linux_phase5a_sandbox_design.md, section 2).
+    // The kernel's id of the current output thread.
     pid_t threadId() const { return _threadId; }
 #endif
 

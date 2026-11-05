@@ -295,17 +295,24 @@ verify_content "$content" "move source" "sandbox auto-move: content preserved"
 
 # ===========================================================================
 echo "------------------------------"
-echo "--sandbox: explicit --allow-write /private/tmp for temp files"
+echo "--sandbox: explicit --allow-write of the system temp folder for temp files"
 echo ""
 
-TMP_FILE="/private/tmp/replay_test_tmp_$$"
+# The real folder behind /tmp: /private/tmp on macOS (/tmp is a link to it), /tmp itself on Linux.
+HOST_OS="$(/usr/bin/uname -s)"
+if [ "$HOST_OS" = "Darwin" ]; then
+    SYSTEM_TMP="/private/tmp"
+else
+    SYSTEM_TMP="/tmp"
+fi
+TMP_FILE="$SYSTEM_TMP/replay_test_tmp_$$"
 trap "rm -f '$TMP_FILE' 2>/dev/null" EXIT
 
 cat > "$WORK_DIR/tmp_write.json" << EOF
 [{ "action": "execute", "tool": "/bin/sh", "arguments": ["-c", "echo 'temp content' > $TMP_FILE"] }]
 EOF
 
-"$REPLAY_TOOL" --sandbox --allow-write /private/tmp "$WORK_DIR/tmp_write.json"
+"$REPLAY_TOOL" --sandbox --allow-write "$SYSTEM_TMP" "$WORK_DIR/tmp_write.json"
 verify_succeeded "$?" "sandbox tmp: replay exited successfully"
 test -f "$TMP_FILE"
 verify_succeeded "$?" "sandbox tmp: temp file created"

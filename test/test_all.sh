@@ -41,10 +41,10 @@ linux_skip_reason() {
     case "$1" in
         test_dispatch.sh)
             echo "IPC between dispatch and replay is not ported (Phase 4)" ;;
-        test_replay_sandbox.sh|test_replay_auto_sandbox.sh|test_gate_auto_sandbox.sh|test_replay_cache_sandbox.py)
-            echo "the sandbox is not ported and fails closed (Phase 5a)" ;;
+        test_replay_cache_sandbox.py)
+            echo "its xattr scenarios need the sandbox's xattr denial, which is not ported yet (Phase 5a, step 3)" ;;
         test_mcp_server.py)
-            echo "MCP server mode starts sandboxed, and the sandbox fails closed (Phase 5a)" ;;
+            echo "MCP server mode on Linux waits for its Unix socket rule (Phase 5a, step 5)" ;;
         test_sandbox_discover.py)
             echo "sandbox-discover.py is macOS only (later, not in the plan)" ;;
     esac
@@ -85,6 +85,7 @@ run_suite() {
 
 run_suite "$SCRIPT_DIR/test_crc32c_variants.sh"
 run_suite "$SCRIPT_DIR/test_sandbox_threads.sh"    "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_sandbox_linux.sh"      "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_fingerprint.sh"        "$BUILD_DIR/fingerprint"
 run_suite "$SCRIPT_DIR/test_gate.sh"               "$BUILD_DIR/gate"
 run_suite "$SCRIPT_DIR/test_gate_auto_sandbox.sh" "$BUILD_DIR/gate"
