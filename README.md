@@ -127,11 +127,12 @@ Options:
   -o, --ordered-output   In simple concurrent execution mode preserve the order of printed task outputs as specified
                      in the playlist. The tasks are still executed concurrently without order guarantee
                      but printing is ordered. Ignored in serial execution and concurrent execution with dependencies.
-  -t, --max-tasks NUMBER   Maximum number of concurrently executed actions. Default is 0, which is treated as unbound.
+  -t, --max-tasks NUMBER   Maximum number of concurrently executed actions. Default is 0: replay sets no limit
+                     and macOS runs at most 64 blocking actions at once. On Linux 0 means 64, the same number.
                      Limiting the number of concurrent operations may sometimes result in faster execution.
                      With intensive file I/O tasks a low number like 4 may yield the best performance.
                      For CPU intensive tasks you may use logical CPU core count (or a multiplier) as obtained by:
-                     sysctl -n hw.ncpu
+                     sysctl -n hw.ncpu (macOS) or nproc (Linux)
   -e, --stop-on-error   Stop executing the remaining playlist actions on first error.
   -f, --force        If the file operation fails, delete destination and try again.
   -n, --dry-run      Show a log of actions which would be performed without running them.
@@ -158,8 +159,9 @@ Options:
                      unchanged files are not re-read. "sidecar" (default) keeps them in a compact index
                      in --cache-dir: it works when the source tree is read-only, which is the usual case
                      under --sandbox, and costs about a tenth of what "xattr" costs per fingerprinted
-                     file. "xattr" stores them in each file's public.fingerprint.* attribute, shared
-                     with the gate and fingerprint tools, and needs the files to be writable.
+                     file. "xattr" stores them in each file's public.fingerprint.* attribute
+                     (user.public.fingerprint.* on Linux), shared with the gate and fingerprint
+                     tools, and needs the files to be writable.
                      Implies --cache.
   --cache-memo-refresh   Ignore what is memoized, recompute every file hash and rewrite the memo.
                      Implies --cache.
@@ -244,6 +246,10 @@ Dependency analysis:
      consumers of given input paths and cannot share their inputs with other actions. Producing additional items under
      such exclusive input paths is also not allowed. "replay" will report an error during dependency analysis
      and will not execute an action graph with exclusive input violations.
+  Paths are compared ignoring the case of ASCII letters, as the default macOS file system does, and so they
+  are on a case-sensitive file system such as most Linux ones: an action reading out.txt waits for the action
+  writing Out.txt, and two actions writing Out.txt and out.txt are rejected under rule 1. There the two names
+  may be different files, so some actions run one after another when they need not; the result is the same.
 
 Incremental execution cache:
 
@@ -284,9 +290,10 @@ Incremental execution cache:
              size, modification time, CHANGE time and file type. Nothing is written to the inputs, so
              it works on a read-only tree. Not touching the files is also what lets it check ctime,
              which closes the wrong skip described under "xattr" below wherever the filesystem keeps
-             a real one (APFS and HFS+ do): utimes() is an inode metadata change, so a tool that
-             restores mtime cannot restore ctime. On a filesystem that carries no true change time
-             and derives it from the modification time, that guarantee degrades to the "xattr" one.
+             a real one (APFS, HFS+, and ext4, XFS and btrfs on Linux do): utimes() is an inode
+             metadata change, so a tool that restores mtime cannot restore ctime. On a filesystem
+             that carries no true change time and derives it from the modification time, that
+             guarantee degrades to the "xattr" one.
              The index is machine-local, because inode numbers are, while the manifest beside it
              is shareable; --cache-hash selects a separate index file, so switching algorithms does
              not invalidate the other. It carries a checksum and is rebuilt from scratch if it fails
@@ -311,7 +318,8 @@ Incremental execution cache:
   batch and nothing else.
 
   When the index is written it usually also records its own crc32c, and the file's inode, size and
-  mtime at that moment, in a "public.replay.store-crc32c" attribute, readable with "xattr -px". A
+  mtime at that moment, in a "public.replay.store-crc32c" attribute, readable with "xattr -px". On
+  Linux the attribute is "user.public.replay.store-crc32c", readable with "getfattr -e hex -n". A
   failure to record it is silent without -v, since it is a diagnostic and nothing depends on it. It
   says what the index contained when it was published, which is not the same claim as what it contains
   now: an attribute cannot notice bit rot, since rot moves neither size nor mtime. Deliberately NOT one
@@ -352,7 +360,8 @@ Incremental execution cache:
 
 Actions and parameters:
 
-  clone       Copy file(s) from one location to another. Cloning is supported on APFS volumes.
+  clone       Copy file(s) from one location to another. Cloning is supported on APFS volumes, and on Linux
+              on btrfs, XFS and bcachefs; elsewhere the data is copied.
               Source and destination for this action can be specified in 2 ways.
               One to one:
     from      Source item path.
@@ -409,6 +418,8 @@ Actions and parameters:
     root      Root directory to search from.
     glob      Array of glob patterns relative to root (e.g. "**/*.swift").
               Patterns starting with "!" are exclusions and remove matches from the result.
+              Matching ignores the case of ASCII letters on every platform, so on a case-sensitive
+              file system "x.txt" matches both x.txt and X.txt.
     exclude   Array of paths or patterns to exclude from traversal (optional).
     max       Maximum number of results to return (optional, default unlimited).
               Output format: one absolute file path per line, preceded by [glob] header.
@@ -757,6 +768,8 @@ When no glob pattern is specified, all files under provided directories are fing
 With --xattr=ON the tool caches computed file hashes and saves FileInfo in "public.fingerprint.crc32c"
 or "public.fingerprint.blake3" xattr for files, depending on hash choice and then reads it back on next
 fingerprinting if file inode, size and modification dates are unchanged.
+On Linux the names are in the "user." namespace: "user.public.fingerprint.crc32c" and
+"user.public.fingerprint.blake3".
 FileInfo is a 32 byte structure:
 	"inode" : 8 bytes,
 	"size" : 8 bytes,
