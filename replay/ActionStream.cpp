@@ -335,5 +335,6 @@ StreamActionsFromStdIn(ReplayContext *context)
 
 	FinishReceivingActionsAndWait(context);
 
-	//do not bother freeing the line buffer - the process is ending
+	// The process is ending, but freeing the buffer keeps LeakSanitizer runs clean.
+	free(line);
 }

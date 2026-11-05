@@ -1347,7 +1347,7 @@ CFMutableDictionaryRef fingerprint::load_snapshot(const std::string& path) noexc
     CFErrorRef error_raw = nullptr;
     CFPropertyListFormat format;
     CFObj<CFMutableDictionaryRef> snapshot((CFMutableDictionaryRef)CFPropertyListCreateWithData(
-        kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &format, &error_raw), kCFObjRetain);
+        kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &format, &error_raw));
     data = nullptr;
 
     if (snapshot == nullptr)
