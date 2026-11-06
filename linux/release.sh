@@ -7,8 +7,9 @@
 #   SOURCE for each architecture:
 #     docker  build with linux/package.sh in the image pinned in linux/swift-image (default),
 #             from scratch in a build folder inside the container.
-#             On Apple silicon x86_64 runs emulated: slower (about 10 minutes here), but no
-#             second machine is needed.
+#             On Apple silicon x86_64 runs emulated, which needs Colima with Rosetta
+#             (colima start --vz-rosetta; QEMU, the default, crashes SwiftPM at random).
+#             About 2 minutes here; no second machine is needed.
 #     DIR     a folder with that architecture's tarballs and .sha256 files, made elsewhere,
 #             such as the dist folder of linux/x86-check.sh --package on an Intel Mac.
 #     skip    leave the architecture out.
@@ -54,7 +55,7 @@ while [ $# -gt 0 ]; do
             CHECK=0
             ;;
         -h|--help)
-            /usr/bin/sed -n '2,29p' "$0" | /usr/bin/sed 's/^# \{0,1\}//'
+            /usr/bin/sed -n '2,30p' "$0" | /usr/bin/sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -182,6 +183,9 @@ produce() {
             local build_status=$?
             if [ "$build_status" -ne 0 ]; then
                 echo "Error: building and packing $arch failed with status $build_status" >&2
+                if [ "$arch" = "x86_64" ] && [ "$(/usr/bin/uname -m)" = "arm64" ]; then
+                    echo "  If the build died with \"Illegal instruction\" (status 132): Docker runs x86_64 with QEMU, whose futex handling makes SwiftPM's libdispatch crash at random. Use Rosetta: colima stop; colima start --vz-rosetta" >&2
+                fi
                 return 1
             fi
             ;;

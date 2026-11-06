@@ -173,7 +173,9 @@ linux/release.sh                          # both architectures, built in the pin
 linux/release.sh --x86_64 <folder>        # x86_64 tarballs made on an Intel Mac instead
 ```
 
-x86_64 builds emulated on Apple silicon, which is slower. With an Intel Mac at
+x86_64 builds emulated on Apple silicon. Colima must run x86_64 with Rosetta
+(`colima start --vz-rosetta`): under QEMU, its default, SwiftPM crashes at
+random. Rosetta is being phased out by Apple, so this route is temporary. With an Intel Mac at
 hand, `linux/x86-check.sh --package` there builds, tests and packs x86_64 in
 its virtual machine. Copy the `dist` folder it names back to the development
 Mac and pass it to `--x86_64`.
