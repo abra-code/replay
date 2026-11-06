@@ -3,7 +3,7 @@
 # linux_phase5b_design.md for the network and process creation), beyond what the shared
 # sandbox suites check on both platforms: denials outside the grants, paths that do not
 # exist yet, hard links, refused options, the --verbose listing, the system call filter,
-# the denied network and process creation, and the documented gaps. Linux only; it reports itself skipped elsewhere.
+# the denied network and process creation, the i386 compat entry on x86_64, and the documented gaps. Linux only; it reports itself skipped elsewhere.
 #
 # Usage: test_sandbox_linux.sh [/path/to/replay]
 # Exit:  0 = all checks passed (or skipped), 1 = a failure, 2 = setup failed
@@ -391,7 +391,84 @@ else
 fi
 
 echo ""
-echo "=== 11. documented gaps, pinned ==="
+echo "=== 11. the i386 compat entry (x86_64 only) ==="
+# A 32-bit program reaches the kernel through the compat entry, which the filter checks
+# with its own system call numbers. The same probe built with -m32 must get the same
+# answers as the native one under every filter option, and its two i386 ways to create
+# a socket (the direct call and socketcall) must be denied where the options say so.
+MACHINE="$(/usr/bin/uname -m)"
+PROBE32_LOG="$WORK_DIR/probe32-build.log"
+if [ "$MACHINE" != "x86_64" ]; then
+    echo "  skipped: not an x86_64 machine ($MACHINE)"
+elif [ ! -x "$WORK_DIR/filter-exec" ]; then
+    echo "  skipped: no filter launcher (section 10)"
+else
+    /usr/bin/clang -m32 -O1 -Wall -o "$WORK_DIR/probe32" "$SCRIPT_DIR/sandbox_syscall_probe.c" > "$PROBE32_LOG" 2>&1
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "  skipped: clang -m32 cannot build the probe (is a 32-bit C library missing? gcc-multilib on Debian and Ubuntu):"
+        /usr/bin/head -n 5 "$PROBE32_LOG" | /usr/bin/sed 's/^/    /'
+    else
+        "$WORK_DIR/probe32" "$ALLOWED/probe.txt" < /dev/null > "$WORK_DIR/probe32-plain.txt" 2>&1
+        status=$?
+        if [ "$status" -ne 0 ]; then
+            echo "  skipped: the 32-bit probe does not run (status $status; a kernel without IA32 emulation?): $(/usr/bin/head -c 200 "$WORK_DIR/probe32-plain.txt")"
+        else
+            # Every line of the native probe's output must appear unchanged in the 32-bit one.
+            same_answers() {
+                # $1: native output; $2: 32-bit output. Prints the lines that differ.
+                local line
+                while IFS= read -r line; do
+                    case "$NL$2$NL" in
+                        *"$NL$line$NL"*) ;;
+                        *) echo "native: $line; 32-bit: $(printf '%s\n' "$2" | /usr/bin/grep "^${line%% *} ")" ;;
+                    esac
+                done <<EOF
+$1
+EOF
+            }
+            for options in "" "--deny-network --deny-unix-sockets" "--deny-fork"; do
+                # $options is unquoted on purpose: it holds zero, one or two options.
+                out64="$("$WORK_DIR/filter-exec" $options -- "$WORK_DIR/probe" "$ALLOWED/probe.txt" < /dev/null 2>&1)"
+                out32="$("$WORK_DIR/filter-exec" $options -- "$WORK_DIR/probe32" "$ALLOWED/probe.txt" < /dev/null 2>&1)"
+                diffs="$(same_answers "$out64" "$out32")"
+                test -n "$out64" && test -z "$diffs"
+                check $? "the 32-bit probe gets the native answers with options '${options:-none}'" "$diffs"
+            done
+
+            # The i386 socket calls, one by one. Without options: all allowed (control).
+            # The tools' network denial: every family on both calls. The MCP server below
+            # Landlock ABI 9 (Unix sockets only): the direct call by family, socketcall for
+            # every family, since the filter cannot read its arguments. The network alone
+            # (the launcher's option, not used by the tools): the reverse by family.
+            expect_lines() {
+                # $1: options; $2: what; then pairs of "<name> <answer>" lines expected.
+                local options="$1" what="$2" expected missing=""
+                shift 2
+                # $options is unquoted on purpose, as above.
+                out32="$("$WORK_DIR/filter-exec" $options -- "$WORK_DIR/probe32" "$ALLOWED/probe.txt" < /dev/null 2>&1)"
+                for expected in "$@"; do
+                    case "$NL$out32$NL" in *"$NL$expected$NL"*) ;; *) missing="$missing [$expected]" ;; esac
+                done
+                test -z "$missing"
+                check $? "$what" "missing:$missing; output: $out32"
+            }
+            expect_lines "" "control: both i386 socket calls work without options" \
+                "socket-syscall-unix ok" "socket-syscall-inet ok" "socketcall-unix ok" "socketcall-inet ok"
+            expect_lines "--deny-network --deny-unix-sockets" "the network denied: both i386 socket calls are denied for every family" \
+                "socket-syscall-unix EACCES" "socket-syscall-inet EACCES" "socketcall-unix EACCES" "socketcall-inet EACCES" "socketpair-unix ok"
+            expect_lines "--deny-unix-sockets" "Unix sockets denied: the direct call by family, socketcall for every family" \
+                "socket-syscall-unix EACCES" "socket-syscall-inet ok" "socketcall-unix EACCES" "socketcall-inet EACCES" "socketpair-unix ok"
+            expect_lines "--deny-network" "the network without Unix sockets: the direct call by family, socketcall for every family" \
+                "socket-syscall-unix ok" "socket-syscall-inet EACCES" "socketcall-unix EACCES" "socketcall-inet EACCES"
+            expect_lines "--deny-fork" "process creation denied: i386 fork, vfork, clone and clone3" \
+                "fork EACCES" "fork-syscall EACCES" "vfork EACCES" "posix_spawn EACCES" "clone3 ENOSYS" "thread ok"
+        fi
+    fi
+fi
+
+echo ""
+echo "=== 12. documented gaps, pinned ==="
 /bin/chmod 644 "$OUTSIDE/secret.txt"
 run_stdin "[execute]	/bin/chmod	600	$OUTSIDE/secret.txt" --allow-write "$ALLOWED"
 mode="$(/usr/bin/stat -c %a "$OUTSIDE/secret.txt")"

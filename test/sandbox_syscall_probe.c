@@ -143,6 +143,34 @@ int main(int argc, char **argv)
             close(s);
     }
 
+#if defined(__i386__)
+    // i386 (built with -m32, run on x86_64 through the filter's compat entry) can create a
+    // socket two ways, and glibc's socket() uses only one of them: the direct socket call
+    // (Linux 4.3) and the older socketcall multiplexer, operation 1 (SYS_SOCKET), whose
+    // arguments sit in memory.
+    static const struct { const char *name; int family; int type; } kRawFamilies[] = {
+        {"unix", AF_UNIX, SOCK_STREAM},
+        {"inet", AF_INET, SOCK_DGRAM},
+    };
+    for (size_t i = 0; i < sizeof(kRawFamilies) / sizeof(kRawFamilies[0]); i++)
+    {
+        char name[32];
+        errno = 0;
+        long raw = syscall(SYS_socket, kRawFamilies[i].family, kRawFamilies[i].type, 0);
+        snprintf(name, sizeof(name), "socket-syscall-%s", kRawFamilies[i].name);
+        report(name, raw);
+        if (raw >= 0)
+            close((int)raw);
+        unsigned long socketArgs[3] = {(unsigned long)kRawFamilies[i].family, (unsigned long)kRawFamilies[i].type, 0};
+        errno = 0;
+        raw = syscall(SYS_socketcall, 1, socketArgs);
+        snprintf(name, sizeof(name), "socketcall-%s", kRawFamilies[i].name);
+        report(name, raw);
+        if (raw >= 0)
+            close((int)raw);
+    }
+#endif
+
     // Process creation: denied with "allow_fork": false, threads stay allowed.
     pthread_t thread;
     int threadResult = pthread_create(&thread, NULL, thread_body, NULL);
@@ -168,8 +196,8 @@ int main(int argc, char **argv)
         waitpid(spawned, NULL, 0);
 
 #ifdef SYS_fork
-    // x86_64 has a fork system call of its own, which glibc's fork() does not use (it
-    // calls clone); aarch64 has none.
+    // x86_64 (and i386) have a fork system call of their own, which glibc's fork() does
+    // not use (it calls clone); aarch64 has none.
     errno = 0;
     long rawForked = syscall(SYS_fork);
     if (rawForked == 0)

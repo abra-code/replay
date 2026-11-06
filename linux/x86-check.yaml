@@ -1,0 +1,25 @@
+# The Lima virtual machine of linux/x86-check.sh: Ubuntu 24.04 on x86_64 (the system release
+# builds are made on, plan D3) with Apple's Virtualization framework (vmType vz, macOS 13 or
+# newer on an Intel Mac). The image and its checksum come from Lima's own pinned list
+# (template _images/ubuntu-24.04 of the Lima version that linux/x86-check.sh installs). CPUs,
+# memory and disk are set by linux/x86-check.sh.
+minimumLimaVersion: 2.0.0
+
+base:
+- template:_images/ubuntu-24.04
+
+vmType: vz
+arch: x86_64
+
+# No folder of the Mac is shared: linux/x86-check.sh copies the sources in, so the builds and
+# tests run on the guest's own file system (ext4), as on a Linux machine.
+mounts: []
+
+# Lima installs containerd and nerdctl by default; the tests need no containers.
+containerd:
+  system: false
+  user: false
+
+ssh:
+  # Lima makes its own key; the Mac's ~/.ssh keys are not copied into the guest.
+  loadDotSSHPubKeys: false
