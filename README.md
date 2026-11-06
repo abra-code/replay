@@ -181,7 +181,7 @@ Options:
   --allow-read PATH    Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.
   --allow-write PATH   Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.
   --deny-network       With sandbox active, deny outbound network (allowed by default).
-                     Not supported on Linux yet.
+                     On Linux no socket can be created, Unix ones included (socketpair works).
   --mcp-server       Start an MCP (Model Context Protocol) stdio server.
                      Use --allow-read PATH for read-only dirs and --allow-write PATH for
                      read-write dirs (repeatable). Both flags imply --sandbox. A
@@ -623,7 +623,8 @@ Sandbox profile JSON schema (--sandbox-profile FILE):
   because dyld must open their framework or library files at startup.
 
   On Linux the baseline grants the system folders (/usr, /etc, /proc and others) in place
-  of bsd.sb, extra_rules is refused, and allow_network and allow_fork cannot be false yet.
+  of bsd.sb and extra_rules is refused. On both systems allow_fork false also keeps every
+  program from starting (no new process); threads still work.
   See sandbox/README.md.
 
 See also:
@@ -845,7 +846,7 @@ OPTIONS:
   --allow-read=PATH      Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.
   --allow-write=PATH     Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.
   --deny-network         With sandbox active, deny outbound network (allowed by default).
-                         Not supported on Linux yet.
+                         On Linux no socket can be created, Unix ones included (socketpair works).
   -v, --verbose          Verbose output
   -h, --help             Print this help message
   -V, --version          Display version
@@ -875,6 +876,7 @@ Sandbox profile JSON schema (--sandbox-profile=FILE):
   because dyld must open their framework or library files at startup.
 
   On Linux the baseline grants the system folders (/usr, /etc, /proc and others) in place
-  of bsd.sb, extra_rules is refused, and allow_network and allow_fork cannot be false yet.
+  of bsd.sb and extra_rules is refused. On both systems allow_fork false also keeps every
+  program from starting (no new process); threads still work.
   See sandbox/README.md.
 ```

@@ -39,7 +39,7 @@ replay --sandbox --allow-write ~/project/build --deny-network actions.json
 | `--allow-read <path>` | directory | Grants `file-read*` on the directory and all descendants. Implicitly enables `--sandbox`. |
 | `--allow-write <path>` | directory | Grants `file-read*` and `file-write*` on the directory and all descendants. Implicitly enables `--sandbox`. |
 | `--sandbox-profile <file>` | JSON file | Loads a profile file (see JSON schema below). Implicitly enables `--sandbox`. |
-| `--deny-network` | - | Denies all outbound and inbound network connections. Without this flag network is allowed. Not supported on Linux yet. |
+| `--deny-network` | - | Denies all outbound and inbound network connections. Without this flag network is allowed. On Linux creating any socket fails, Unix ones included (see Linux below). |
 
 All flags may be repeated. At least one sandbox flag must be present to activate the sandbox — without any flags the process runs unsandboxed.
 
@@ -70,9 +70,9 @@ All fields are optional.
 | `import_baseline` | bool | `true` | Import `bsd.sb` (see below; on Linux, the Linux baseline). Rarely needs to be `false`. |
 | `read_only` | string array | `[]` | Directories where `file-read*` is allowed (recursively). |
 | `read_write` | string array | `[]` | Directories where `file-read*` and `file-write*` are allowed (recursively). |
-| `allow_network` | bool | `true` | Allow all network operations. Set to `false` to deny. Equivalent of `--deny-network`. `false` is not supported on Linux yet. |
+| `allow_network` | bool | `true` | Allow all network operations. Set to `false` to deny. Equivalent of `--deny-network`. |
 | `allow_exec` | bool | `true` | Allow `process-exec*` (launch any executable). See Execution below. |
-| `allow_fork` | bool | `true` | Allow `process-fork` (fork without exec). `false` is not supported on Linux yet. |
+| `allow_fork` | bool | `true` | Allow creating processes. `false` keeps every program from starting, since starting one creates a process: `execute` actions fail (EPERM on macOS, EACCES on Linux), on both systems. Threads still work. |
 | `extra_rules` | string array | `[]` | Raw SBPL rules appended verbatim at the end of the profile. Use as an escape hatch for rules not expressible via the structured fields. macOS only: a profile with it is refused on Linux. |
 
 ### Example: read-only source, read-write output
@@ -433,11 +433,15 @@ From Landlock version 9, a Unix socket with a path can be connected to only insi
 
 Below version 9 the kernel does not check connecting to a Unix socket by path, so a sandboxed command can reach any socket its user may open. Through the D-Bus session bus that is a complete way out (`systemd-run --user` starts a program outside the sandbox). Therefore:
 - **MCP server mode** (`--mcp-server`, where an AI agent chooses the commands): creating a Unix socket fails with EACCES. `socketpair` and other kinds of sockets still work. Commands that talk to a local service fail: ssh-agent, gpg-agent, the docker command, D-Bus clients; `syslog(3)` messages are lost; user and group names known only through SSSD, winbind or systemd's user database do not resolve (`id`, `whoami`, `~user`). From version 6 the MCP server also limits abstract Unix sockets (which have no path) to those made inside the sandbox.
-- **Playlists**, whose commands the user wrote, keep Unix sockets. On those kernels a playlist's commands can reach the services above, and the socket of a running `replay` server, which runs the actions `dispatch` sends it outside the sandbox.
+- **Playlists**, whose commands the user wrote, keep Unix sockets, unless the network is denied (below). On those kernels a playlist's commands can reach the services above, and the socket of a running `replay` server, which runs the actions `dispatch` sends it outside the sandbox.
 - A datagram `socketpair` can still send to datagram sockets with a path, such as the system log's (`/dev/log`, the journal), on any version.
+
+### Network and process creation
+
+- **`--deny-network`** and `"allow_network": false`: the system call filter refuses creating a socket of any family (EACCES), Unix sockets included on every kernel, as macOS denies connecting to them; `socketpair` still works. Name lookups (DNS) fail too. Only new sockets are refused: a socket a command inherits, for example one its caller passed down through `replay`, keeps working.
+- **`"allow_fork": false`**: the filter refuses `fork`, `vfork` and every `clone` that does not make a thread (EACCES), and `clone3` answers ENOSYS (the C library then makes its threads with `clone`). Starting a program needs a new process, so `execute` actions fail, as on macOS. Threads, and with them `replay`'s own work, are not affected.
 
 ### Not supported on Linux yet
 
-- `--deny-network` and `"allow_network": false`, and `"allow_fork": false`: refused.
 - `extra_rules`: these are macOS sandbox rules; a profile that has them is refused.
 - `sandbox-discover.py`.

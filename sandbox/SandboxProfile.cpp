@@ -385,19 +385,7 @@ bool ApplyProfile(const std::string& sbpl_profile, bool verbose)
 // failure prints why and returns false, and the callers then exit.
 static bool ApplyLinuxConfig(const Config& config, bool verbose, const std::vector<pid_t>& allowed_threads)
 {
-    // Not available on Linux yet (network and process creation need a system call
-    // filter, a later step) or at all (raw macOS rules).
-    if (!config.allow_network)
-    {
-        fprintf(stderr, "error: denying network access in the sandbox (--deny-network, \"allow_network\": false) "
-                        "is not supported on Linux yet\n");
-        return false;
-    }
-    if (!config.allow_fork)
-    {
-        fprintf(stderr, "error: \"allow_fork\": false is not supported on Linux yet\n");
-        return false;
-    }
+    // Raw macOS rules have no Linux meaning.
     if (!config.extra_rules.empty())
     {
         fprintf(stderr, "error: \"extra_rules\" holds macOS sandbox rules, which do not apply on Linux; "
@@ -441,20 +429,36 @@ static bool ApplyLinuxConfig(const Config& config, bool verbose, const std::vect
     for (const auto& warning : ruleset.warnings)
         fprintf(stderr, "%s\n", warning.c_str());
 
-    // Landlock limits connecting to Unix sockets from ABI 9; below that the filter denies
-    // creating them, when asked (the MCP server).
-    bool denyUnixSockets = config.deny_unix_sockets && abi < 9;
+    // Unix sockets: the MCP server needs them denied below ABI 9, where Landlock cannot
+    // limit connecting to them. A denied network denies them on every ABI, as macOS's
+    // (deny network*) denies connecting to them (verified 2026-11-05), and since through
+    // the D-Bus session bus a Unix socket reaches the network too (systemd-run).
+    bool denyUnixSockets = (config.deny_unix_sockets && abi < 9) || !config.allow_network;
+    seccomp::FilterOptions filterOptions;
+    filterOptions.denyUnixSockets = denyUnixSockets;
+    filterOptions.denyNetwork = !config.allow_network;
+    filterOptions.denyFork = !config.allow_fork;
 
     if (verbose)
+    {
+        std::string also;
+        if (!config.allow_network)
+            also += "Also denied: the network: creating sockets of every family, Unix included (IPv4, IPv6, "
+                    "netlink, packet, vsock and the rest; socketpair stays allowed). macOS denies the network's "
+                    "operations instead, connecting to Unix sockets included.\n";
+        else if (denyUnixSockets)
+            also += "Also denied: creating Unix sockets (socketpair stays allowed), since this "
+                    "kernel's Landlock cannot limit connecting to them.\n";
+        else if (config.deny_unix_sockets)
+            also += "Also denied: connecting to abstract Unix sockets made outside the sandbox.\n";
+        if (!config.allow_fork)
+            also += "Also denied: starting processes (fork, vfork, and clone without CLONE_THREAD; clone3 "
+                    "is unavailable), so no program can be run; threads stay allowed.\n";
         fprintf(stdout, "%s"
                         "Also denied everywhere: extended attribute writes and removals, io_uring, "
                         "and pushing input into a terminal (TIOCSTI, TIOCLINUX).\n%s\n",
-                landlock::Describe(ruleset).c_str(),
-                denyUnixSockets ? "Also denied: creating Unix sockets (socketpair stays allowed), since this "
-                                  "kernel's Landlock cannot limit connecting to them.\n"
-                : config.deny_unix_sockets ? "Also denied: connecting to abstract Unix sockets made outside the "
-                                             "sandbox.\n"
-                : "");
+                landlock::Describe(ruleset).c_str(), also.c_str());
+    }
 
     if (!landlock::Apply(ruleset, allowed_threads, error))
     {
@@ -463,7 +467,7 @@ static bool ApplyLinuxConfig(const Config& config, bool verbose, const std::vect
     }
     // After Landlock, which set no-new-privileges. A failure here leaves the process
     // half sandboxed; the callers exit on false.
-    if (!seccomp::ApplyFilter(denyUnixSockets, error))
+    if (!seccomp::ApplyFilter(filterOptions, error))
     {
         fprintf(stderr, "error: cannot apply the sandbox: %s\n", error.c_str());
         return false;

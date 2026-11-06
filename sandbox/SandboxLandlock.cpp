@@ -245,7 +245,7 @@ bool BuildRules(const Config& config, int abi, RuleSet& out, std::string& error)
     // them; the scope limits connecting to sockets made inside the sandbox. Only when
     // Unix sockets are limited (the MCP server): from ABI 9 it is what keeps a command
     // from, for example, the X server's abstract socket. Below ABI 9 the filter denies
-    // creating Unix sockets anyway. For playlists it belongs with the network (5b).
+    // creating Unix sockets anyway, and with the network denied it does on every ABI.
     if (config.deny_unix_sockets && abi >= 6)
         result.scoped |= kScopeAbstractUnix;
 

@@ -1,8 +1,9 @@
 #!/bin/bash
-# The Linux sandbox's own behavior (private/linux_phase5a_sandbox_design.md), beyond
-# what the shared sandbox suites check on both platforms: denials outside the grants,
-# paths that do not exist yet, hard links, refused options, the --verbose listing, and
-# the documented gaps. Linux only; it reports itself skipped elsewhere.
+# The Linux sandbox's own behavior (private/linux_phase5a_sandbox_design.md, and
+# linux_phase5b_design.md for the network and process creation), beyond what the shared
+# sandbox suites check on both platforms: denials outside the grants, paths that do not
+# exist yet, hard links, refused options, the --verbose listing, the system call filter,
+# the denied network and process creation, and the documented gaps. Linux only; it reports itself skipped elsewhere.
 #
 # Usage: test_sandbox_linux.sh [/path/to/replay]
 # Exit:  0 = all checks passed (or skipped), 1 = a failure, 2 = setup failed
@@ -153,13 +154,6 @@ run_stdin "[execute]	/bin/true" --sandbox-profile "$WORK_DIR/extra_rules.json"
 test "$rc" -ne 0
 check $? "a profile with macOS extra_rules is refused" "$out"
 
-cat > "$WORK_DIR/no_fork.json" << EOF
-{ "read_write": ["$ALLOWED"], "allow_fork": false }
-EOF
-run_stdin "[execute]	/bin/true" --sandbox-profile "$WORK_DIR/no_fork.json"
-test "$rc" -ne 0
-check $? "allow_fork false is refused (not supported on Linux yet)" "$out"
-
 echo ""
 echo "=== 5. the --verbose listing ==="
 run_stdin "[execute]	/bin/true" --verbose --allow-write "$ALLOWED"
@@ -298,7 +292,106 @@ else
 fi
 
 echo ""
-echo "=== 9. documented gaps, pinned ==="
+echo "=== 9. the network denied ==="
+# --deny-network and "allow_network": false: creating a socket of any family fails with
+# EACCES, Unix included on every ABI, as macOS denies connecting to Unix sockets then;
+# socketpair stays allowed.
+NL=$'\n'
+if [ ! -x "$WORK_DIR/probe" ]; then
+    echo "  skipped: no system call probe (section 7)"
+else
+    run_stdin "[execute]	$WORK_DIR/probe	$ALLOWED/probe.txt" --allow-write "$ALLOWED" --allow-read "$WORK_DIR/probe" --deny-network
+    for call in socket-inet socket-inet6 socket-netlink socket-packet socket-vsock; do
+        case "$NL$out$NL" in *"$NL$call EACCES$NL"*) r=0 ;; *) r=1 ;; esac
+        check $r "--deny-network: $call is denied with EACCES" "$out"
+    done
+    case "$NL$out$NL" in *"${NL}socketpair-unix ok$NL"*) r=0 ;; *) r=1 ;; esac
+    check $r "--deny-network: socketpair stays allowed" "$out"
+    case "$NL$out$NL" in *"${NL}socket-unix EACCES$NL"*) r=0 ;; *) r=1 ;; esac
+    check $r "--deny-network: Unix sockets are denied too, on every ABI" "$out"
+    case "$NL$out$NL" in *"${NL}fork ok$NL"*) r=0 ;; *) r=1 ;; esac
+    check $r "--deny-network: processes can still be started" "$out"
+
+    cat > "$WORK_DIR/no_network.json" << EOF2
+{ "read_write": ["$ALLOWED"], "read_only": ["$WORK_DIR/probe"], "allow_network": false }
+EOF2
+    run_stdin "[execute]	$WORK_DIR/probe	$ALLOWED/probe.txt" --sandbox-profile "$WORK_DIR/no_network.json"
+    case "$NL$out$NL" in *"${NL}socket-inet EACCES$NL"*) r=0 ;; *) r=1 ;; esac
+    check $r "\"allow_network\": false in a profile denies the network without --deny-network" "$out"
+fi
+run_stdin "[execute]	/bin/true" --verbose --allow-write "$ALLOWED" --deny-network
+case "$out" in *"Also denied: the network"*) r=0 ;; *) r=1 ;; esac
+check $r "--verbose lists the denied network" "$out"
+
+echo ""
+echo "=== 10. process creation denied ==="
+# "allow_fork": false: no new process (fork, vfork, clone without CLONE_THREAD; clone3 is
+# unavailable), so posix_spawn fails too and no program can be started; threads stay.
+cat > "$WORK_DIR/no_fork.json" << EOF2
+{ "read_write": ["$ALLOWED"], "allow_fork": false }
+EOF2
+: > "$WORK_DIR/creates.txt"
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    printf '[create file]\t%s/nofork-%s.txt\tcontent %s\n' "$ALLOWED" "$i" "$i" >> "$WORK_DIR/creates.txt"
+done
+out="$("$REPLAY" --sandbox-profile "$WORK_DIR/no_fork.json" < "$WORK_DIR/creates.txt" 2>&1)"
+rc=$?
+count="$(/usr/bin/find "$ALLOWED" -maxdepth 1 -name 'nofork-*.txt' | /usr/bin/wc -l | /usr/bin/tr -d ' ')"
+test "$rc" -eq 0 && test "$count" = "20"
+check $? "\"allow_fork\": false: 20 concurrent actions run (threads are allowed)" "rc $rc, $count files; $out"
+run_stdin "[execute]	/bin/true" --sandbox-profile "$WORK_DIR/no_fork.json"
+test "$rc" -ne 0
+check $? "\"allow_fork\": false: an execute action fails" "$out"
+case "$out" in *"posix_spawn(/bin/true): Permission denied"*) r=0 ;; *) r=1 ;; esac
+check $r "the failure is posix_spawn's EACCES (Permission denied)" "$out"
+run_stdin "[create file]	$ALLOWED/verbose-nofork.txt	x" --verbose --sandbox-profile "$WORK_DIR/no_fork.json"
+case "$out" in *"Also denied: starting processes"*) r=0 ;; *) r=1 ;; esac
+check $r "--verbose lists the denied process creation" "$out"
+
+# The filter alone, through a launcher that installs it and then replaces itself with
+# the probe (execv starts no process): the calls that create processes, one by one.
+FILTER_LOG="$WORK_DIR/filter-build.log"
+if [ ! -x "$WORK_DIR/probe" ]; then
+    echo "  skipped: no system call probe (section 7)"
+elif [ ! -x /usr/bin/clang++ ]; then
+    echo "  skipped: no /usr/bin/clang++ to build the filter launcher"
+else
+    /usr/bin/clang++ -std=c++20 -O1 -Wall -Wextra -Werror -o "$WORK_DIR/filter-exec" \
+        "$SCRIPT_DIR/../sandbox/SandboxSeccomp.cpp" "$SCRIPT_DIR/sandbox_filter_exec.cpp" > "$FILTER_LOG" 2>&1
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        check 1 "building the filter launcher" "$(/bin/cat "$FILTER_LOG")"
+    else
+        plain="$("$WORK_DIR/filter-exec" -- "$WORK_DIR/probe" "$ALLOWED/probe.txt" 2>&1)"
+        out="$("$WORK_DIR/filter-exec" --deny-fork -- "$WORK_DIR/probe" "$ALLOWED/probe.txt" 2>&1)"
+        for call in fork vfork posix_spawn; do
+            case "$NL$plain$NL" in *"$NL$call ok$NL"*) r=0 ;; *) r=1 ;; esac
+            check $r "control: $call works under the filter without --deny-fork" "$plain"
+            case "$NL$out$NL" in *"$NL$call EACCES$NL"*) r=0 ;; *) r=1 ;; esac
+            check $r "$call is denied with EACCES" "$out"
+        done
+        # x86_64 only: its own fork system call, which glibc's fork() does not use.
+        case "$NL$plain$NL" in
+            *"${NL}fork-syscall "*)
+                case "$NL$out$NL" in *"${NL}fork-syscall EACCES$NL"*) r=0 ;; *) r=1 ;; esac
+                check $r "the fork system call is denied with EACCES" "$out"
+                ;;
+        esac
+        case "$NL$out$NL" in *"${NL}clone3 ENOSYS$NL"*) r=0 ;; *) r=1 ;; esac
+        check $r "clone3 is unavailable (ENOSYS), so glibc falls back to clone" "$out"
+        # A container's own filter (Docker's) may already answer ENOSYS to clone3.
+        case "$NL$plain$NL" in
+            *"${NL}clone3 ENOSYS$NL"*) echo "  note: clone3 gives ENOSYS without --deny-fork too (the container's filter), so the check above cannot tell whether the filter blocks it" ;;
+        esac
+        case "$NL$out$NL" in *"${NL}thread ok$NL"*) r=0 ;; *) r=1 ;; esac
+        check $r "a thread can still be created" "$out"
+        case "$NL$out$NL" in *"${NL}socket-inet ok$NL"*) r=0 ;; *) r=1 ;; esac
+        check $r "the network stays allowed" "$out"
+    fi
+fi
+
+echo ""
+echo "=== 11. documented gaps, pinned ==="
 /bin/chmod 644 "$OUTSIDE/secret.txt"
 run_stdin "[execute]	/bin/chmod	600	$OUTSIDE/secret.txt" --allow-write "$ALLOWED"
 mode="$(/usr/bin/stat -c %a "$OUTSIDE/secret.txt")"

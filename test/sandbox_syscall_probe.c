@@ -7,6 +7,9 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -14,6 +17,12 @@
 #include <sys/syscall.h>
 #include <sys/xattr.h>
 #include <unistd.h>
+
+#ifndef AF_VSOCK
+#define AF_VSOCK 40
+#endif
+
+extern char **environ;
 
 static const char *name_of(int err)
 {
@@ -29,6 +38,7 @@ static const char *name_of(int err)
         case EBADF: return "EBADF";
         case EFAULT: return "EFAULT";
         case EINVAL: return "EINVAL";
+        case EAFNOSUPPORT: return "EAFNOSUPPORT";
         default: return strerror(err);
     }
 }
@@ -36,6 +46,11 @@ static const char *name_of(int err)
 static void report(const char *what, long result)
 {
     printf("%s %s\n", what, name_of(result < 0 ? errno : 0));
+}
+
+static void *thread_body(void *arg)
+{
+    return arg;
 }
 
 int main(int argc, char **argv)
@@ -87,8 +102,9 @@ int main(int argc, char **argv)
     errno = 0;
     report("TIOCGWINSZ", ioctl(0, TIOCGWINSZ, &ws)); // control: allowed, ENOTTY
 
-    // Unix sockets: denied in MCP server mode on kernels below Landlock ABI 9, allowed
-    // otherwise; socketpair and other address families are always allowed.
+    // Unix sockets: denied in MCP server mode on kernels below Landlock ABI 9 and with the
+    // network denied, allowed otherwise. socketpair is always allowed; other address
+    // families are allowed unless the network is denied.
     errno = 0;
     int s = socket(AF_UNIX, SOCK_STREAM, 0);
     report("socket-unix", s);
@@ -108,5 +124,72 @@ int main(int argc, char **argv)
     report("socket-inet", s);
     if (s >= 0)
         close(s);
+
+    // The other families a denied network also denies. An unfiltered kernel may refuse
+    // some on its own (packet needs CAP_NET_RAW: EPERM; vsock without a hypervisor:
+    // EAFNOSUPPORT); only the filter answers EACCES.
+    static const struct { const char *name; int family; int type; } kFamilies[] = {
+        {"socket-inet6", AF_INET6, SOCK_DGRAM},
+        {"socket-netlink", AF_NETLINK, SOCK_RAW},
+        {"socket-packet", AF_PACKET, SOCK_DGRAM},
+        {"socket-vsock", AF_VSOCK, SOCK_STREAM},
+    };
+    for (size_t i = 0; i < sizeof(kFamilies) / sizeof(kFamilies[0]); i++)
+    {
+        errno = 0;
+        s = socket(kFamilies[i].family, kFamilies[i].type, 0);
+        report(kFamilies[i].name, s);
+        if (s >= 0)
+            close(s);
+    }
+
+    // Process creation: denied with "allow_fork": false, threads stay allowed.
+    pthread_t thread;
+    int threadResult = pthread_create(&thread, NULL, thread_body, NULL);
+    errno = threadResult;
+    report("thread", threadResult == 0 ? 0 : -1);
+    if (threadResult == 0)
+        pthread_join(thread, NULL);
+
+    errno = 0;
+    pid_t child = fork();
+    if (child == 0)
+        _exit(0);
+    report("fork", child);
+    if (child > 0)
+        waitpid(child, NULL, 0);
+
+    char *spawnArgv[] = {"/bin/true", NULL};
+    pid_t spawned = 0;
+    int spawnResult = posix_spawn(&spawned, "/bin/true", NULL, NULL, spawnArgv, environ);
+    errno = spawnResult;
+    report("posix_spawn", spawnResult == 0 ? 0 : -1);
+    if (spawnResult == 0)
+        waitpid(spawned, NULL, 0);
+
+#ifdef SYS_fork
+    // x86_64 has a fork system call of its own, which glibc's fork() does not use (it
+    // calls clone); aarch64 has none.
+    errno = 0;
+    long rawForked = syscall(SYS_fork);
+    if (rawForked == 0)
+        _exit(0);
+    report("fork-syscall", rawForked);
+    if (rawForked > 0)
+        waitpid((pid_t)rawForked, NULL, 0);
+#endif
+
+    errno = 0;
+    pid_t vforked = vfork();
+    if (vforked == 0)
+        _exit(0);
+    report("vfork", vforked);
+    if (vforked > 0)
+        waitpid(vforked, NULL, 0);
+
+    // clone3(args, size) with a null args pointer: an unfiltered kernel answers EFAULT or
+    // EINVAL; the filter answers ENOSYS before the kernel looks.
+    errno = 0;
+    report("clone3", syscall(435, NULL, 0));
     return 0;
 }

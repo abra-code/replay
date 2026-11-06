@@ -380,9 +380,8 @@ echo "--deny-network: curl reports http_code=000 (no connection)"
 echo ""
 # Uses --write-out to capture the result via stdout (bypasses execute action's
 # async exit-code race). $SSL_DIR is added so curl gets past TLS init and reaches
-# the actual network call, which the sandbox then blocks.
-# On Linux, denying the network needs a system call filter that does not exist yet,
-# so replay must refuse the option, with a message, instead of running unconfined.
+# the actual network call, which the sandbox then blocks (on Linux: creating the
+# socket fails with EACCES).
 
 cat > "$WORK_DIR/curl_denied.json" << EOF
 [{
@@ -394,26 +393,13 @@ cat > "$WORK_DIR/curl_denied.json" << EOF
                  "http://example.com"]
 }]
 EOF
-if [ "$HOST_OS" = "Darwin" ]; then
-	output=$("$REPLAY_TOOL" \
-		--allow-write "$WORK_DIR" \
-		--allow-read "$SSL_DIR" \
-		--deny-network \
-		"$WORK_DIR/curl_denied.json" 2>/dev/null)
-	echo "$output" | /usr/bin/grep -qF "http_code=000"
-	verify_succeeded "$?" "network denied: curl reports http_code=000 (got: $output)"
-else
-	output=$("$REPLAY_TOOL" \
-		--allow-write "$WORK_DIR" \
-		--deny-network \
-		"$WORK_DIR/curl_denied.json" 2>&1)
-	status=$?
-	verify_failed "$status" "network denied: Linux refuses --deny-network (exit status $status)"
-	echo "$output" | /usr/bin/grep -qF "not supported on Linux yet"
-	verify_succeeded "$?" "network denied: the refusal says why (got: $output)"
-	echo "$output" | /usr/bin/grep -qF "http_code="
-	verify_failed "$?" "network denied: curl never ran (got: $output)"
-fi
+output=$("$REPLAY_TOOL" \
+	--allow-write "$WORK_DIR" \
+	--allow-read "$SSL_DIR" \
+	--deny-network \
+	"$WORK_DIR/curl_denied.json" 2>/dev/null)
+echo "$output" | /usr/bin/grep -qF "http_code=000"
+verify_succeeded "$?" "network denied: curl reports http_code=000 (got: $output)"
 
 
 # ===========================================================================
@@ -426,21 +412,11 @@ echo ""
 cat > "$WORK_DIR/no_network_profile.json" << EOF2
 { "read_write": ["$WORK_DIR"], "read_only": ["$SSL_DIR"], "allow_network": false }
 EOF2
-if [ "$HOST_OS" = "Darwin" ]; then
-	output=$("$REPLAY_TOOL" \
-		--sandbox-profile "$WORK_DIR/no_network_profile.json" \
-		"$WORK_DIR/curl_denied.json" 2>/dev/null)
-	echo "$output" | /usr/bin/grep -qF "http_code=000"
-	verify_succeeded "$?" "profile network denied: curl reports http_code=000 (got: $output)"
-else
-	output=$("$REPLAY_TOOL" \
-		--sandbox-profile "$WORK_DIR/no_network_profile.json" \
-		"$WORK_DIR/curl_denied.json" 2>&1)
-	status=$?
-	verify_failed "$status" "profile network denied: Linux refuses \"allow_network\": false (exit status $status)"
-	echo "$output" | /usr/bin/grep -qF "not supported on Linux yet"
-	verify_succeeded "$?" "profile network denied: the refusal says why (got: $output)"
-fi
+output=$("$REPLAY_TOOL" \
+	--sandbox-profile "$WORK_DIR/no_network_profile.json" \
+	"$WORK_DIR/curl_denied.json" 2>/dev/null)
+echo "$output" | /usr/bin/grep -qF "http_code=000"
+verify_succeeded "$?" "profile network denied: curl reports http_code=000 (got: $output)"
 
 
 # ===========================================================================

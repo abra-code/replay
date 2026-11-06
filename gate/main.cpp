@@ -87,7 +87,7 @@ static void print_usage(std::ostream& stream)
     stream << "  --allow-read=PATH      Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.\n";
     stream << "  --allow-write=PATH     Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.\n";
     stream << "  --deny-network         With sandbox active, deny outbound network (allowed by default).\n";
-    stream << "                         Not supported on Linux yet.\n";
+    stream << "                         On Linux no socket can be created, Unix ones included (socketpair works).\n";
     stream << "  -v, --verbose          Verbose output\n";
     stream << "  -h, --help             Print this help message\n";
     stream << "  -V, --version          Display version\n";
@@ -117,7 +117,8 @@ static void print_usage(std::ostream& stream)
     stream << "  because dyld must open their framework or library files at startup.\n";
     stream << "\n";
     stream << "  On Linux the baseline grants the system folders (/usr, /etc, /proc and others) in place\n";
-    stream << "  of bsd.sb, extra_rules is refused, and allow_network and allow_fork cannot be false yet.\n";
+    stream << "  of bsd.sb and extra_rules is refused. On both systems allow_fork false also keeps every\n";
+    stream << "  program from starting (no new process); threads still work.\n";
     stream << "  See sandbox/README.md.\n";
     stream << "\n";
 }

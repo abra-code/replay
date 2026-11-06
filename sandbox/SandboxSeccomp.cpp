@@ -14,6 +14,7 @@
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#include <sched.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
@@ -42,6 +43,8 @@ constexpr uint32_t kRemovexattrat = 466;
 constexpr uint32_t kIoUringSetup = 425;
 constexpr uint32_t kIoUringEnter = 426;
 constexpr uint32_t kIoUringRegister = 427;
+// clone3 (Linux 5.3) has the same number everywhere too.
+constexpr uint32_t kClone3 = 435;
 
 // The 32-bit compat entry of each 64-bit architecture: i386 on x86_64, 32-bit Arm on
 // aarch64. Its system call numbers differ from the native ones; for these calls they
@@ -49,6 +52,7 @@ constexpr uint32_t kIoUringRegister = 427;
 constexpr uint32_t kCompatSetxattr = 226, kCompatLsetxattr = 227, kCompatFsetxattr = 228;
 constexpr uint32_t kCompatRemovexattr = 235, kCompatLremovexattr = 236, kCompatFremovexattr = 237;
 constexpr uint32_t kCompatIoctl = 54;
+constexpr uint32_t kCompatFork = 2, kCompatVfork = 190, kCompatClone = 120;
 
 // Creating a socket on the compat entry: a direct socket call (i386 from Linux 4.3,
 // which glibc may not use, and Arm EABI) and, on i386 only, the older socketcall
@@ -90,11 +94,20 @@ constexpr uint32_t kOffsetArg1Low = offsetof(struct seccomp_data, args) + sizeof
 // The checks for one architecture entry, with the system call number in the
 // accumulator: each listed number returns its answer, ioctl looks at its request, and
 // everything else is allowed.
-// A call denied only when the low 32 bits of its first argument have one value.
+// A call that returns `answer` only when the low 32 bits of its first argument match,
+// and is allowed otherwise.
+enum class Match
+{
+    kEqual,     // the argument is `value`
+    kNotEqual,  // the argument is anything but `value`
+    kBitClear,  // the bit `value` is not set in the argument
+};
+
 struct ArgCheck
 {
     uint32_t nr;
-    uint32_t arg0;
+    Match match;
+    uint32_t value;
     uint32_t answer;
 };
 
@@ -120,7 +133,13 @@ std::vector<sock_filter> Section(const std::vector<std::pair<uint32_t, uint32_t>
     {
         code.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, check.nr, 0, 4));     // another call: past the block
         code.push_back(BPF_STMT(BPF_LD | BPF_W | BPF_ABS, kOffsetArg0Low));
-        code.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, check.arg0, 0, 1));   // another value: to the ALLOW
+        // The next two instructions are the answer, then the ALLOW.
+        if (check.match == Match::kEqual)
+            code.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, check.value, 0, 1));   // another value: to the ALLOW
+        else if (check.match == Match::kNotEqual)
+            code.push_back(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, check.value, 1, 0));   // this value: to the ALLOW
+        else
+            code.push_back(BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, check.value, 1, 0));  // bit set: to the ALLOW
         code.push_back(BPF_STMT(BPF_RET | BPF_K, check.answer));
         code.push_back(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW));
     }
@@ -136,40 +155,74 @@ std::vector<sock_filter> Section(const std::vector<std::pair<uint32_t, uint32_t>
     return code;
 }
 
-std::vector<sock_filter> BuildProgram(bool denyUnixSockets)
+std::vector<sock_filter> BuildProgram(const FilterOptions& options)
 {
     const uint32_t deny = Errno(EACCES);
     const uint32_t missing = Errno(ENOSYS);
 
-    // socket(AF_UNIX, ...) gives EACCES, which socket(2) documents as "permission to
-    // create a socket of the specified type is denied". socketpair is not checked: its
-    // stream and seqpacket sockets are connected to each other and reach nothing else,
-    // but a datagram one can still send to (or connect to) any datagram Unix socket,
-    // such as the journal's or /dev/log (a known gap; D-Bus, docker and the agents
-    // listen on stream sockets).
-    std::vector<ArgCheck> nativeChecks;
-    std::vector<ArgCheck> compatChecks;
-    if (denyUnixSockets)
-    {
-        nativeChecks.push_back({__NR_socket, AF_UNIX, deny});
-        compatChecks.push_back({kCompatSocket, AF_UNIX, deny});
-        if (kCompatSocketcall != 0)
-            compatChecks.push_back({kCompatSocketcall, kSysSocket, deny});
-    }
-
-    std::vector<sock_filter> native = Section({
+    std::vector<std::pair<uint32_t, uint32_t>> nativeDenied = {
         {__NR_setxattr, deny}, {__NR_lsetxattr, deny}, {__NR_fsetxattr, deny},
         {__NR_removexattr, deny}, {__NR_lremovexattr, deny}, {__NR_fremovexattr, deny},
         {kSetxattrat, deny}, {kRemovexattrat, deny},
         {kIoUringSetup, missing}, {kIoUringEnter, missing}, {kIoUringRegister, missing},
-    }, nativeChecks, __NR_ioctl, kHasX32);
-
-    std::vector<sock_filter> compat = Section({
+    };
+    std::vector<std::pair<uint32_t, uint32_t>> compatDenied = {
         {kCompatSetxattr, deny}, {kCompatLsetxattr, deny}, {kCompatFsetxattr, deny},
         {kCompatRemovexattr, deny}, {kCompatLremovexattr, deny}, {kCompatFremovexattr, deny},
         {kSetxattrat, deny}, {kRemovexattrat, deny},
         {kIoUringSetup, missing}, {kIoUringEnter, missing}, {kIoUringRegister, missing},
-    }, compatChecks, kCompatIoctl, false);
+    };
+    std::vector<ArgCheck> nativeChecks;
+    std::vector<ArgCheck> compatChecks;
+
+    // socket(): EACCES, which socket(2) documents as "permission to create a socket of
+    // the specified type is denied". socketpair is not checked: on Linux it makes Unix
+    // sockets only; its stream and seqpacket sockets are connected to each other and
+    // reach nothing else, but a datagram one can still send to (or connect to) any
+    // datagram Unix socket, such as the journal's or /dev/log (a known gap; D-Bus,
+    // docker and the agents listen on stream sockets).
+    if (options.denyNetwork && options.denyUnixSockets)
+    {
+        nativeDenied.push_back({__NR_socket, deny});
+        compatDenied.push_back({kCompatSocket, deny});
+    }
+    else if (options.denyNetwork)
+    {
+        nativeChecks.push_back({__NR_socket, Match::kNotEqual, AF_UNIX, deny});
+        compatChecks.push_back({kCompatSocket, Match::kNotEqual, AF_UNIX, deny});
+    }
+    else if (options.denyUnixSockets)
+    {
+        nativeChecks.push_back({__NR_socket, Match::kEqual, AF_UNIX, deny});
+        compatChecks.push_back({kCompatSocket, Match::kEqual, AF_UNIX, deny});
+    }
+    // i386's socketcall hides its socket arguments in memory, so when any family is
+    // denied its SYS_SOCKET operation is denied for every family.
+    if ((options.denyNetwork || options.denyUnixSockets) && (kCompatSocketcall != 0))
+        compatChecks.push_back({kCompatSocketcall, Match::kEqual, kSysSocket, deny});
+
+    // Process creation: a clone that makes a thread (CLONE_THREAD) stays allowed, any
+    // other clone, fork and vfork are denied. clone3 keeps its flags in memory the filter
+    // cannot read, so it is unavailable: glibc then falls back to clone, for threads
+    // (pthread_create, so libdispatch keeps its workers) and for posix_spawn alike.
+    if (options.denyFork)
+    {
+        nativeChecks.push_back({__NR_clone, Match::kBitClear, CLONE_THREAD, deny});
+        nativeDenied.push_back({kClone3, missing});
+#if defined(__NR_fork)
+        nativeDenied.push_back({__NR_fork, deny});
+#endif
+#if defined(__NR_vfork)
+        nativeDenied.push_back({__NR_vfork, deny});
+#endif
+        compatChecks.push_back({kCompatClone, Match::kBitClear, CLONE_THREAD, deny});
+        compatDenied.push_back({kClone3, missing});
+        compatDenied.push_back({kCompatFork, deny});
+        compatDenied.push_back({kCompatVfork, deny});
+    }
+
+    std::vector<sock_filter> native = Section(nativeDenied, nativeChecks, __NR_ioctl, kHasX32);
+    std::vector<sock_filter> compat = Section(compatDenied, compatChecks, kCompatIoctl, false);
 
     // arch == native: the native section; arch == compat: the compat section; any
     // other architecture cannot occur, and is killed rather than allowed.
@@ -188,9 +241,9 @@ static_assert(sizeof(sock_filter) == 8, "unexpected sock_filter layout");
 }  // namespace
 
 
-bool ApplyFilter(bool denyUnixSockets, std::string& error)
+bool ApplyFilter(const FilterOptions& options, std::string& error)
 {
-    std::vector<sock_filter> program = BuildProgram(denyUnixSockets);
+    std::vector<sock_filter> program = BuildProgram(options);
     // Each jump over a section must fit the 8-bit offset; the sections are a few dozen
     // instructions.
     if (program.size() > 250)

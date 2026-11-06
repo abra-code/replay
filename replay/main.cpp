@@ -166,7 +166,7 @@ DisplayHelp(void)
 		"  --allow-read PATH    Allow read-only access to PATH (repeatable). Implicitly enables --sandbox.\n"
 		"  --allow-write PATH   Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.\n"
 		"  --deny-network       With sandbox active, deny outbound network (allowed by default).\n"
-		"                     Not supported on Linux yet.\n"
+		"                     On Linux no socket can be created, Unix ones included (socketpair works).\n"
 		"  --mcp-server       Start an MCP (Model Context Protocol) stdio server.\n"
 		"                     Use --allow-read PATH for read-only dirs and --allow-write PATH for\n"
 		"                     read-write dirs (repeatable). Both flags imply --sandbox. A\n"
@@ -640,7 +640,8 @@ DisplayHelp(void)
 		"  because dyld must open their framework or library files at startup.\n"
 		"\n"
 		"  On Linux the baseline grants the system folders (/usr, /etc, /proc and others) in place\n"
-		"  of bsd.sb, extra_rules is refused, and allow_network and allow_fork cannot be false yet.\n"
+		"  of bsd.sb and extra_rules is refused. On both systems allow_fork false also keeps every\n"
+		"  program from starting (no new process); threads still work.\n"
 		"  See sandbox/README.md.\n"
 		"\n"
 	);
