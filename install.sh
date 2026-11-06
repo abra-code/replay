@@ -10,6 +10,14 @@
 
 set -o pipefail
 
+# On Linux the tools come from a release, through linux/install.sh. This file is sourced, so
+# return, not exit.
+if [ "$(/usr/bin/uname -s)" = "Linux" ]; then
+    echo "On Linux, install a release with:"
+    echo "  /usr/bin/curl -fsSL https://raw.githubusercontent.com/abra-code/replay/refs/heads/master/linux/install.sh | /bin/bash"
+    return 1
+fi
+
 INSTALL_DIR="$HOME/.local/bin"
 /bin/mkdir -p "$INSTALL_DIR"
 BUILD_DIR=""

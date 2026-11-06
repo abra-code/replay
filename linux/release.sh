@@ -20,9 +20,11 @@
 #
 # Checks, for each architecture, each in a fresh container of that architecture (x86_64 ones
 # emulated on Apple silicon), all through linux/release-check-inner.sh:
-#   Ubuntu 24.04, no Swift: the tools with the runtime tarball in the same prefix.
-#   Debian 13 with libswiftlang (Swift 6.0.3, the oldest runtime replay supports).
-#   Fedora 44 with swift-lang-runtime (Swift 6.3.2).
+#   Ubuntu 24.04, no Swift: linux/install.sh as a user without root, with the runtime
+#     tarball (also a second install, the install.sh inside the tarball, --uninstall).
+#   Debian 13 with libswiftlang (Swift 6.0.3, the oldest runtime replay supports):
+#     linux/install.sh as root, which must use the system's runtime.
+#   Fedora 44 with swift-lang-runtime (Swift 6.3.2): the tarball unpacked by the check.
 # Base images are run with --platform, never built: without buildx, Colima's docker build
 # makes an arm64 image whatever --platform says.
 
@@ -52,7 +54,7 @@ while [ $# -gt 0 ]; do
             CHECK=0
             ;;
         -h|--help)
-            /usr/bin/sed -n '2,27p' "$0" | /usr/bin/sed 's/^# \{0,1\}//'
+            /usr/bin/sed -n '2,29p' "$0" | /usr/bin/sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -276,6 +278,7 @@ if [ "$CHECK" -eq 1 ]; then
                 -v "$OUT_DIR:/release:ro" \
                 -v "$LINUX_DIR/release-check-inner.sh:/check/release-check-inner.sh:ro" \
                 -v "$LINUX_DIR/runtime-check-inner.sh:/check/runtime-check-inner.sh:ro" \
+                -v "$LINUX_DIR/install.sh:/check/install.sh:ro" \
                 "$base" /bin/bash /check/release-check-inner.sh "$mode" "$tools" "$runtime"
             status=$?
             if [ "$status" -eq 0 ]; then

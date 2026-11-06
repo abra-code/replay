@@ -18,7 +18,7 @@ interchangeable. Pick by what you are doing.
 | `installer/` | PackageBuilder.app | whatever it is handed | `installer/dist/*.pkg` |
 | `./build-linux.sh` (Linux) | Swift Package Manager | this machine only | `.build-linux/<machine>/<config>` |
 
-`install.sh`, `./build.sh` and `installer/` are for macOS. On Linux, see [On Linux](#on-linux).
+`install.sh`, `./build.sh` and `installer/` are for macOS. On Linux, see [On Linux](#on-linux); `install.sh` there points to `linux/install.sh`.
 
 ### Install from source, in one command
 
@@ -130,15 +130,31 @@ the environment silences them.
 
 A Linux release is two tarballs per architecture, attached to the GitHub
 release beside the macOS `.pkg`:
-- `replay_<version>_linux_<arch>.tar.gz`: the four tools in `bin/`, the license
+- `replay_<version>_linux_<arch>.tar.gz`: the four tools in `bin/`, `install.sh`, the license
   and `BUILD-INFO.txt` (source commit, compiler, what the tools need).
 - `swift-runtime_<swift>_linux_<arch>.tar.gz`: the 14 Swift runtime libraries
   the tools load (about 74 MB unpacked), unchanged, with the Swift and ICU
   (International Components for Unicode) licenses. Only for systems without a
   Swift runtime, such as Ubuntu 24.04.
 
-The same binaries serve every supported distribution. To install by hand into
-a prefix (`~/.local` for one user, `/usr/local` with root):
+The same binaries serve every supported distribution. To install the latest
+release:
+
+```
+/usr/bin/curl -fsSL https://raw.githubusercontent.com/abra-code/replay/refs/heads/master/linux/install.sh | /bin/bash
+```
+
+(or `/usr/bin/wget -qO- <the same URL> | /bin/bash`). It installs into
+`~/.local`, or into `/usr/local` when run as root, and fetches the runtime
+tarball only when the system has no Swift runtime. Pass options after
+`/bin/bash -s --`:
+- `--prefix DIR`, `--version V`;
+- `--from DIR` for tarballs already downloaded;
+- `--with-runtime`, `--no-runtime`, `--uninstall`.
+
+The same `install.sh` is in the tools tarball, so
+`replay_<version>_linux_<arch>/install.sh` installs from an unpacked copy,
+taking the runtime tarball from the folder beside it. By hand, into a prefix:
 
 ```
 tar -xzf replay_<version>_linux_<arch>.tar.gz && mkdir -p ~/.local/bin && cp replay_<version>_linux_<arch>/bin/* ~/.local/bin/
@@ -146,7 +162,8 @@ tar -xzf swift-runtime_<swift>_linux_<arch>.tar.gz --strip-components=1 -C ~/.lo
 ```
 
 The tools then sit in `~/.local/bin` and find the runtime in
-`~/.local/lib/abracode/swift/linux`.
+`~/.local/lib/abracode/swift/linux`. `install.sh` treats tools copied by hand as
+another program's and asks for `--force` once to replace them.
 
 To make a release, on the development Mac with Docker (Colima) and a committed
 tree:

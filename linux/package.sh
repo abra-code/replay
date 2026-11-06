@@ -14,7 +14,7 @@
 # <swift> the toolchain's Swift version:
 #   replay_<version>_linux_<arch>.tar.gz
 #       replay_<version>_linux_<arch>/bin/{replay,dispatch,fingerprint,gate} (debug
-#       information stripped), LICENSE, BUILD-INFO.txt
+#       information stripped), install.sh (linux/install.sh), LICENSE, BUILD-INFO.txt
 #   swift-runtime_<swift>_linux_<arch>.tar.gz
 #       swift-runtime_<swift>_linux_<arch>/lib/abracode/swift/linux/: the Swift runtime
 #       libraries the tools load, unchanged, plus LICENSE-Swift.txt, LICENSE-ICU.txt and
@@ -237,10 +237,15 @@ for tool in replay dispatch fingerprint gate; do
 done
 /bin/cp "$REPO_DIR/LICENSE" "$STAGE/$TOOLS_NAME/LICENSE"
 status=$?
+if [ "$status" -eq 0 ]; then
+    /bin/cp "$LINUX_DIR/install.sh" "$STAGE/$TOOLS_NAME/install.sh"
+    status=$?
+fi
 if [ "$status" -ne 0 ]; then
-    echo "Error: cannot copy $REPO_DIR/LICENSE" >&2
+    echo "Error: cannot copy LICENSE and linux/install.sh into the tools folder" >&2
     exit 1
 fi
+/bin/chmod 755 "$STAGE/$TOOLS_NAME/install.sh"
 OS_NAME_LINE="$(. /etc/os-release && echo "$PRETTY_NAME")"
 GLIBC_LINE="$(/usr/bin/ldd --version 2>&1 | /usr/bin/head -n 1)"
 {
@@ -248,7 +253,9 @@ GLIBC_LINE="$(/usr/bin/ldd --version 2>&1 | /usr/bin/head -n 1)"
     echo "source: $COMMIT"
     echo "built: $(/bin/date -u '+%Y-%m-%d %H:%M UTC') on $OS_NAME_LINE ($GLIBC_LINE)"
     echo "compiler: $SWIFT_VERSION_LINE"
-    echo "needs: glibc 2.39 or newer, and a Swift runtime: the distribution's (libswiftlang on Debian 13 and Ubuntu 26.04, swift-lang-runtime on Fedora), a swift.org toolchain in /usr, or swift-runtime_${SWIFT_VERSION}_linux_$ARCH.tar.gz unpacked into the prefix that holds bin/"
+    echo "needs: glibc 2.39 or newer, and a Swift runtime: the distribution's (libswiftlang on Debian 13 and Ubuntu 26.04, swift-lang-runtime on Fedora), a swift.org toolchain in /usr, or the runtime tarball below unpacked into the prefix that holds bin/"
+    # Read by install.sh.
+    echo "runtime-tarball: swift-runtime_${SWIFT_VERSION}_linux_$ARCH.tar.gz"
 } > "$STAGE/$TOOLS_NAME/BUILD-INFO.txt"
 pack "$TOOLS_NAME"
 status=$?
