@@ -5,12 +5,15 @@
 # linux/x86-check-send.sh puts there; it needs no Homebrew and no administrator rights.
 #
 # Usage: linux/x86-check.sh [--vm NAME] [--cpus N] [--memory GIB] [--disk GIB]
-#                           [--stop | --delete | --keep] [debug|release|both]
+#                           [--stop | --delete | --keep] [--package] [debug|release|both]
 #   --vm      the virtual machine's name (default replay-x86)
 #   --cpus    its CPUs (default: all of the Mac's)
 #   --memory  its memory in GiB (default: half of the Mac's, from 4 to 8)
 #   --disk    its disk in GiB (default 40; used only when the machine is created)
 #   --stop    stop the machine when done (default), --delete delete it, --keep leave it running
+#   --package when every step passed, also pack the x86_64 release tarballs (linux/package.sh)
+#             into the results folder's dist/; copy that folder to the development Mac for
+#             linux/release.sh --x86_64 <folder>. Needs release or both.
 #   debug|release|both   the configurations to build and test (default both)
 #
 # Steps:
@@ -28,7 +31,7 @@
 # The Mac is kept awake while the script runs (caffeinate). On battery a closed lid still
 # makes it sleep: keep it on power.
 #
-# Time: on a dual-core MacBook Air expect two to three hours for the first run (downloads of
+# Time: on a dual-core 2019 MacBook Air the first run took about 10 minutes (downloads of
 # about 2 GB, two builds, four suite runs); later runs skip the downloads, not the builds.
 #
 # Notes:
@@ -48,6 +51,7 @@ MEMORY=""
 DISK="40"
 WHEN_DONE="stop"
 CONFIG="both"
+PACKAGE=0
 GUEST_DIR="/var/tmp/replay-x86"
 
 need_value() {
@@ -96,11 +100,14 @@ while [ $# -gt 0 ]; do
         --keep)
             WHEN_DONE="keep"
             ;;
+        --package)
+            PACKAGE=1
+            ;;
         debug|Debug|release|Release|both)
             CONFIG="$1"
             ;;
         -h|--help)
-            /usr/bin/sed -n '2,38p' "$0" | /usr/bin/sed 's/^# \{0,1\}//'
+            /usr/bin/sed -n '2,41p' "$0" | /usr/bin/sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -114,6 +121,12 @@ done
 case "$VM" in
     ''|*[!A-Za-z0-9-]*)
         echo "Error: --vm takes letters, digits and dashes only" >&2
+        exit 1
+        ;;
+esac
+case "$PACKAGE:$CONFIG" in
+    1:debug|1:Debug)
+        echo "Error: --package packs the release build; run release or both" >&2
         exit 1
         ;;
 esac
@@ -284,10 +297,37 @@ if [ "${copy_status[0]}" -ne 0 ] || [ "${copy_status[1]}" -ne 0 ]; then
 fi
 
 # 4. The tests
-echo "== Running linux/x86-check-guest.sh $CONFIG in the machine"
+GUEST_ARGS=()
+if [ "$PACKAGE" -eq 1 ]; then
+    guest /bin/rm -rf "${GUEST_DIR:?}/dist"
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "Error: cannot remove the last release tarballs, $GUEST_DIR/dist, in the machine (status $status)" >&2
+        exit 1
+    fi
+    GUEST_ARGS+=(--package "$GUEST_DIR/dist")
+fi
+GUEST_ARGS+=("$CONFIG")
+echo "== Running linux/x86-check-guest.sh ${GUEST_ARGS[*]} in the machine"
 # Without a terminal on stdin, so the log gets no carriage returns.
-guest /bin/bash "$GUEST_DIR/src/linux/x86-check-guest.sh" "$CONFIG" < /dev/null
+guest /bin/bash "$GUEST_DIR/src/linux/x86-check-guest.sh" "${GUEST_ARGS[@]}" < /dev/null
 TEST_STATUS=$?
+
+# The release tarballs, out of the machine (only when the guest packed them).
+if [ "$PACKAGE" -eq 1 ] && [ "$TEST_STATUS" -eq 0 ]; then
+    DIST_DIR="$RESULTS_DIR/dist"
+    /bin/mkdir -p "$DIST_DIR"
+    guest /usr/bin/tar -C "$GUEST_DIR/dist" -cf - . | /usr/bin/tar -xf - -C "$DIST_DIR"
+    copy_status=("${PIPESTATUS[@]}")
+    if [ "${copy_status[0]}" -ne 0 ] || [ "${copy_status[1]}" -ne 0 ]; then
+        echo "Error: copying the release tarballs out of the machine failed (in the machine: ${copy_status[0]}, on the Mac: ${copy_status[1]})" >&2
+        TEST_STATUS=1
+    else
+        echo "== Release tarballs for x86_64 in $DIST_DIR:"
+        /bin/ls -l "$DIST_DIR" | /usr/bin/sed 1d
+        echo "== Copy that folder to the development Mac, then run there: linux/release.sh --x86_64 <that folder>"
+    fi
+fi
 
 # 5. Done
 case "$WHEN_DONE" in

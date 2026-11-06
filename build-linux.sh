@@ -19,14 +19,16 @@ SWIFT="${SWIFT:-/usr/bin/swift}"
 # Runtime search list, in order (plan D2). Missing folders are skipped by the loader.
 #   1. Debian and Ubuntu package libswiftlang
 #   2. Swift Docker images, and toolchain tarballs unpacked into /usr
-#   3. our fallback copy, installed by install.sh only when no system runtime exists
-#      (the path is proposed; Phase 6 settles it)
+#   3. our copy of the runtime (linux/package.sh packs it), installed only when no system
+#      runtime exists, into <prefix>/lib/abracode/swift/linux beside the tools in
+#      <prefix>/bin: /usr/local for everyone (needs root), ~/.local for one user. $ORIGIN is the folder
+#      of the executable; the loader expands it (it is ignored in set-user-ID programs).
 # Fedora's swift-lang-runtime installs into /usr/lib64, which the loader searches by
 # default after these.
 RUNTIME_SEARCH_PATHS=(
     "/usr/libexec/swift/lib/swift/linux"
     "/usr/lib/swift/linux"
-    "/opt/abracode/lib/swift/linux"
+    '$ORIGIN/../lib/abracode/swift/linux'
 )
 
 usage() {

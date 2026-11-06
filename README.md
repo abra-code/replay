@@ -86,8 +86,8 @@ nothing itself - it verifies the artifacts it is handed, so `./build.sh` and
 
 The four tools build and run on Linux, on aarch64 and x86_64, from the same
 code. The C++ code uses CoreFoundation and libdispatch as on macOS; on Linux
-they come from the Swift runtime libraries. There are no release packages yet:
-build from a clone.
+they come from the Swift runtime libraries. Release tarballs go on the GitHub
+releases page from the first Linux release on (see [Release](#release)).
 
 ### Requirements
 
@@ -98,11 +98,12 @@ build from a clone.
 - **To run:** a Swift runtime. The tools look for it, in this order, in
   `/usr/libexec/swift/lib/swift/linux` (the `libswiftlang` package of Debian 13
   and Ubuntu 26.04), `/usr/lib/swift/linux` (a swift.org toolchain unpacked into
-  `/usr`, and the Swift container images), and `/opt/abracode/lib/swift/linux`
-  (kept for the runtime copy a future installer will put there).
+  `/usr`, and the Swift container images), and `../lib/abracode/swift/linux`
+  next to the folder that holds the tools (where the runtime tarball of a
+  release goes, see [Release](#release)).
   Fedora's `swift-lang-runtime` package installs into `/usr/lib64`, which the
-  system searches anyway. Ubuntu 24.04 has no runtime package; install the
-  toolchain there. Tools built with Swift 6.2.4 have been tested on runtimes
+  system searches anyway. Ubuntu 24.04 has no runtime package; use the runtime
+  tarball there (or a toolchain). Tools built with Swift 6.2.4 have been tested on runtimes
   6.0.3 (Debian 13), 6.1.3 (Ubuntu 26.04) and 6.3.2 (Fedora 44).
 - **For the sandbox:** Linux 6.2 or newer with Landlock enabled. See
   [sandbox/README.md](sandbox/README.md#linux).
@@ -124,6 +125,49 @@ the Raspberry Pi 5), every tool prints two "swift runtime: unable to protect
 path to swift-backtrace" lines at start. They come from the Swift runtime and
 only mean that Swift's crash backtracer is off. `SWIFT_BACKTRACE=enable=no` in
 the environment silences them.
+
+### Release
+
+A Linux release is two tarballs per architecture, attached to the GitHub
+release beside the macOS `.pkg`:
+- `replay_<version>_linux_<arch>.tar.gz`: the four tools in `bin/`, the license
+  and `BUILD-INFO.txt` (source commit, compiler, what the tools need).
+- `swift-runtime_<swift>_linux_<arch>.tar.gz`: the 14 Swift runtime libraries
+  the tools load (about 74 MB unpacked), unchanged, with the Swift and ICU
+  (International Components for Unicode) licenses. Only for systems without a
+  Swift runtime, such as Ubuntu 24.04.
+
+The same binaries serve every supported distribution. To install by hand into
+a prefix (`~/.local` for one user, `/usr/local` with root):
+
+```
+tar -xzf replay_<version>_linux_<arch>.tar.gz && mkdir -p ~/.local/bin && cp replay_<version>_linux_<arch>/bin/* ~/.local/bin/
+tar -xzf swift-runtime_<swift>_linux_<arch>.tar.gz --strip-components=1 -C ~/.local    # only without a system runtime
+```
+
+The tools then sit in `~/.local/bin` and find the runtime in
+`~/.local/lib/abracode/swift/linux`.
+
+To make a release, on the development Mac with Docker (Colima) and a committed
+tree:
+
+```
+linux/release.sh                          # both architectures, built in the pinned Swift image
+linux/release.sh --x86_64 <folder>        # x86_64 tarballs made on an Intel Mac instead
+```
+
+x86_64 builds emulated on Apple silicon, which is slower. With an Intel Mac at
+hand, `linux/x86-check.sh --package` there builds, tests and packs x86_64 in
+its virtual machine. Copy the `dist` folder it names back to the development
+Mac and pass it to `--x86_64`.
+
+Every tarball is then checked in clean containers of its architecture:
+- Ubuntu 24.04 with no Swift, using the runtime tarball;
+- Debian 13 with `libswiftlang` (Swift 6.0.3, the oldest runtime supported);
+- Fedora 44 with `swift-lang-runtime` (Swift 6.3.2).
+
+The results go to `.build-linux/release/<version>/` with a `SHA256SUMS` file.
+The script prints the `gh release upload` command and does not run it.
 
 ### What differs from macOS
 
@@ -166,6 +210,7 @@ time. The `linux/` folder has the development and test setups:
 - `linux/kernel-check.sh`: the suites on a newer kernel than Docker's, in an
   agent-vm machine.
 - `linux/runtime-check.sh`: the built tools on the Debian and Fedora runtimes.
+- `linux/package.sh` and `linux/release.sh`: the release tarballs (see [Release](#release)).
 - `linux/x86-check.sh`: the build and the suites on x86_64, in a virtual
   machine on an Intel Mac.
 

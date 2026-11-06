@@ -3,7 +3,9 @@
 # guest's user, from the copy of the sources that linux/x86-check.sh puts there. Plan Phase 3
 # (private/linux_port_plan.md): the build and the test suites on x86_64.
 #
-# Usage: linux/x86-check-guest.sh [debug|release|both]   (default both)
+# Usage: linux/x86-check-guest.sh [--package DIR] [debug|release|both]   (default both)
+#   --package DIR  when every step passed, also pack the release build with linux/package.sh
+#                  into DIR (the release tarballs for x86_64; needs release or both)
 #
 # Steps:
 #   1. Installs (once, with sudo) what the Swift toolchain links against, the test tools, and
@@ -35,9 +37,18 @@ PACKAGES=(binutils libc6-dev libcurl4-openssl-dev libedit2 libgcc-13-dev libncur
     zlib1g-dev attr zip curl ca-certificates python3 python3-jsonschema gcc-multilib)
 
 CONFIGS="debug release"
+PACKAGE_DIR=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --package)
+            if [ $# -lt 2 ]; then
+                echo "Error: --package needs a folder" >&2
+                exit 2
+            fi
+            PACKAGE_DIR="$2"
+            shift
+            ;;
         debug|Debug)
             CONFIGS="debug"
             ;;
@@ -48,7 +59,7 @@ while [ $# -gt 0 ]; do
             CONFIGS="debug release"
             ;;
         -h|--help)
-            /usr/bin/sed -n '2,19p' "$0" | /usr/bin/sed 's/^# \{0,1\}//'
+            /usr/bin/sed -n '2,21p' "$0" | /usr/bin/sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -58,6 +69,10 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+if [ -n "$PACKAGE_DIR" ] && [ "$CONFIGS" = "debug" ]; then
+    echo "Error: --package packs the release build; run release or both" >&2
+    exit 2
+fi
 
 LINUX_DIR="$(CDPATH= cd -P -- "$(/usr/bin/dirname -- "$0")" && pwd)"
 REPO_DIR="$(CDPATH= cd -P -- "$LINUX_DIR/.." && pwd)"
@@ -179,7 +194,21 @@ echo ""
 echo "== Summary on $(/usr/bin/uname -r):$results"
 if [ "$failures" -ne 0 ]; then
     echo "== $failures step(s) failed"
+    if [ -n "$PACKAGE_DIR" ]; then
+        echo "== Not packing the release: a step failed"
+    fi
     exit 1
 fi
 echo "== All steps passed"
+
+if [ -n "$PACKAGE_DIR" ]; then
+    echo ""
+    echo "== Packing the release build into $PACKAGE_DIR"
+    "$LINUX_DIR/package.sh" --no-build --out "$PACKAGE_DIR"
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "Error: linux/package.sh failed with status $status" >&2
+        exit 1
+    fi
+fi
 exit 0
