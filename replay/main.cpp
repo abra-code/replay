@@ -128,6 +128,7 @@ DisplayHelp(void)
 		"                     sent by \"dispatch\". If the server is not running for given batch name, the first request to add\n"
 		"                     an action starts \"replay\" in server mode. Therefore starting the server manually is not required\n"
 		"                     but it is possible if needed.\n"
+		"                     The server cannot run sandboxed: the sandbox options are refused with it.\n"
 		"  -l, --stdout PATH  log standard output to provided file path.\n"
 		"  -m, --stderr PATH  log standard error to provided file path.\n"
 		"  --cache            Enable the incremental execution cache: skip actions whose declared inputs,\n"
@@ -942,6 +943,16 @@ int main(int argc, const char * argv[])
 			return EXIT_FAILURE;
 		}
 		sandboxRequested = false;
+	}
+
+	// A sandboxed server does not work: on macOS the sandbox denies registering its message
+	// port, and on Linux the grant it would need (the shared socket folder) would let one
+	// batch's sandboxed actions reach the other batches' servers, which may run unsandboxed.
+	// Refused until it is designed (private/linux_phase4_ipc_design.md, section 5).
+	if(sandboxRequested && !context.batchName.empty())
+	{
+		LogError("error: --start-server cannot run sandboxed: leave out --sandbox, --sandbox-profile, --allow-read, --allow-write and --deny-network\n");
+		return EXIT_FAILURE;
 	}
 
 	// The cache needs a complete dependency graph and a playlist file to key its

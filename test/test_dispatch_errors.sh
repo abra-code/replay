@@ -5,6 +5,7 @@
 #   - wait on a non-existent batch (warning + non-zero exit)
 #   - invalid action name
 #   - per-action missing-argument validation for every action type
+#   - replay --start-server refuses the sandbox options
 
 set -uo pipefail
 
@@ -233,6 +234,22 @@ fi
 
 # Clean up: send wait so the server shuts down before we delete the temp dir
 "$DISPATCH" "$BATCH" wait 2>/dev/null || true
+
+# ============================================================
+echo "=== the server cannot run sandboxed ==="
+
+# Each sandbox option is refused with --start-server, before any port is created.
+n=22
+for opt in "--sandbox" "--allow-read=$TEST_DIR" "--allow-write=$TEST_DIR" "--deny-network"; do
+    output=$("$REPLAY" --start-server "sandboxed-$$" "$opt" < /dev/null 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ] && echo "$output" | /usr/bin/grep -q "cannot run sandboxed"; then
+        pass "$n. --start-server with $opt is refused"
+    else
+        fail "$n. --start-server with $opt should be refused (got $rc: $output)"
+    fi
+    n=$((n + 1))
+done
 
 # ============================================================
 echo ""

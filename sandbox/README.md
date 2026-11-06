@@ -43,6 +43,8 @@ replay --sandbox --allow-write ~/project/build --deny-network actions.json
 
 All flags may be repeated. At least one sandbox flag must be present to activate the sandbox — without any flags the process runs unsandboxed.
 
+`replay --start-server` (the server `dispatch` talks to) cannot run sandboxed, on macOS or Linux: the sandbox flags are refused with it. On macOS the sandbox denies registering its message port; on Linux the grant it would need, the shared socket folder, would let the sandboxed actions of one batch reach the servers of other batches.
+
 **Auto-sandboxing for `replay`**: When `--sandbox` is used with a playlist file (not stdin), `replay` automatically extracts declared paths from the playlist and adds them to the sandbox policy. Read operations (read, list, tree, glob, clone source) are added as read-only — **at the file or directory referenced**, not its parent — so a `read /etc/passwd` action does not unlock all of `/etc`. Write operations (create, edit, delete, clone destination, execute outputs) need parent-directory access for atomic-replace and creation, and so are added as read-write **on the parent directory**. The filesystem root `/` is rejected with a warning if any auto-discovered or `--allow-*` path resolves to it. You can still combine `--sandbox` with `--allow-read`, `--allow-write`, and `--sandbox-profile` to add additional paths.
 
 ---
@@ -431,7 +433,7 @@ From Landlock version 9, a Unix socket with a path can be connected to only insi
 
 Below version 9 the kernel does not check connecting to a Unix socket by path, so a sandboxed command can reach any socket its user may open. Through the D-Bus session bus that is a complete way out (`systemd-run --user` starts a program outside the sandbox). Therefore:
 - **MCP server mode** (`--mcp-server`, where an AI agent chooses the commands): creating a Unix socket fails with EACCES. `socketpair` and other kinds of sockets still work. Commands that talk to a local service fail: ssh-agent, gpg-agent, the docker command, D-Bus clients; `syslog(3)` messages are lost; user and group names known only through SSSD, winbind or systemd's user database do not resolve (`id`, `whoami`, `~user`). From version 6 the MCP server also limits abstract Unix sockets (which have no path) to those made inside the sandbox.
-- **Playlists**, whose commands the user wrote, keep Unix sockets. On those kernels a playlist's commands can reach the services above.
+- **Playlists**, whose commands the user wrote, keep Unix sockets. On those kernels a playlist's commands can reach the services above, and the socket of a running `replay` server, which runs the actions `dispatch` sends it outside the sandbox.
 - A datagram `socketpair` can still send to datagram sockets with a path, such as the system log's (`/dev/log`, the journal), on any version.
 
 ### Not supported on Linux yet

@@ -143,6 +143,7 @@ Options:
                      sent by "dispatch". If the server is not running for given batch name, the first request to add
                      an action starts "replay" in server mode. Therefore starting the server manually is not required
                      but it is possible if needed.
+                     The server cannot run sandboxed: the sandbox options are refused with it.
   -l, --stdout PATH  log standard output to provided file path.
   -m, --stderr PATH  log standard error to provided file path.
   --cache            Enable the incremental execution cache: skip actions whose declared inputs,
@@ -668,6 +669,11 @@ explicitly with "start" action and provide parameters to forward to "replay", fo
 
 Subsequent use of "start" action for the same batch name will not restart the server
 but a warning will be printed about already running server instance.
+The server cannot run sandboxed: "start" with --sandbox, --allow-read, --allow-write,
+--sandbox-profile or --deny-network fails.
+On Linux "dispatch" reaches the server through a Unix socket in $XDG_RUNTIME_DIR/replay,
+or in /tmp/replay-<uid> when that variable does not name a folder you own, so both must run
+as the same user with the same XDG_RUNTIME_DIR.
 
 Supported actions are the same as "replay" actions plus a couple of special control words:
 
