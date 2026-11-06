@@ -1,16 +1,21 @@
 //
 //  IpcPort.cpp
 //
-//  The macOS backend of ipc::Port: CFMessagePort, unchanged in behavior from the code
-//  it replaces (private/linux_phase4_ipc_design.md, section 3). On Linux there is no
-//  backend yet: CreateLocal and CreateRemote return null.
+//  ipc::Port's factories and its macOS backend, CFMessagePort, unchanged in behavior
+//  from the code it replaced (private/linux_phase4_ipc_design.md, section 3). Linux uses
+//  the Unix domain socket backend (IpcPortSocket.cpp); macOS uses it too when
+//  REPLAY_IPC_BACKEND=socket, so the test suites can run it on a Mac.
 //
 
 #include "IpcPort.h"
+#include "IpcPortInternal.h"
+
+#include <utility>
 
 #if defined(__APPLE__)
 #include <CoreFoundation/CFMessagePort.h>
-#include <utility>
+#include <cstdlib>
+#include <cstring>
 #endif
 
 namespace ipc
@@ -22,6 +27,7 @@ static_assert(kSendTimeout == (int32_t)kCFMessagePortSendTimeout, "status number
 static_assert(kReceiveTimeout == (int32_t)kCFMessagePortReceiveTimeout, "status numbers follow CFMessagePort");
 static_assert(kInvalid == (int32_t)kCFMessagePortIsInvalid, "status numbers follow CFMessagePort");
 static_assert(kTransportError == (int32_t)kCFMessagePortTransportError, "status numbers follow CFMessagePort");
+static_assert(kBecameInvalid == (int32_t)kCFMessagePortBecameInvalidError, "status numbers follow CFMessagePort");
 
 namespace
 {
@@ -107,10 +113,8 @@ private:
 	Handler mHandler;
 };
 
-} // namespace
-
 std::unique_ptr<Port>
-Port::CreateLocal(const std::string &name, Handler handler)
+CreateMessagePortLocal(const std::string &name, Handler handler)
 {
 	CFObj<CFStringRef> cfName = CreateCFName(name);
 	if (cfName == nullptr)
@@ -131,7 +135,7 @@ Port::CreateLocal(const std::string &name, Handler handler)
 }
 
 std::unique_ptr<Port>
-Port::CreateRemote(const std::string &name)
+CreateMessagePortRemote(const std::string &name)
 {
 	CFObj<CFStringRef> cfName = CreateCFName(name);
 	if (cfName == nullptr)
@@ -144,20 +148,35 @@ Port::CreateRemote(const std::string &name)
 	return result;
 }
 
-#else // no backend yet (Linux before the socket backend)
-
-std::unique_ptr<Port>
-Port::CreateLocal(const std::string &, Handler)
+bool
+UseSocketBackend()
 {
-	return nullptr;
+	const char *backend = getenv("REPLAY_IPC_BACKEND");
+	return (backend != nullptr) && (strcmp(backend, "socket") == 0);
 }
 
-std::unique_ptr<Port>
-Port::CreateRemote(const std::string &)
-{
-	return nullptr;
-}
+} // namespace
 
+#endif // __APPLE__
+
+std::unique_ptr<Port>
+Port::CreateLocal(const std::string &name, Handler handler)
+{
+#if defined(__APPLE__)
+	if (!UseSocketBackend())
+		return CreateMessagePortLocal(name, std::move(handler));
 #endif
+	return detail::CreateSocketLocal(name, std::move(handler));
+}
+
+std::unique_ptr<Port>
+Port::CreateRemote(const std::string &name)
+{
+#if defined(__APPLE__)
+	if (!UseSocketBackend())
+		return CreateMessagePortRemote(name);
+#endif
+	return detail::CreateSocketRemote(name);
+}
 
 } // namespace ipc

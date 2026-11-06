@@ -11,6 +11,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if defined(__linux__)
+#include <errno.h>
+#include <signal.h>
+#include <sys/syscall.h>
+#endif
+
 #include <string>
 #include <string_view>
 #include <vector>
@@ -104,12 +110,71 @@ StartProcessExitMonitoring(int pid)
 			dispatch_source_cancel(source);
 			CFRunLoopStop(CFRunLoopGetCurrent());
 		});
+		// The reference from dispatch_source_create keeps the source alive until it is
+		// canceled: releasing it right after dispatch_resume freed the source, so it never
+		// fired and "wait" hung when the server died without its callback.
+		dispatch_source_set_cancel_handler(source, ^{
+			dispatch_release(source);
+		});
 		dispatch_resume(source);
-		// GCD retains internally while pending — safe to release our reference
-		dispatch_release(source);
 	}
 #else
-	(void)pid; // Phase 1 stub: Linux libdispatch has no DISPATCH_SOURCE_TYPE_PROC (Phase 4)
+	// Linux libdispatch has no DISPATCH_SOURCE_TYPE_PROC. A pidfd (Linux 5.3) becomes
+	// readable when the process exits; a read source on it on the main queue, which
+	// CFRunLoopRun drains, keeps the structure of the macOS code above, including keeping
+	// the source's reference until it is canceled.
+#if defined(SYS_pidfd_open)
+	int pidfd = (int)syscall(SYS_pidfd_open, (pid_t)pid, 0); // close-on-exec is set by the kernel
+#else
+	int pidfd = -1; // built with kernel headers older than Linux 5.3
+	errno = ENOSYS;
+#endif
+	if (pidfd >= 0)
+	{
+		dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, (uintptr_t)pidfd, 0,
+			dispatch_get_main_queue());
+		if (source != nullptr)
+		{
+			dispatch_source_set_event_handler(source, ^{
+				dispatch_source_cancel(source);
+				CFRunLoopStop(CFRunLoopGetCurrent());
+			});
+			dispatch_source_set_cancel_handler(source, ^{
+				close(pidfd);
+				dispatch_release(source);
+			});
+			dispatch_resume(source);
+			return;
+		}
+		close(pidfd);
+	}
+	else if (errno == ESRCH)
+	{ // already gone: stop once the run loop runs, as the macOS source does in this race
+		dispatch_async(dispatch_get_main_queue(), ^{
+			CFRunLoopStop(CFRunLoopGetCurrent());
+		});
+		return;
+	}
+
+	// No pidfd (a kernel before 5.3, or a system call filter that refuses it): check every
+	// half second whether the process still exists.
+	dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+	if (timer != nullptr)
+	{
+		dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
+			500 * NSEC_PER_MSEC, 100 * NSEC_PER_MSEC);
+		dispatch_source_set_event_handler(timer, ^{
+			if ((kill((pid_t)pid, 0) != 0) && (errno == ESRCH))
+			{
+				dispatch_source_cancel(timer);
+				CFRunLoopStop(CFRunLoopGetCurrent());
+			}
+		});
+		dispatch_source_set_cancel_handler(timer, ^{
+			dispatch_release(timer);
+		});
+		dispatch_resume(timer);
+	}
 #endif
 }
 
@@ -763,7 +828,7 @@ int main(int argc, const char *argv[])
 		if ((replyPlist != nullptr) && CFType<CFDictionaryRef>::DynamicCast(replyPlist, replyDict))
 		{
 			CFDict replayReply(replyDict);
-			// lastError extracted but unused — match original behavior
+			// lastError extracted but unused - match original behavior
 			int64_t pid64 = 0;
 			if (replayReply.GetValue(CFSTR("pid"), pid64))
 				replayPID = (int)pid64;

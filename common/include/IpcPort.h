@@ -2,9 +2,9 @@
 //  IpcPort.h
 //
 //  A named port for requests between dispatch and the replay server
-//  (private/linux_phase4_ipc_design.md). On macOS it wraps CFMessagePort; on Linux
-//  it has no backend yet, so no port can be created or reached and dispatch reports
-//  that the server is not running.
+//  (private/linux_phase4_ipc_design.md). On macOS it wraps CFMessagePort; on Linux,
+//  and on macOS when REPLAY_IPC_BACKEND=socket (for tests), it uses a Unix domain
+//  socket (common/IpcPortSocket.cpp).
 //
 //  Names and status numbers are CFMessagePort's, so the error numbers the tools print
 //  do not change on macOS.
@@ -29,6 +29,7 @@ enum Status : int32_t
 	kReceiveTimeout = -2,
 	kInvalid = -3,
 	kTransportError = -4,
+	kBecameInvalid = -5, // the server went away while a reply was awaited
 };
 
 // Called on the thread whose run loop the port was added to, one request at a time.

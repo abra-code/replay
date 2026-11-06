@@ -27,11 +27,6 @@ if [ "$HOST_OS" = "Linux" ]; then
     # start. They land in output the suites compare. Turning the backtracer off stops
     # them; it only affects crash reports. A value set by the caller is kept.
     export SWIFT_BACKTRACE="${SWIFT_BACKTRACE:-enable=no}"
-
-    # Sections of otherwise passing suites that cannot pass on Linux yet. Each suite
-    # skips its section when the variable is set and prints the reason, which names
-    # the plan phase (private/linux_port_plan.md) that removes it.
-    export REPLAY_TEST_SKIP_IPC="IPC between dispatch and replay is not ported to Linux (Phase 4)"
 fi
 
 # Whole suites that cannot pass on Linux yet, with the reason and the plan phase
@@ -39,8 +34,6 @@ fi
 # that runs.
 linux_skip_reason() {
     case "$1" in
-        test_dispatch.sh)
-            echo "IPC between dispatch and replay is not ported (Phase 4)" ;;
         test_sandbox_discover.py)
             echo "sandbox-discover.py is macOS only (later, not in the plan)" ;;
     esac
@@ -99,6 +92,7 @@ run_suite "$SCRIPT_DIR/test_replay_sandbox.sh"     "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_auto_sandbox.sh" "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_dispatch.sh"           "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_dispatch_errors.sh"    "$BUILD_DIR/replay"
+run_suite "$SCRIPT_DIR/test_ipc_socket.py"        "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_mcp_server.py"         "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_errors.py"      "$BUILD_DIR/replay"
 run_suite "$SCRIPT_DIR/test_replay_stress_playlist.py" "$BUILD_DIR/replay"

@@ -291,9 +291,7 @@ echo "------------------------------"
 echo "dispatch list"
 echo ""
 
-if test -n "${REPLAY_TEST_SKIP_IPC:-}"; then
-	echo "skipping dispatch tests: $REPLAY_TEST_SKIP_IPC"
-elif test -f "$DISPATCH"; then
+if test -f "$DISPATCH"; then
 	"$REPLAY_TOOL" --start-server listtreetest1 > "$WORK_DIR/dispatch_list_out.txt" &
 	sleep 0.3
 
@@ -318,9 +316,7 @@ echo "------------------------------"
 echo "dispatch tree"
 echo ""
 
-if test -n "${REPLAY_TEST_SKIP_IPC:-}"; then
-	echo "skipping dispatch tests: $REPLAY_TEST_SKIP_IPC"
-elif test -f "$DISPATCH"; then
+if test -f "$DISPATCH"; then
 	"$REPLAY_TOOL" --start-server listtreetest2 > "$WORK_DIR/dispatch_tree_out.txt" &
 	sleep 0.3
 
@@ -345,9 +341,7 @@ echo "------------------------------"
 echo "dispatch tree with depth"
 echo ""
 
-if test -n "${REPLAY_TEST_SKIP_IPC:-}"; then
-	echo "skipping dispatch tests: $REPLAY_TEST_SKIP_IPC"
-elif test -f "$DISPATCH"; then
+if test -f "$DISPATCH"; then
 	"$REPLAY_TOOL" --start-server listtreetest3 > "$WORK_DIR/dispatch_tree_depth_out.txt" &
 	sleep 0.3
 
