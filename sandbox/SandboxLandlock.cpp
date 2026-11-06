@@ -11,6 +11,7 @@
 #include "FileHelpers.h"
 #include "Platform.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -168,6 +169,52 @@ void AddDeduplicated(std::vector<std::string> paths, uint64_t dirAccess, uint64_
             continue;
         rules.push_back({path, access, isDir, why});
     }
+}
+
+// What the links directly in /etc point to (design section 5). Landlock judges the
+// resolved path, so a link whose target lies outside the other rules leaves that /etc
+// entry unreadable. The usual case: /etc/resolv.conf links into /run on systems with
+// systemd-resolved (Ubuntu, Fedora), NetworkManager or resolvconf, and without its
+// target a sandboxed program cannot look up host names. A target file under /run is
+// granted with its folder (not /run itself, nor a folder in /run/user): those services
+// replace the file with a new one, and a rule binds to the file's inode at the time it
+// is added. Any other target is granted alone. Never granted this way: "/", the
+// folders TooBroadToGrantInstead names, and a folder that is in /run/user or holds it.
+std::vector<std::string> EtcLinkTargets()
+{
+    std::vector<std::string> targets;
+    DIR *etc = opendir("/etc");
+    if (etc == nullptr)
+        return targets;
+    struct dirent *entry;
+    while ((entry = readdir(etc)) != nullptr)
+    {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+        std::string link = std::string("/etc/") + entry->d_name;
+        struct stat st;
+        if (lstat(link.c_str(), &st) != 0 || !S_ISLNK(st.st_mode))
+            continue;
+        char resolved[PATH_MAX];
+        if (realpath(link.c_str(), resolved) == nullptr || stat(resolved, &st) != 0)
+            continue; // dangling: nothing to read
+        std::string target = resolved;
+        if (target == "/" || TooBroadToGrantInstead(target))
+            continue;
+        // Not a folder in /run/user, nor one holding it: those are the users' own
+        // runtime folders, and hold credentials (for example containers/auth.json).
+        if (S_ISDIR(st.st_mode) && (IsUnder(target, "/run/user") || IsUnder("/run/user", target)))
+            continue;
+        if (!S_ISDIR(st.st_mode))
+        {
+            std::string dir = ParentOf(target);
+            if (dir != "/run" && IsUnder(dir, "/run") && !IsUnder(dir, "/run/user") && !TooBroadToGrantInstead(dir))
+                target = dir;
+        }
+        targets.push_back(target);
+    }
+    closedir(etc);
+    return targets;
 }
 
 // Folders of the shared libraries this process has mapped (from /proc/self/maps)
@@ -329,6 +376,8 @@ bool BuildRules(const Config& config, int abi, RuleSet& out, std::string& error)
         for (const auto& dir : MappedLibraryDirs())
             baseline.push_back(dir);
         AddDeduplicated(baseline, kReadOnlyDir, kReadOnlyFile, "baseline", result.rules);
+        // After the folders above, so that a link into /usr or /proc adds no rule.
+        AddDeduplicated(EtcLinkTargets(), kReadOnlyDir, kReadOnlyFile, "baseline: a link in /etc", result.rules);
 
         std::vector<std::string> devices;
         for (const char *device : kBaselineDevices)

@@ -168,6 +168,38 @@ case "$out" in *"  execute: /  [allow_exec]"*) r=0 ;; *) r=1 ;; esac
 check $r "it lists program execution" "$out"
 case "$out" in *"Not covered by the sandbox:"*) r=0 ;; *) r=1 ;; esac
 check $r "it lists the gaps" "$out"
+LISTING="$out"
+
+# /etc/resolv.conf is a link into /run on systems with systemd-resolved (Ubuntu, Fedora),
+# NetworkManager or resolvconf; Landlock judges the link's target, so the baseline grants
+# targets of links in /etc. Docker writes a plain file there, so the link case runs only
+# on such a system (the x86_64 machine of linux/x86-check.sh is one).
+RESOLV_PLAIN=""
+if [ -e /etc/resolv.conf ]; then
+    RESOLV_PLAIN="$(/bin/cat /etc/resolv.conf 2>/dev/null)"
+fi
+# Empty content (or a failed read) would match any output, so the check needs some.
+if [ -n "$RESOLV_PLAIN" ]; then
+    run_stdin "[execute]	/bin/cat	/etc/resolv.conf" --allow-write "$ALLOWED"
+    case "$out" in *"$RESOLV_PLAIN"*) r=0 ;; *) r=1 ;; esac
+    check $r "a sandboxed program reads /etc/resolv.conf (host name lookups need it)" "$out"
+    RESOLV_TARGET=""
+    if [ -L /etc/resolv.conf ]; then
+        RESOLV_TARGET="$(/usr/bin/readlink -f /etc/resolv.conf)"
+    fi
+    case "$RESOLV_TARGET" in
+        "" | /etc/* | /usr/* | /proc/*)
+            echo "  SKIP: /etc/resolv.conf is not a link out of the baseline folders here"
+            ;;
+        *)
+            RESOLV_TARGET_DIR="$(/usr/bin/dirname "$RESOLV_TARGET")"
+            case "$LISTING" in *"  read-only: $RESOLV_TARGET_DIR  [baseline: a link in /etc]"*|*"  read-only: $RESOLV_TARGET  [baseline: a link in /etc]"*) r=0 ;; *) r=1 ;; esac
+            check $r "the listing names the target of the /etc/resolv.conf link ($RESOLV_TARGET)" "$LISTING"
+            ;;
+    esac
+else
+    echo "  SKIP: no readable, non-empty /etc/resolv.conf here"
+fi
 
 echo ""
 echo "=== 6. running programs ==="
