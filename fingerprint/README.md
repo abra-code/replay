@@ -99,4 +99,6 @@ When `--xattr=on` (default), fingerprints are stored in extended attributes:
 - `public.fingerprint.crc32c` for CRC32C
 - `public.fingerprint.blake3` for BLAKE3
 
+On Linux the names are in the `user.` namespace: `user.public.fingerprint.crc32c` and `user.public.fingerprint.blake3`.
+
 On subsequent runs, cached values are used if file inode, size, and mtime are unchanged. This significantly speeds up repeated fingerprinting.

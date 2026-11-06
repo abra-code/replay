@@ -1,5 +1,5 @@
 # replay tools
-'replay' repository contains 4 tools:
+'replay' repository contains 4 tools, for macOS and for Linux (aarch64 and x86_64; see [On Linux](#on-linux)):
 - replay: execute a list of declared actions or run as stdio [mcp server](mcp_tool_schemas.md) with hard [sandbox](sandbox/README.md)
 - dispatch: companion tool for 'replay'
 - fingerprint: calculate deep directory hash - [readme](fingerprint/README.md)
@@ -16,6 +16,9 @@ interchangeable. Pick by what you are doing.
 | `swift build -c release` | Swift Package Manager | this machine only | `.build/release` |
 | `./build.sh` | xcodebuild | universal for Release | `build/Release` |
 | `installer/` | PackageBuilder.app | whatever it is handed | `installer/dist/*.pkg` |
+| `./build-linux.sh` (Linux) | Swift Package Manager | this machine only | `.build-linux/<machine>/<config>` |
+
+`install.sh`, `./build.sh` and `installer/` are for macOS. On Linux, see [On Linux](#on-linux).
 
 ### Install from source, in one command
 
@@ -79,8 +82,97 @@ will package anything.
 nothing itself - it verifies the artifacts it is handed, so `./build.sh` and
 `./codesign.sh <identity>` come first. See `installer/README.md`.
 
+## On Linux
+
+The four tools build and run on Linux, on aarch64 and x86_64, from the same
+code. The C++ code uses CoreFoundation and libdispatch as on macOS; on Linux
+they come from the Swift runtime libraries. There are no release packages yet:
+build from a clone.
+
+### Requirements
+
+- **Distribution:** glibc 2.39 or newer. Ubuntu 24.04 and later, Debian 13,
+  current Fedora, RHEL 10 and its rebuilds. Not Alpine (musl).
+- **To build:** the swift.org Swift toolchain of the release named in
+  `linux/swift-image` (6.2.4 today).
+- **To run:** a Swift runtime. The tools look for it, in this order, in
+  `/usr/libexec/swift/lib/swift/linux` (the `libswiftlang` package of Debian 13
+  and Ubuntu 26.04), `/usr/lib/swift/linux` (a swift.org toolchain unpacked into
+  `/usr`, and the Swift container images), and `/opt/abracode/lib/swift/linux`
+  (kept for the runtime copy a future installer will put there).
+  Fedora's `swift-lang-runtime` package installs into `/usr/lib64`, which the
+  system searches anyway. Ubuntu 24.04 has no runtime package; install the
+  toolchain there. Tools built with Swift 6.2.4 have been tested on runtimes
+  6.0.3 (Debian 13), 6.1.3 (Ubuntu 26.04) and 6.3.2 (Fedora 44).
+- **For the sandbox:** Linux 6.2 or newer with Landlock enabled. See
+  [sandbox/README.md](sandbox/README.md#linux).
+
+### Build
+
+```
+./build-linux.sh                # debug, into .build-linux/<machine>/debug
+./build-linux.sh release        # release, into .build-linux/<machine>/release
+./build-linux.sh --help         # the other options
+```
+
+The script prints where the products went and the runtime search list built
+into them. Copy `replay`, `dispatch`, `fingerprint` and `gate` to a folder on
+`PATH`.
+
+On kernels with 16 KiB or 64 KiB memory pages (some aarch64 machines, such as
+the Raspberry Pi 5), every tool prints two "swift runtime: unable to protect
+path to swift-backtrace" lines at start. They come from the Swift runtime and
+only mean that Swift's crash backtracer is off. `SWIFT_BACKTRACE=enable=no` in
+the environment silences them.
+
+### What differs from macOS
+
+The help texts below say where Linux behaves differently; in short:
+- **Sandbox:** Landlock with a system call filter instead of Seatbelt. A denied
+  operation fails with EACCES (sometimes EXDEV) instead of EPERM, with other
+  error text. File metadata (`stat`, `chmod`, `chown`, timestamps) is not
+  covered. Extended attribute writes are denied to everything under the
+  sandbox, so a sandboxed replay writes no fingerprint memos. Programs that
+  set user or group IDs lose those privileges. Details in
+  [sandbox/README.md](sandbox/README.md#linux).
+- **Extended attribute names** are in the `user.` namespace:
+  `user.public.fingerprint.crc32c`, `user.public.fingerprint.blake3` and
+  `user.public.replay.store-crc32c`.
+- **Paths are compared ignoring ASCII case,** as on macOS, also on
+  case-sensitive file systems. Two names that differ only in case may then be
+  ordered one after another when they need not be; the result is the same.
+- **`clone`** is copy-on-write on btrfs, XFS and bcachefs, and a full copy
+  elsewhere. Otherwise it behaves like macOS's copyfile, except:
+  - a read-only subfolder is copied (copyfile fails with EACCES);
+  - a folder copied into itself fails at once with EINVAL;
+  - set-user-ID and set-group-ID bits are dropped when the owner cannot be
+    copied;
+  - a file copied onto a symlink to itself fails with EEXIST.
+- **Creation time** (the `info` action and the MCP server's `get_file_info`)
+  comes from `statx`. On file systems that do not record it, the inode change
+  time stands in.
+- **`--max-tasks 0`** (the default) means at most 64 actions at once, the
+  limit macOS has for blocking actions.
+- **`dispatch`** reaches `replay --start-server` through a Unix socket in
+  `$XDG_RUNTIME_DIR/replay` (or `/tmp/replay-<uid>`), so both must run as the
+  same user with the same `XDG_RUNTIME_DIR`.
+
+For contributors: a `CFSTR` constant with non-ASCII text has the wrong length
+on Linux (it counts UTF-8 bytes), so non-ASCII strings must be created at run
+time. The `linux/` folder has the development and test setups:
+- `linux/docker.sh`: a container with the pinned toolchain and this
+  repository at `/src`.
+- `linux/agent-vm.sh`: an agent-vm virtual machine.
+- `linux/kernel-check.sh`: the suites on a newer kernel than Docker's, in an
+  agent-vm machine.
+- `linux/runtime-check.sh`: the built tools on the Debian and Fedora runtimes.
+- `linux/x86-check.sh`: the build and the suites on x86_64, in a virtual
+  machine on an Intel Mac.
+
+`test/test_all.sh <build folder>` runs the suites on either platform.
+
 # replay
-A macOS tool to execute a list of declared actions.  
+A macOS and Linux tool to execute a list of declared actions.  
 
 Key features:
 - declared actions (aka playlist) with automatic dependency detection
@@ -89,8 +181,8 @@ Key features:
 - concurrent operations for fastest execution
 - serial operations if sequence is required
 - designed to improve performance of shell scripts running a series of slow tasks, which underutilize the CPU, storage or network resources
-- self contained fast C++ code - no external library or runtime dependencies; not calling external tools to perform file operations
-- supports cloning on APFS so duplicates don't take unnecessary space on disk
+- self contained fast C++ code - no external library or runtime dependencies beyond the system's (on Linux, the Swift runtime libraries); not calling external tools to perform file operations
+- supports cloning on APFS (and on Linux on btrfs, XFS and bcachefs) so duplicates don't take unnecessary space on disk
 - companion "dispatch" tool helps with ad hoc task distribution without the need to create a playlist
   
 Supported actions include:
