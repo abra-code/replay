@@ -58,6 +58,12 @@ let package = Package(
             path: "common",
             cxxSettings: [
                 .unsafeFlags(["-std=c++20"]),
+            ],
+            linkerSettings: [
+                // The math library is separate from the C library on Linux: std::ceil
+                // (IpcPortSocket.cpp) is a call into it on x86_64, while aarch64 has an
+                // instruction for it, so only the x86_64 link failed without this.
+                .linkedLibrary("m", .when(platforms: [.linux])),
             ]
         ),
 
