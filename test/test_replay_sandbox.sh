@@ -418,6 +418,33 @@ fi
 
 # ===========================================================================
 echo "------------------------------"
+echo "profile \"allow_network\": false without --deny-network: no connection"
+echo ""
+# The flag can only turn the network off; without it the profile's field stands. It
+# used to be overwritten with true, so this profile ran with the network allowed.
+
+cat > "$WORK_DIR/no_network_profile.json" << EOF2
+{ "read_write": ["$WORK_DIR"], "read_only": ["$SSL_DIR"], "allow_network": false }
+EOF2
+if [ "$HOST_OS" = "Darwin" ]; then
+	output=$("$REPLAY_TOOL" \
+		--sandbox-profile "$WORK_DIR/no_network_profile.json" \
+		"$WORK_DIR/curl_denied.json" 2>/dev/null)
+	echo "$output" | /usr/bin/grep -qF "http_code=000"
+	verify_succeeded "$?" "profile network denied: curl reports http_code=000 (got: $output)"
+else
+	output=$("$REPLAY_TOOL" \
+		--sandbox-profile "$WORK_DIR/no_network_profile.json" \
+		"$WORK_DIR/curl_denied.json" 2>&1)
+	status=$?
+	verify_failed "$status" "profile network denied: Linux refuses \"allow_network\": false (exit status $status)"
+	echo "$output" | /usr/bin/grep -qF "not supported on Linux yet"
+	verify_succeeded "$?" "profile network denied: the refusal says why (got: $output)"
+fi
+
+
+# ===========================================================================
+echo "------------------------------"
 echo "path deduplication: nested paths collapse to common parents"
 echo ""
 

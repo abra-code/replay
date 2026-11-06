@@ -504,7 +504,10 @@ bool InitializeSandbox(const std::string& profile_path,
         cfg.read_only.push_back(p);
     for (const auto& p : allow_write)
         cfg.read_write.push_back(p);
-    cfg.allow_network = allow_network;
+    // --deny-network can only turn the network off: a profile's "allow_network": false
+    // stays false when the flag is absent (it used to be overwritten with true).
+    if (!allow_network)
+        cfg.allow_network = false;
     cfg.deny_unix_sockets = deny_unix_sockets;
     AddSystemAutoAllows(cfg);
     return ApplyConfig(cfg, verbose, allowed_threads);

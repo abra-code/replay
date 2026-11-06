@@ -114,7 +114,7 @@ When `import_baseline` is `true` (the default), the profile imports Apple's `bsd
 - **Mach IPC**: bootstrap port, task and thread ports — needed for Obj-C runtime, XPC, etc.
 - **`/dev` nodes**: `/dev/null`, `/dev/random`, `/dev/urandom`, `/dev/tty`
 - **`/tmp` symlink**: only `file-read-metadata` on the `/tmp` literal itself (so `stat` of the symlink resolves). Neither reads nor writes to files under `/tmp` are allowed by the baseline — those require explicit `read_only` or `read_write` entries.
-- **Network**: `bsd.sb` does not grant network access on its own. Network is allowed or denied by an explicit rule that `replay`/`gate` always emits — `(allow network*)` when `allow_network` is true (the default), `(deny network*)` when `--deny-network` is passed.
+- **Network**: `bsd.sb` does not grant network access on its own. Network is allowed or denied by an explicit rule that `replay`/`gate` always emits - `(allow network*)` when `allow_network` is true (the default), `(deny network*)` when it is false or `--deny-network` is passed.
 
 Setting `import_baseline: false` removes all of the above. The process will likely crash during startup (dyld cannot load any dylib). Only do this if you are constructing a fully bespoke SBPL profile via `extra_rules`.
 
@@ -350,7 +350,7 @@ When `--sandbox-profile` and `--allow-*` flags are both present, they merge:
 1. The JSON profile is loaded first.
 2. `--allow-read` paths are appended to `read_only`.
 3. `--allow-write` paths are appended to `read_write`.
-4. `--deny-network` sets `allow_network = false` (overrides the JSON field).
+4. `--deny-network` sets `allow_network = false` (overrides the JSON field). Without the flag the JSON field stands, so `"allow_network": false` in a profile denies the network on its own.
 
 This lets a base profile define most of the policy while the caller adds a single extra output directory via a CLI flag.
 
