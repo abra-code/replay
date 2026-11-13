@@ -93,8 +93,8 @@ releases page from the first Linux release on (see [Release](#release)).
 
 - **Distribution:** glibc 2.39 or newer. Ubuntu 24.04 and later, Debian 13,
   current Fedora, RHEL 10 and its rebuilds. Not Alpine (musl).
-- **To build:** the swift.org Swift toolchain of the release named in
-  `linux/swift-image` (6.2.4 today).
+- **To build:** a swift.org Swift toolchain, 6.2 or newer (`build-linux.sh` refuses an
+  older one); release builds use the one named in `linux/swift-image` (6.2.4 today).
 - **To run:** a Swift runtime. The tools look for it, in this order, in
   `/usr/libexec/swift/lib/swift/linux` (the `libswiftlang` package of Debian 13
   and Ubuntu 26.04), `/usr/lib/swift/linux` (a swift.org toolchain unpacked into

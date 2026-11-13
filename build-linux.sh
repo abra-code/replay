@@ -129,6 +129,31 @@ if [ -z "$RESOURCE_PATH" ] || [ ! -f "$RESOURCE_PATH/CoreFoundation/CoreFoundati
     exit 1
 fi
 
+# The oldest toolchain release the tools are built and tested with; any newer one builds them too
+# (linux/swift-image pins the one release builds use)
+MIN_SWIFT_MAJOR=6
+MIN_SWIFT_MINOR=2
+SWIFT_VERSION_TEXT="$("$SWIFT" --version 2>&1)"
+SWIFT_MAJOR="$(printf '%s\n' "$SWIFT_VERSION_TEXT" | /usr/bin/sed -n 's/.*Swift version \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1/p' | /usr/bin/head -n 1)"
+SWIFT_MINOR="$(printf '%s\n' "$SWIFT_VERSION_TEXT" | /usr/bin/sed -n 's/.*Swift version \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\2/p' | /usr/bin/head -n 1)"
+if [ -z "$SWIFT_MAJOR" ] || [ -z "$SWIFT_MINOR" ]; then
+    echo "Error: cannot read the Swift version from '$SWIFT --version':" >&2
+    echo "$SWIFT_VERSION_TEXT" >&2
+    exit 1
+fi
+if [ "$SWIFT_MAJOR" -lt "$MIN_SWIFT_MAJOR" ] || { [ "$SWIFT_MAJOR" -eq "$MIN_SWIFT_MAJOR" ] && [ "$SWIFT_MINOR" -lt "$MIN_SWIFT_MINOR" ]; }; then
+    echo "Error: Swift $SWIFT_MAJOR.$SWIFT_MINOR is older than $MIN_SWIFT_MAJOR.$MIN_SWIFT_MINOR, the oldest that builds these tools. Set SWIFT=/path/to/swift, or build in the container (linux/docker.sh)." >&2
+    exit 1
+fi
+
+# The runtime libraries the tools link (Foundation, dispatch, BlocksRuntime), beside the CF
+# headers' folder in every toolchain layout
+RUNTIME_LIB_DIR="$RESOURCE_PATH/linux"
+if [ ! -f "$RUNTIME_LIB_DIR/libFoundation.so" ]; then
+    echo "Error: the toolchain's runtime libraries are not in '$RUNTIME_LIB_DIR' (no libFoundation.so)." >&2
+    exit 1
+fi
+
 # On Linux a CFSTR with non-ASCII text produces a broken string: its length is the UTF-8
 # byte count (plan, fact 20). Reject such literals, raw or written with \u, \U or \x escapes.
 # Use a string created at run time instead.
@@ -168,6 +193,10 @@ SWIFT_ARGS+=(-Xcxx -Xclang -Xcxx -fno-cxx-modules)
 
 # Link: replace the toolchain's runtime path with the search list above (plan, D2).
 SWIFT_ARGS+=(-Xswiftc -no-toolchain-stdlib-rpath)
+# And name the runtime libraries' folder: Swift 6.2's driver added it to every link, but the
+# build engine of newer toolchains (6.4) links the C++ tools with clang++ without it ("cannot
+# find -lFoundation"). GNU ld applies a -L to every -l, wherever it appears.
+SWIFT_ARGS+=(-Xlinker "-L$RUNTIME_LIB_DIR")
 for runtime_path in "${RUNTIME_SEARCH_PATHS[@]}"; do
     SWIFT_ARGS+=(-Xlinker -rpath -Xlinker "$runtime_path")
 done
