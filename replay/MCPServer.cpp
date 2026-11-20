@@ -1402,7 +1402,7 @@ static void dispatch_mcp_tool(const std::string &tool,
         doc.set_root(structured);
 
         PrintMCPStructuredResult(context, ac,
-                                  text.empty() ? "(no directories configured — all filesystem access denied)"
+                                  text.empty() ? "(no directories configured: the file tools accept no path)"
                                                : text,
                                   doc.to_string());
     }
@@ -1747,7 +1747,7 @@ static Json::MutableVal make_execute_command_output(Json::MutableDoc &doc)
 // field, and declaring one is what obliges the server to return conforming
 // structuredContent - which that client is not being sent. Advertising the schema while
 // withholding the data would be the mismatch, so both are gated on the same flag.
-static std::string build_tools_list_json(bool with_output_schemas)
+static std::string build_tools_list_json(bool with_output_schemas, bool kernel_sandbox)
 {
     Json::MutableDoc doc;
     auto tools = doc.new_arr();
@@ -1955,14 +1955,21 @@ static std::string build_tools_list_json(bool with_output_schemas)
             schema, kMutates));
     }
 
-    // execute_command (extended — hard-sandboxed shell execution)
+    // execute_command (extended: shell execution, confined only under the kernel sandbox)
     {
         auto props = doc.new_obj();
+        // Tell the agent what actually confines its commands in this server: the
+        // description used to say "sandboxed" even when the server ran without one.
+        const char *confinement = kernel_sandbox
+            ? "The kernel sandbox (Seatbelt on macOS, Landlock and seccomp on Linux) "
+              "confines the shell and its child processes to the allowed directories, "
+              "which path checks alone cannot do."
+            : "This server runs without a kernel sandbox: the shell and its child "
+              "processes run with the user's full rights, bounded only by the machine "
+              "the server runs in.";
         add_str_prop(doc, props, "command",
-            "Shell command executed via /bin/sh -c. Supports pipes, redirects, "
-            "environment variables, and shell built-ins. When the server is started "
-            "with --sandbox, the macOS Seatbelt kernel sandbox confines the child "
-            "shell process to the allowed directories — stronger than path-validation alone.");
+            std::string("Shell command executed via /bin/sh -c. Supports pipes, redirects, "
+            "environment variables, and shell built-ins. ") + confinement);
         add_str_prop(doc, props, "workingDirectory",
             "Absolute path to use as the working directory (must be within an allowed "
             "directory). Defaults to the first writable allowed directory.");
@@ -1975,11 +1982,9 @@ static std::string build_tools_list_json(bool with_output_schemas)
         doc.obj_add(schema, "properties", props);
         doc.obj_add(schema, "required", make_req(doc, {"command"}));
         doc.arr_append(tools, add_tool(doc, "execute_command",
-            "[Extended] Execute a shell command. Returns stdout as the primary content "
+            std::string("[Extended] Execute a shell command. Returns stdout as the primary content "
             "item and stderr as a second item when non-empty. Sets isError=true when "
-            "the command exits non-zero or times out."
-            "macOS kernel sandbox enforces filesystem access limits on the child process - "
-            "making shell execution safer than soft path-checking.",
+            "the command exits non-zero or times out. ") + confinement,
             schema, kRunsCommands,
             out_schema(make_execute_command_output(doc))));
     }
@@ -2318,8 +2323,9 @@ static void handle_message(const std::string &line,
         // Two cached variants rather than one: which is correct depends on the
         // negotiated revision, and building it per request would re-serialize 16 tool
         // schemas on every call.
-        static const std::string kToolsJsonModern = build_tools_list_json(true);
-        static const std::string kToolsJsonLegacy = build_tools_list_json(false);
+        // The sandbox mode is fixed for the life of the process, so it can be baked in.
+        static const std::string kToolsJsonModern = build_tools_list_json(true, opts->kernelSandbox);
+        static const std::string kToolsJsonLegacy = build_tools_list_json(false, opts->kernelSandbox);
         const std::string &kToolsJson = structured_output_negotiated()
                                             ? kToolsJsonModern : kToolsJsonLegacy;
         Json::MutableDoc resp;

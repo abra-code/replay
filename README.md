@@ -1,6 +1,6 @@
 # replay tools
 'replay' repository contains 4 tools, for macOS and for Linux (aarch64 and x86_64; see [On Linux](#on-linux)):
-- replay: execute a list of declared actions or run as stdio [mcp server](mcp_tool_schemas.md) with hard [sandbox](sandbox/README.md)
+- replay: execute a list of declared actions or run as stdio [mcp server](mcp_tool_schemas.md), with an optional hard [sandbox](sandbox/README.md) (off unless a sandbox option is given, for a server inside an isolated machine)
 - dispatch: companion tool for 'replay'
 - fingerprint: calculate deep directory hash - [readme](fingerprint/README.md)
 - gate: cached task execution tool - [readme](gate/README.md)
@@ -340,7 +340,11 @@ Options:
                      On Linux no socket can be created, Unix ones included (socketpair works).
   --mcp-server       Start an MCP (Model Context Protocol) stdio server.
                      Use --allow-read PATH for read-only dirs and --allow-write PATH for
-                     read-write dirs (repeatable). Both flags imply --sandbox. A
+                     read-write dirs (repeatable). Either flag, like every sandbox
+                     option, turns the kernel sandbox on. With no sandbox option the
+                     server applies none: execute_command runs with the user's full
+                     rights. That is meant for a server inside an isolated machine
+                     (a virtual machine that sees only the project). A
                      --sandbox-profile JSON file's read_only/read_write dirs are also
                      included in the allowed set.
                      On Linux kernels below Landlock ABI 9 (Linux 7.1) the commands it

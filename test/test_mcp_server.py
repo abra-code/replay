@@ -2932,6 +2932,50 @@ def test_no_sandbox(tmpdir: str) -> None:
               proc.returncode != 0 and needle in proc.stderr, proc.stderr)
 
 
+def test_sandbox_mode_texts(tmpdir: str) -> None:
+    """With no sandbox option the server runs unconfined by design (for a server inside an
+    isolated machine); execute_command's description and the banner must say which mode
+    the server is in, since agents read the description."""
+    print("=== MCP: execute_command text follows the sandbox mode ===")
+
+    outside = f"{tmpdir}/mode_outside"
+    os.makedirs(outside, exist_ok=True)
+    target = f"{outside}/written.txt"
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "execute_command",
+                    "arguments": {"command": f"printf 'x' > {target}"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+    ]
+    proc = subprocess.run([str(REPLAY), "--mcp-server"],
+                          input="".join(json.dumps(m) + "\n" for m in messages),
+                          capture_output=True, text=True, timeout=20)
+    by_id = {}
+    for line in proc.stdout.splitlines():
+        if line.strip():
+            resp = json.loads(line)
+            by_id[resp.get("id")] = resp
+
+    def execute_description(resp: dict) -> str:
+        for tool in resp.get("result", {}).get("tools", []):
+            if tool.get("name") == "execute_command":
+                return tool.get("description", "")
+        return ""
+
+    check("no sandbox option: the shell runs unconfined (by design)",
+          os.path.exists(target), str(by_id.get(1)))
+    check("no sandbox option: the banner says \"no kernel sandbox\"",
+          "no kernel sandbox" in proc.stderr, proc.stderr)
+    check("no sandbox option: execute_command says it runs without a kernel sandbox",
+          "without a kernel sandbox" in execute_description(by_id.get(2, {})),
+          execute_description(by_id.get(2, {})))
+
+    boxed = run_mcp([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}], [tmpdir])
+    boxed_text = execute_description(boxed.get(1, {}))
+    check("sandboxed: execute_command says the kernel sandbox confines it",
+          "kernel sandbox" in boxed_text and "without a kernel sandbox" not in boxed_text,
+          boxed_text)
+
 def main() -> int:
     if not REPLAY.exists():
         print(f"error: replay binary not found at {REPLAY}", file=sys.stderr)
@@ -3023,6 +3067,7 @@ def main() -> int:
         test_list_allowed_directories(tmpdir)
         test_sandbox_profile_allowed_dirs(tmpdir)
         test_no_sandbox(tmpdir)
+        test_sandbox_mode_texts(tmpdir)
         test_path_validation(tmpdir)
         test_missing_required_params(tmpdir)
         test_readonly_dir(tmpdir)

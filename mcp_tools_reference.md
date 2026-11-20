@@ -56,7 +56,7 @@ path list in `content[0].text`. Negotiate `2025-06-18` or later to get the struc
 | `edit_files` | `paths`, `edits` | ✓ | Multi-file edit with glob expansion. |
 | `glob_search` | `directory`, `globs` | ✓ | Filename-glob search; `globs` array, brace alternation `{a,b}`, `excludeGlobs`. Returns files only (not directories), as `resource_link` items; paths in `structuredContent.matches`, with `truncated` when the `max` cap was hit. |
 | `grep_files` | `regex` | ✓ | Content search (grep), always ECMAScript regex. Requires `directory` and/or `globs`. Case-insensitive, context lines. |
-| `execute_command` | `command` | ✓ | Shell execution, hard-sandboxed via Seatbelt when `--sandbox` is active. |
+| `execute_command` | `command` | ✓ | Shell execution; confined by the kernel sandbox when a sandbox option is given, unconfined otherwise. |
 
 ---
 
@@ -142,7 +142,7 @@ Behavior:
 
 ---
 
-### `execute_command` — sandboxed shell execution
+### `execute_command` - shell execution
 
 Required: `command`.  
 Optional: `workingDirectory`, `timeout` (default 30s, max 60s).
@@ -160,7 +160,7 @@ Runs `command` via `/bin/sh -c <command>`. Captures both stdout and stderr. Supp
 
 **Output cap**: 512 KB per stream. Excess is truncated with a `[output truncated at 512 KB]` notice.
 
-**Why this tool exists**: For filesystem tools, the server can statically validate every path argument before executing the action — the soft (path-checking) and hard (Seatbelt kernel) sandboxes are equivalent in outcome. Shell commands are opaque to static analysis: a command can access paths via symlinks, subprocesses, eval, or file descriptors without those paths appearing in the command string. Only the Seatbelt kernel sandbox can actually enforce filesystem restrictions for shell execution. When replay is started with `--sandbox`, the sandbox profile is inherited by every child process via `fork`, giving shell commands the same filesystem confinement as all other tools. With `--no-sandbox` shell commands are not confined; only the path arguments of the other tools are checked.
+**Why this tool exists**: For filesystem tools, the server can statically validate every path argument before executing the action — the soft (path-checking) and hard (Seatbelt kernel) sandboxes are equivalent in outcome. Shell commands are opaque to static analysis: a command can access paths via symlinks, subprocesses, eval, or file descriptors without those paths appearing in the command string. Only the Seatbelt kernel sandbox can actually enforce filesystem restrictions for shell execution. When replay is started with a sandbox option (`--sandbox`, `--allow-read`, `--allow-write`, `--sandbox-profile`, `--deny-network`), the sandbox is inherited by every child process, giving shell commands the same filesystem confinement as all other tools (Seatbelt on macOS, Landlock and seccomp on Linux). With no sandbox option, or with `--no-sandbox`, shell commands are not confined; only the path arguments of the other tools are checked. That mode is meant for a server inside an isolated machine, where the machine is the boundary; a kernel sandbox cannot be widened later, only replaced by restarting the server with other options. The tool's description tells the agent which mode the server is in.
 
 **Difference from `ExcecuteTool` (replay action system)**:
 
