@@ -3,7 +3,7 @@
 # linux_phase5b_design.md for the network and process creation), beyond what the shared
 # sandbox suites check on both platforms: denials outside the grants, paths that do not
 # exist yet, hard links, refused options, the --verbose listing, the system call filter,
-# the denied network and process creation, the i386 compat entry on x86_64, and the documented gaps. Linux only; it reports itself skipped elsewhere.
+# the denied network and process creation, the i386 compat entry on x86_64, the documented gaps, and terminals. Linux only; it reports itself skipped elsewhere.
 #
 # Usage: test_sandbox_linux.sh [/path/to/replay]
 # Exit:  0 = all checks passed (or skipped), 1 = a failure, 2 = setup failed
@@ -534,6 +534,22 @@ run_stdin "[execute]	/bin/chmod	600	$OUTSIDE/secret.txt" --allow-write "$ALLOWED
 mode="$(/usr/bin/stat -c %a "$OUTSIDE/secret.txt")"
 test "$mode" = "600"
 check $? "chmod outside the grants still works (Landlock does not cover metadata)" "mode $mode; $out"
+
+echo ""
+echo "=== 13. terminals ==="
+# Only the terminal on replay's own descriptors 0 to 2 is granted, not all of /dev/pts:
+# another terminal of the user must be neither readable nor writable.
+if [ ! -x /usr/bin/python3 ]; then
+    echo "  skipped: needs /usr/bin/python3"
+else
+    out="$(/usr/bin/python3 "$SCRIPT_DIR/sandbox_terminal_check.py" "$REPLAY" "$ALLOWED" 2>&1)"
+    case "$out" in *"OWN-WRITE-ALLOWED"*) r=0 ;; *) r=1 ;; esac
+    check $r "a step can write to replay's own terminal by name" "$out"
+    case "$out" in *"OTHER-WRITE-REFUSED"*) r=0 ;; *) r=1 ;; esac
+    check $r "a step cannot write to another terminal" "$out"
+    case "$out" in *"OTHER-READ-REFUSED"*) r=0 ;; *) r=1 ;; esac
+    check $r "a step cannot open another terminal for reading" "$out"
+fi
 
 echo ""
 echo "Passed: $pass  Failed: $fail"

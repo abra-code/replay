@@ -388,11 +388,20 @@ bool BuildRules(const Config& config, int abi, RuleSet& out, std::string& error)
         }
         AddDeduplicated(devices, kReadWriteFile, kReadWriteFile, "baseline", result.rules);
 
-        // Terminals, so that writing to /dev/stderr works when stderr is one; the
+        // The terminals on descriptors 0 to 2, so that opening /dev/stdin or /dev/stderr
+        // works when they are one. Only those: all of /dev/pts would let a command read
+        // what the user types into another terminal and write into it (threat model
+        // P-F6); this process can use these through its descriptors anyway. The
         // dangerous terminal ioctls are denied separately (design section 6).
-        struct stat st;
-        if (stat("/dev/pts", &st) == 0 && S_ISDIR(st.st_mode))
-            result.rules.push_back({"/dev/pts", kReadFile | kWriteFile, true, "baseline"});
+        std::vector<std::string> terminals;
+        for (int fd = 0; fd <= 2; fd++)
+        {
+            char name[PATH_MAX];
+            if (isatty(fd) && ttyname_r(fd, name, sizeof(name)) == 0)
+                terminals.push_back(name);
+        }
+        AddDeduplicated(terminals, kReadFile | kWriteFile, kReadFile | kWriteFile,
+                        "baseline: the terminal on descriptor 0, 1 or 2", result.rules);
     }
 
     // 4. Running programs anywhere (design section 4).
