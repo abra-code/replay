@@ -420,6 +420,78 @@ verify_succeeded "$?" "profile network denied: curl reports http_code=000 (got: 
 
 
 # ===========================================================================
+# Unix sockets (macOS; Linux in test_sandbox_linux.sh). Two listeners, one inside the
+# write grant and one outside it; a step tries to connect to each with nc -U.
+if [ "$HOST_OS" = "Darwin" ]; then
+	echo "------------------------------"
+	echo "Unix sockets: kept by default, limited to the write grants with --deny-unix-sockets"
+	echo ""
+
+	IN_SOCK="$WORK_DIR/in.sock"
+	OUT_SOCK="$DENIED_DIR/out.sock"
+	/usr/bin/nc -lUk "$IN_SOCK" > /dev/null 2>&1 &
+	in_listener=$!
+	/usr/bin/nc -lUk "$OUT_SOCK" > /dev/null 2>&1 &
+	out_listener=$!
+	waited=0
+	while { [ ! -S "$IN_SOCK" ] || [ ! -S "$OUT_SOCK" ]; } && [ "$waited" -lt 50 ]; do
+		/bin/sleep 0.1
+		waited=$((waited + 1))
+	done
+
+	cat > "$WORK_DIR/unix_connect.json" << EOF
+[{
+  "action": "execute",
+  "tool": "/bin/sh",
+  "arguments": ["-c", "echo x | /usr/bin/nc -U -w1 $IN_SOCK && echo in-connected || echo in-refused; echo x | /usr/bin/nc -U -w1 $OUT_SOCK && echo out-connected || echo out-refused"]
+}]
+EOF
+
+	output=$("$REPLAY_TOOL" --allow-write "$WORK_DIR" "$WORK_DIR/unix_connect.json" 2>/dev/null)
+	echo "$output" | /usr/bin/grep -qx "out-connected"
+	verify_succeeded "$?" "default: a step can connect to a Unix socket outside the grants (got: $output)"
+
+	output=$("$REPLAY_TOOL" --allow-write "$WORK_DIR" --deny-unix-sockets "$WORK_DIR/unix_connect.json" 2>/dev/null)
+	echo "$output" | /usr/bin/grep -qx "out-refused"
+	verify_succeeded "$?" "--deny-unix-sockets: connecting outside the grants is refused (got: $output)"
+	echo "$output" | /usr/bin/grep -qx "in-connected"
+	verify_succeeded "$?" "--deny-unix-sockets: connecting inside the write grant works (got: $output)"
+
+	# DNS goes through mDNSResponder's Unix socket, which stays allowed. Plain HTTP, so
+	# the check depends on the name lookup only, not on TLS.
+	cat > "$WORK_DIR/curl_dns.json" << EOF
+[{
+  "action": "execute",
+  "tool": "/usr/bin/curl",
+  "arguments": ["--silent", "--max-time", "8",
+                 "--write-out", "http_code=%{http_code}",
+                 "--output", "/dev/null",
+                 "http://example.com"]
+}]
+EOF
+	output=$("$REPLAY_TOOL" --allow-write "$WORK_DIR" --allow-read "$SSL_DIR" --deny-unix-sockets "$WORK_DIR/curl_dns.json" 2>/dev/null)
+	echo "$output" | /usr/bin/grep -qF "http_code=200"
+	verify_succeeded "$?" "--deny-unix-sockets: name lookups still work, curl gets http_code=200 (got: $output)"
+
+	output=$("$REPLAY_TOOL" --verbose --allow-write "$WORK_DIR" "$WORK_DIR/unix_connect.json" 2>&1)
+	# The profile must be printed at all, or the absence check below passes vacuously.
+	echo "$output" | /usr/bin/grep -qF "(allow network*)"
+	verify_succeeded "$?" "default: --verbose prints the profile (got: $output)"
+	echo "$output" | /usr/bin/grep -qF "(remote unix-socket)"
+	verify_failed "$?" "default: the profile has no Unix socket rule"
+
+	# The grant rule names the resolved write dir (/tmp is /private/tmp), or it never matches.
+	resolved_work_dir="$(CDPATH= cd -P -- "$WORK_DIR" && pwd -P)"
+	output=$("$REPLAY_TOOL" --verbose --allow-write "$WORK_DIR" --deny-unix-sockets "$WORK_DIR/unix_connect.json" 2>&1)
+	echo "$output" | /usr/bin/grep -qF "(remote unix-socket (subpath \"$resolved_work_dir\"))"
+	verify_succeeded "$?" "--deny-unix-sockets: the grant rule names the resolved write dir $resolved_work_dir (got: $output)"
+
+	kill "$in_listener" "$out_listener" 2> /dev/null
+	wait "$in_listener" "$out_listener" 2> /dev/null
+fi
+
+
+# ===========================================================================
 echo "------------------------------"
 echo "path deduplication: nested paths collapse to common parents"
 echo ""

@@ -311,7 +311,7 @@ DisplayHelp(void)
 		"Subsequent use of \"start\" action for the same batch name will not restart the server\n"
 		"but a warning will be printed about already running server instance.\n"
 		"The server cannot run sandboxed: \"start\" with --sandbox, --allow-read, --allow-write,\n"
-		"--sandbox-profile or --deny-network fails.\n"
+		"--sandbox-profile, --deny-network or --deny-unix-sockets fails.\n"
 		"On Linux \"dispatch\" reaches the server through a Unix socket in $XDG_RUNTIME_DIR/replay,\n"
 		"or in /tmp/replay-<uid> when that variable does not name a folder you own, so both must run\n"
 		"as the same user with the same XDG_RUNTIME_DIR.\n"

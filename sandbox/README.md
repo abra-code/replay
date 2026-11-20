@@ -1,6 +1,6 @@
 # Sandbox Reference
 
-`replay` and `gate` can self-sandbox at startup: on macOS with Seatbelt (TrustedBSD MAC), on Linux with Landlock and a system call filter. The policy is kernel-enforced: once applied it covers the process and every child process it spawns; there is no way to escape or weaken it from user space.
+`replay` and `gate` can self-sandbox at startup: on macOS with Seatbelt (TrustedBSD MAC), on Linux with Landlock and a system call filter. The policy is kernel-enforced: once applied it covers the process and every child process it spawns; it cannot be removed or weakened from user space. It does not stop a sandboxed command from asking a process outside the sandbox to act for it: by default the command can connect to the user's Unix sockets (ssh-agent, Docker, the D-Bus session bus on Linux, a running `replay --start-server`), and some of those run what they are sent. `--deny-unix-sockets` limits that; the MCP server always does (see [Unix sockets](#unix-sockets-macos)).
 
 The flags and the JSON profile are the same on both systems. Most of this document describes macOS; the [Linux](#linux) section at the end says what is different there.
 
@@ -40,6 +40,7 @@ replay --sandbox --allow-write ~/project/build --deny-network actions.json
 | `--allow-write <path>` | directory | Grants `file-read*` and `file-write*` on the directory and all descendants. Implicitly enables `--sandbox`. |
 | `--sandbox-profile <file>` | JSON file | Loads a profile file (see JSON schema below). Implicitly enables `--sandbox`. |
 | `--deny-network` | - | Denies all outbound and inbound network connections. Without this flag network is allowed. On Linux creating any socket fails, Unix ones included (see Linux below). |
+| `--deny-unix-sockets` | - | Limits Unix sockets (see [Unix sockets](#unix-sockets-macos)): on macOS only sockets inside the write grants can be connected to; on Linux below Landlock version 9 no Unix socket can be created. Always on for `--mcp-server`. Implicitly enables `--sandbox`. |
 
 All flags may be repeated. At least one sandbox flag must be present to activate the sandbox — without any flags the process runs unsandboxed.
 
@@ -184,6 +185,20 @@ gate --sandbox -i src.c -o out.o -- clang        -c src.c -o out.o      # may fa
 By default the sandbox allows network. Use `--deny-network` or `"allow_network": false` to block it.
 
 The profile always emits an explicit network rule — `(allow network*)` by default, `(deny network*)` when denied. There is no implicit fallback: the rule is always present.
+
+### Unix sockets (macOS)
+
+Seatbelt counts connecting to a Unix socket as network access, so `(allow network*)` lets a sandboxed command connect to any Unix socket its user may open, inside the grants or not: ssh-agent, gpg-agent, Docker and Colima, and the socket of a `replay --start-server` when `REPLAY_IPC_BACKEND=socket` is set. The default message port of that server is not reachable, because the profile does not allow looking it up.
+
+Playlists and `gate` keep this by default, since builds use these sockets (fetching over ssh, `docker build`, signing with gpg). With `--deny-unix-sockets`, and always in MCP server mode, the profile adds:
+
+```
+(deny network-outbound (remote unix-socket))
+(allow network-outbound (literal "/private/var/run/mDNSResponder") (literal "/private/var/run/syslog"))
+(allow network-outbound (remote unix-socket (subpath "<each read_write dir>")))
+```
+
+A command can then connect only to sockets inside its write grants. Name lookups keep working: every DNS lookup goes through mDNSResponder's socket. With the network denied, `(deny network*)` already covers Unix sockets.
 
 ---
 
@@ -432,8 +447,8 @@ Landlock rules need an existing file or folder:
 From Landlock version 9, a Unix socket with a path can be connected to only inside the write grants. The docker socket, ssh-agent, gpg-agent and the D-Bus session bus are then reachable only if their folder is granted read-write.
 
 Below version 9 the kernel does not check connecting to a Unix socket by path, so a sandboxed command can reach any socket its user may open. Through the D-Bus session bus that is a complete way out (`systemd-run --user` starts a program outside the sandbox). Therefore:
-- **MCP server mode** (`--mcp-server`, where an AI agent chooses the commands): creating a Unix socket fails with EACCES. `socketpair` and other kinds of sockets still work. Commands that talk to a local service fail: ssh-agent, gpg-agent, the docker command, D-Bus clients; `syslog(3)` messages are lost; user and group names known only through SSSD, winbind or systemd's user database do not resolve (`id`, `whoami`, `~user`). From version 6 the MCP server also limits abstract Unix sockets (which have no path) to those made inside the sandbox.
-- **Playlists**, whose commands the user wrote, keep Unix sockets, unless the network is denied (below). On those kernels a playlist's commands can reach the services above, and the socket of a running `replay` server, which runs the actions `dispatch` sends it outside the sandbox.
+- **MCP server mode** (`--mcp-server`, where an AI agent chooses the commands), and `--deny-unix-sockets`: creating a Unix socket fails with EACCES. `socketpair` and other kinds of sockets still work. Commands that talk to a local service fail: ssh-agent, gpg-agent, the docker command, D-Bus clients; `syslog(3)` messages are lost; user and group names known only through SSSD, winbind or systemd's user database do not resolve (`id`, `whoami`, `~user`); Python's default process pool (`multiprocessing`, `concurrent.futures`, whose default start method is `forkserver` from Python 3.14) and `multiprocessing.Manager` fail, while the `fork` and `spawn` start methods work. From version 6 the flag also limits abstract Unix sockets (which have no path) to those made inside the sandbox.
+- **Playlists** and `gate`, whose commands the user wrote, keep Unix sockets, unless `--deny-unix-sockets` is given or the network is denied (below). On those kernels a playlist's commands can reach the services above, and the socket of a running `replay` server, which runs the actions `dispatch` sends it outside the sandbox.
 - A datagram `socketpair` can still send to datagram sockets with a path, such as the system log's (`/dev/log`, the journal), on any version.
 
 ### Network and process creation

@@ -311,6 +311,25 @@ std::string GenerateSbplProfile(const Config& config)
     else
         p += "\n(deny network*)\n";
 
+    // Unix sockets limited (the MCP server, --deny-unix-sockets): connecting is allowed
+    // only to sockets inside the write grants, as Landlock does from ABI 9. Every DNS
+    // lookup goes through mDNSResponder's socket, so it stays allowed (without it curl
+    // cannot resolve a host name, verified 2026-11-20), as does the system log's.
+    // With the network denied, (deny network*) above already covers Unix sockets.
+    if (config.allow_network && config.deny_unix_sockets)
+    {
+        p += "\n; Unix sockets: only inside the write grants\n";
+        p += "(deny network-outbound (remote unix-socket))\n";
+        p += "(allow network-outbound (literal \"/private/var/run/mDNSResponder\") "
+             "(literal \"/private/var/run/syslog\"))\n";
+        for (const auto& dir : rw_dirs)
+        {
+            p += "(allow network-outbound (remote unix-socket (subpath \"";
+            p += EscapeSbplStringLiteral(dir);
+            p += "\")))\n";
+        }
+    }
+
     if (!config.extra_rules.empty())
     {
         p += "\n; extra rules\n";
@@ -429,8 +448,8 @@ static bool ApplyLinuxConfig(const Config& config, bool verbose, const std::vect
     for (const auto& warning : ruleset.warnings)
         fprintf(stderr, "%s\n", warning.c_str());
 
-    // Unix sockets: the MCP server needs them denied below ABI 9, where Landlock cannot
-    // limit connecting to them. A denied network denies them on every ABI, as macOS's
+    // Unix sockets: the MCP server and --deny-unix-sockets need them denied below ABI 9,
+    // where Landlock cannot limit connecting to them. A denied network denies them on every ABI, as macOS's
     // (deny network*) denies connecting to them (verified 2026-11-05), and since through
     // the D-Bus session bus a Unix socket reaches the network too (systemd-run).
     bool denyUnixSockets = (config.deny_unix_sockets && abi < 9) || !config.allow_network;

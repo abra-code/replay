@@ -2976,6 +2976,51 @@ def test_sandbox_mode_texts(tmpdir: str) -> None:
           "kernel sandbox" in boxed_text and "without a kernel sandbox" not in boxed_text,
           boxed_text)
 
+def test_unix_sockets_limited(tmpdir: str) -> None:
+    """Under the kernel sandbox an MCP command can connect only to Unix sockets inside
+    the write grants (threat model P-F3: on macOS it reached every socket of the user,
+    ssh-agent and Docker included). Linux: test_sandbox_linux.sh section 8."""
+    if sys.platform != "darwin":
+        return
+    print("=== MCP: Unix sockets limited to the write grants (macOS) ===")
+    import socket
+    import threading
+
+    inside = f"{tmpdir}/us_in"
+    outside = f"{tmpdir}/us_out"
+    os.makedirs(inside, exist_ok=True)
+    os.makedirs(outside, exist_ok=True)
+    listeners = []
+    for path in (f"{inside}/s.sock", f"{outside}/s.sock"):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.bind(path)
+        s.listen(4)
+        listeners.append(s)
+
+    def serve(s: socket.socket) -> None:
+        while True:
+            try:
+                c, _ = s.accept()
+            except OSError:
+                return
+            c.close()
+
+    for s in listeners:
+        threading.Thread(target=serve, args=(s,), daemon=True).start()
+
+    command = (f"/usr/bin/nc -U -w1 {inside}/s.sock < /dev/null && echo in-connected || echo in-refused; "
+               f"/usr/bin/nc -U -w1 {outside}/s.sock < /dev/null && echo out-connected || echo out-refused")
+    resp = run_mcp([{"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                     "params": {"name": "execute_command", "arguments": {"command": command}}}],
+                   [inside])
+    text = text_of(resp.get(1, {}))
+    check("sandboxed MCP: connecting to a Unix socket outside the grants is refused",
+          "out-refused" in text, text)
+    check("sandboxed MCP: connecting to a Unix socket inside the write grant works",
+          "in-connected" in text, text)
+    for s in listeners:
+        s.close()
+
 def test_path_check_missing_tail(tmpdir: str) -> None:
     """The allowed-directory check on a path whose end does not exist yet: ".." after a
     missing folder, and a link to a missing target, used to pass as text and then land
@@ -3124,6 +3169,7 @@ def main() -> int:
         test_sandbox_profile_allowed_dirs(tmpdir)
         test_no_sandbox(tmpdir)
         test_sandbox_mode_texts(tmpdir)
+        test_unix_sockets_limited(tmpdir)
         test_path_check_missing_tail(tmpdir)
         test_path_validation(tmpdir)
         test_missing_required_params(tmpdir)

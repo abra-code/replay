@@ -88,6 +88,13 @@ static void print_usage(std::ostream& stream)
     stream << "  --allow-write=PATH     Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.\n";
     stream << "  --deny-network         With sandbox active, deny outbound network (allowed by default).\n";
     stream << "                         On Linux no socket can be created, Unix ones included (socketpair works).\n";
+    stream << "  --deny-unix-sockets    With sandbox active, limit Unix sockets, which otherwise let the command\n";
+    stream << "                         reach the user's daemons (ssh-agent, Docker, the desktop's D-Bus, which\n";
+    stream << "                         can start programs outside the sandbox). macOS: only sockets inside\n";
+    stream << "                         the write grants can be connected to (DNS keeps working). Linux below\n";
+    stream << "                         Landlock ABI 9 (Linux 7.1): no Unix socket can be created (socketpair\n";
+    stream << "                         works), which also stops Python's default process pool on Linux.\n";
+    stream << "                         Implicitly enables --sandbox.\n";
     stream << "  -v, --verbose          Verbose output\n";
     stream << "  -h, --help             Print this help message\n";
     stream << "  -V, --version          Display version\n";
@@ -250,6 +257,7 @@ int main(int argc, char* argv[])
         kOptAllowRead,
         kOptAllowWrite,
         kOptDenyNetwork,
+        kOptDenyUnixSockets,
     };
 
     static const struct option long_options[] = {
@@ -270,6 +278,7 @@ int main(int argc, char* argv[])
         { "allow-read",             required_argument, nullptr, kOptAllowRead },
         { "allow-write",            required_argument, nullptr, kOptAllowWrite },
         { "deny-network",           no_argument,       nullptr, kOptDenyNetwork },
+        { "deny-unix-sockets",      no_argument,       nullptr, kOptDenyUnixSockets },
         { "verbose",        no_argument,       nullptr, 'v' },
         { "help",           no_argument,       nullptr, 'h' },
         { "version",        no_argument,       nullptr, 'V' },
@@ -292,6 +301,7 @@ int main(int argc, char* argv[])
     std::vector<std::string> sandbox_allow_read;
     std::vector<std::string> sandbox_allow_write;
     bool sandbox_deny_network = false;
+    bool sandbox_deny_unix_sockets = false;
 
     int opt;
     while ((opt = getopt_long(argc, argv, "i:o:I:O:e:E:S:c:C:H:fvhV", long_options, nullptr)) != -1)
@@ -343,6 +353,10 @@ int main(int argc, char* argv[])
             case kOptDenyNetwork:
                 sandbox_requested = true;
                 sandbox_deny_network = true;
+                break;
+            case kOptDenyUnixSockets:
+                sandbox_requested = true;
+                sandbox_deny_unix_sockets = true;
                 break;
 
             case 'h':
@@ -509,7 +523,8 @@ int main(int argc, char* argv[])
                 sandbox_allow_read.push_back(tool_path);
         }
 
-        if (!sandbox::InitializeSandbox(sandbox_profile_path, sandbox_allow_read, sandbox_allow_write, !sandbox_deny_network, g_verbose))
+        if (!sandbox::InitializeSandbox(sandbox_profile_path, sandbox_allow_read, sandbox_allow_write, !sandbox_deny_network,
+                                        g_verbose, {}, sandbox_deny_unix_sockets))
             return 2;
 #if defined(__linux__)
         // The Linux sandbox denies xattr writes (seccomp), so a memo write could only fail,

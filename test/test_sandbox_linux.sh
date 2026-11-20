@@ -321,6 +321,34 @@ else
     check $r "other address families stay allowed in MCP mode" "$out"
     case "$out" in *"setxattr EACCES"*) r=0 ;; *) r=1 ;; esac
     check $r "the rest of the filter applies in MCP mode too" "$out"
+
+    # Playlists and gate keep Unix sockets (section 7) unless --deny-unix-sockets asks
+    # for the MCP server's limit.
+    NL=$'\n'
+    run_stdin "[execute]	$WORK_DIR/probe	$ALLOWED/probe.txt" --allow-write "$ALLOWED" --allow-read "$WORK_DIR/probe" --deny-unix-sockets
+    GATE="$(/usr/bin/dirname -- "$REPLAY")/gate"
+    gate_out=""
+    if [ -x "$GATE" ]; then
+        gate_out="$("$GATE" --deny-unix-sockets --allow-write "$ALLOWED" --allow-read "$WORK_DIR/probe" \
+                     -c "$ALLOWED/gate-cache-unix" -f -- "$WORK_DIR/probe" "$ALLOWED/probe.txt" 2>&1)"
+    fi
+    case "$ABI" in
+        ''|*[!0-9]*) check 1 "the Landlock ABI is known (section 5)" "ABI '$ABI'" ;;
+        *)
+            if [ "$ABI" -lt 9 ]; then
+                case "$NL$out$NL" in *"${NL}socket-unix EACCES$NL"*) r=0 ;; *) r=1 ;; esac
+                check $r "below ABI 9, --deny-unix-sockets: a playlist command cannot create a Unix socket" "$out"
+                if [ -x "$GATE" ]; then
+                    case "$NL$gate_out$NL" in *"${NL}socket-unix EACCES$NL"*) r=0 ;; *) r=1 ;; esac
+                    check $r "below ABI 9, gate --deny-unix-sockets: the command cannot create a Unix socket" "$gate_out"
+                fi
+            fi
+            ;;
+    esac
+    case "$NL$out$NL" in *"${NL}socketpair-unix ok$NL"*) r=0 ;; *) r=1 ;; esac
+    check $r "--deny-unix-sockets: socketpair stays allowed" "$out"
+    case "$NL$out$NL" in *"${NL}socket-inet ok$NL"*) r=0 ;; *) r=1 ;; esac
+    check $r "--deny-unix-sockets: the network stays allowed" "$out"
 fi
 
 echo ""

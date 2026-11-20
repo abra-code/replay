@@ -338,6 +338,14 @@ Options:
   --allow-write PATH   Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.
   --deny-network       With sandbox active, deny outbound network (allowed by default).
                      On Linux no socket can be created, Unix ones included (socketpair works).
+  --deny-unix-sockets  With sandbox active, limit Unix sockets, which otherwise let a step
+                     reach the user's daemons (ssh-agent, Docker, the desktop's D-Bus,
+                     which can start programs outside the sandbox). macOS: only sockets
+                     inside the write grants can be connected to (DNS keeps working).
+                     Linux below Landlock ABI 9 (Linux 7.1): no Unix socket can be
+                     created (socketpair works), which also stops Python's default
+                     process pool on Linux. Always on for --mcp-server.
+                     Implicitly enables --sandbox.
   --mcp-server       Start an MCP (Model Context Protocol) stdio server.
                      Use --allow-read PATH for read-only dirs and --allow-write PATH for
                      read-write dirs (repeatable). Either flag, like every sandbox
@@ -347,8 +355,8 @@ Options:
                      (a virtual machine that sees only the project). A
                      --sandbox-profile JSON file's read_only/read_write dirs are also
                      included in the allowed set.
-                     On Linux kernels below Landlock ABI 9 (Linux 7.1) the commands it
-                     runs cannot create Unix sockets (see sandbox/README.md).
+                     Under the sandbox, Unix sockets are limited as by
+                     --deny-unix-sockets (see sandbox/README.md).
                      The FIRST explicit --allow-read/--allow-write dir is the project
                      (working) directory (or the first profile read_write dir if none
                      are given): tools with an optional 'directory' param (e.g. grep_files)
@@ -361,7 +369,8 @@ Options:
                      accepts every path); execute_command runs unconfined. For a
                      server that already runs in an isolated machine, and for commands
                      that apply a sandbox of their own, which a sandboxed process
-                     cannot do on macOS. Not combinable with --deny-network or --sandbox.
+                     cannot do on macOS. Not combinable with --deny-network,
+                     --deny-unix-sockets or --sandbox.
   -V, --version      Display version.
   -h, --help         Display this help.
 
@@ -831,7 +840,7 @@ explicitly with "start" action and provide parameters to forward to "replay", fo
 Subsequent use of "start" action for the same batch name will not restart the server
 but a warning will be printed about already running server instance.
 The server cannot run sandboxed: "start" with --sandbox, --allow-read, --allow-write,
---sandbox-profile or --deny-network fails.
+--sandbox-profile, --deny-network or --deny-unix-sockets fails.
 On Linux "dispatch" reaches the server through a Unix socket in $XDG_RUNTIME_DIR/replay,
 or in /tmp/replay-<uid> when that variable does not name a folder you own, so both must run
 as the same user with the same XDG_RUNTIME_DIR.
@@ -1007,6 +1016,13 @@ OPTIONS:
   --allow-write=PATH     Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.
   --deny-network         With sandbox active, deny outbound network (allowed by default).
                          On Linux no socket can be created, Unix ones included (socketpair works).
+  --deny-unix-sockets    With sandbox active, limit Unix sockets, which otherwise let the command
+                         reach the user's daemons (ssh-agent, Docker, the desktop's D-Bus, which
+                         can start programs outside the sandbox). macOS: only sockets inside
+                         the write grants can be connected to (DNS keeps working). Linux below
+                         Landlock ABI 9 (Linux 7.1): no Unix socket can be created (socketpair
+                         works), which also stops Python's default process pool on Linux.
+                         Implicitly enables --sandbox.
   -v, --verbose          Verbose output
   -h, --help             Print this help message
   -V, --version          Display version

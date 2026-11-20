@@ -42,6 +42,7 @@ enum
 	kOptAllowRead,
 	kOptAllowWrite,
 	kOptDenyNetwork,
+	kOptDenyUnixSockets,
 	kOptMCPServer,
 	kOptNoSandbox,
 	kOptCache,
@@ -73,6 +74,7 @@ static struct option sLongOptions[] =
 	{"allow-read",			required_argument,	NULL, kOptAllowRead},
 	{"allow-write",			required_argument,	NULL, kOptAllowWrite},
 	{"deny-network",		no_argument,			NULL, kOptDenyNetwork},
+	{"deny-unix-sockets",	no_argument,			NULL, kOptDenyUnixSockets},
 	{"mcp-server",			no_argument,			NULL, kOptMCPServer},
 	{"no-sandbox",			no_argument,			NULL, kOptNoSandbox},
 	{"cache",				no_argument,			NULL, kOptCache},
@@ -167,6 +169,14 @@ DisplayHelp(void)
 		"  --allow-write PATH   Allow read+write access to PATH (repeatable). Implicitly enables --sandbox.\n"
 		"  --deny-network       With sandbox active, deny outbound network (allowed by default).\n"
 		"                     On Linux no socket can be created, Unix ones included (socketpair works).\n"
+		"  --deny-unix-sockets  With sandbox active, limit Unix sockets, which otherwise let a step\n"
+		"                     reach the user's daemons (ssh-agent, Docker, the desktop's D-Bus,\n"
+		"                     which can start programs outside the sandbox). macOS: only sockets\n"
+		"                     inside the write grants can be connected to (DNS keeps working).\n"
+		"                     Linux below Landlock ABI 9 (Linux 7.1): no Unix socket can be\n"
+		"                     created (socketpair works), which also stops Python's default\n"
+		"                     process pool on Linux. Always on for --mcp-server.\n"
+		"                     Implicitly enables --sandbox.\n"
 		"  --mcp-server       Start an MCP (Model Context Protocol) stdio server.\n"
 		"                     Use --allow-read PATH for read-only dirs and --allow-write PATH for\n"
 		"                     read-write dirs (repeatable). Either flag, like every sandbox\n"
@@ -176,8 +186,8 @@ DisplayHelp(void)
 		"                     (a virtual machine that sees only the project). A\n"
 		"                     --sandbox-profile JSON file's read_only/read_write dirs are also\n"
 		"                     included in the allowed set.\n"
-		"                     On Linux kernels below Landlock ABI 9 (Linux 7.1) the commands it\n"
-		"                     runs cannot create Unix sockets (see sandbox/README.md).\n"
+		"                     Under the sandbox, Unix sockets are limited as by\n"
+		"                     --deny-unix-sockets (see sandbox/README.md).\n"
 		"                     The FIRST explicit --allow-read/--allow-write dir is the project\n"
 		"                     (working) directory (or the first profile read_write dir if none\n"
 		"                     are given): tools with an optional 'directory' param (e.g. grep_files)\n"
@@ -190,7 +200,8 @@ DisplayHelp(void)
 		"                     accepts every path); execute_command runs unconfined. For a\n"
 		"                     server that already runs in an isolated machine, and for commands\n"
 		"                     that apply a sandbox of their own, which a sandboxed process\n"
-		"                     cannot do on macOS. Not combinable with --deny-network or --sandbox.\n"
+		"                     cannot do on macOS. Not combinable with --deny-network,\n"
+		"                     --deny-unix-sockets or --sandbox.\n"
 		"  -V, --version      Display version.\n"
 		"  -h, --help         Display this help.\n"
 		"\n"
@@ -722,6 +733,7 @@ int main(int argc, const char * argv[])
 	std::vector<std::string> sandboxAllowRead;
 	std::vector<std::string> sandboxAllowWrite;
 	bool sandboxDenyNetwork = false;
+	bool sandboxDenyUnixSockets = false;
 	bool noSandbox = false;
 	bool explicitSandbox = false;
 	// Explicit --allow-read/--allow-write dirs recorded in command-line order.
@@ -828,6 +840,11 @@ int main(int argc, const char * argv[])
 			case kOptDenyNetwork:
 				sandboxRequested = true;
 				sandboxDenyNetwork = true;
+			break;
+
+			case kOptDenyUnixSockets:
+				sandboxRequested = true;
+				sandboxDenyUnixSockets = true;
 			break;
 
 			case kOptMCPServer:
@@ -942,9 +959,10 @@ int main(int argc, const char * argv[])
 			LogError("error: --no-sandbox applies to --mcp-server only\n");
 			return EXIT_FAILURE;
 		}
-		if(sandboxDenyNetwork || explicitSandbox)
+		if(sandboxDenyNetwork || sandboxDenyUnixSockets || explicitSandbox)
 		{
-			LogError("error: --no-sandbox cannot be combined with %s\n", sandboxDenyNetwork ? "--deny-network" : "--sandbox");
+			LogError("error: --no-sandbox cannot be combined with %s\n",
+			         sandboxDenyNetwork ? "--deny-network" : (sandboxDenyUnixSockets ? "--deny-unix-sockets" : "--sandbox"));
 			return EXIT_FAILURE;
 		}
 		sandboxRequested = false;
@@ -956,7 +974,7 @@ int main(int argc, const char * argv[])
 	// Refused until it is designed (private/linux_phase4_ipc_design.md, section 5).
 	if(sandboxRequested && !context.batchName.empty())
 	{
-		LogError("error: --start-server cannot run sandboxed: leave out --sandbox, --sandbox-profile, --allow-read, --allow-write and --deny-network\n");
+		LogError("error: --start-server cannot run sandboxed: leave out --sandbox, --sandbox-profile, --allow-read, --allow-write, --deny-network and --deny-unix-sockets\n");
 		return EXIT_FAILURE;
 	}
 
@@ -1127,13 +1145,15 @@ int main(int argc, const char * argv[])
 		// stays outside; the sandbox then checks that no other thread runs.
 		context.outputSerializer->stopThread();
 #endif
-		// In MCP server mode an AI agent chooses the commands, so on a Linux kernel whose
-		// Landlock cannot limit connecting to Unix sockets (below ABI 9) the sandbox denies
-		// creating them: through the D-Bus session bus a child could otherwise start a
-		// program outside the sandbox (private/linux_phase5a_sandbox_design.md, section 9).
-		// Playlists, whose commands the user wrote, keep them. macOS ignores the flag.
+		// In MCP server mode an AI agent chooses the commands, so the sandbox limits Unix
+		// sockets: they reach the user's daemons, and through the D-Bus session bus a child
+		// could start a program outside the sandbox (private/linux_phase5a_sandbox_design.md,
+		// section 9). Playlists, whose commands the user wrote, keep them unless
+		// --deny-unix-sockets asks otherwise: builds use them (ssh-agent, Docker, and
+		// Python's default process pool on Linux).
 		bool sandboxed = sandbox::InitializeSandbox(sandboxProfilePath, sandboxAllowRead, sandboxAllowWrite,
-		                                            !sandboxDenyNetwork, context.verbose, {}, mcpServerMode);
+		                                            !sandboxDenyNetwork, context.verbose, {},
+		                                            mcpServerMode || sandboxDenyUnixSockets);
 #if defined(__linux__)
 		context.outputSerializer->startThread();
 #endif
