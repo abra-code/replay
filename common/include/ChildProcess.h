@@ -69,4 +69,12 @@ struct Result
 
 Result Run(const Options &opts);
 
+// From this call on, every child gets only descriptors 0 to 2 (as the options set them
+// up); the parent's other descriptors stay behind, close-on-exec or not. replay and gate
+// call it once their kernel sandbox is on: a descriptor their own caller left open
+// (on a file outside the grants, say) would otherwise let a sandboxed command read or
+// write through it, which the sandbox does not check. Unsandboxed runs keep passing
+// descriptors on, as a classic make jobserver needs.
+void CloseOtherDescriptorsInChildren();
+
 } // namespace ChildProcess

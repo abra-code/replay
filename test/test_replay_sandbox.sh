@@ -420,6 +420,40 @@ verify_succeeded "$?" "profile network denied: curl reports http_code=000 (got: 
 
 
 # ===========================================================================
+echo "------------------------------"
+echo "inherited descriptors: kept unsandboxed, closed under the sandbox"
+echo ""
+# Descriptor 9 is opened by this script on a file outside every grant. The sandbox does
+# not check a descriptor already open, so replay and gate must not pass it on.
+
+echo "SECRET-OUTSIDE" > "$DENIED_DIR/secret.txt"
+FD_STEP="$(printf '[execute]\t/bin/sh\t-c\tcat <&9 && echo fd-read || echo fd-refused')"
+
+output=$(printf '%s\n' "$FD_STEP" | "$REPLAY_TOOL" 9< "$DENIED_DIR/secret.txt" 2>/dev/null)
+echo "$output" | /usr/bin/grep -qx "SECRET-OUTSIDE"
+verify_succeeded "$?" "unsandboxed: a step still inherits descriptor 9 (got: $output)"
+
+output=$(printf '%s\n' "$FD_STEP" | "$REPLAY_TOOL" --allow-write "$WORK_DIR" 9< "$DENIED_DIR/secret.txt" 2>/dev/null)
+echo "$output" | /usr/bin/grep -qx "fd-refused"
+verify_succeeded "$?" "sandboxed: a step does not get descriptor 9 (got: $output)"
+echo "$output" | /usr/bin/grep -q "SECRET-OUTSIDE"
+verify_failed "$?" "sandboxed: the step cannot read the outside file through descriptor 9"
+
+GATE_TOOL="$(/usr/bin/dirname -- "$REPLAY_TOOL")/gate"
+if [ -x "$GATE_TOOL" ]; then
+	output=$("$GATE_TOOL" --allow-write "$WORK_DIR" -c "$WORK_DIR/gate-fd-cache" -f -- \
+	         /bin/sh -c 'cat <&9 && echo fd-read || echo fd-refused' 9< "$DENIED_DIR/secret.txt" 2>/dev/null)
+	echo "$output" | /usr/bin/grep -qx "fd-refused"
+	verify_succeeded "$?" "gate sandboxed: the command does not get descriptor 9 (got: $output)"
+	output=$(echo "STDIN-PASSES" | "$GATE_TOOL" --allow-write "$WORK_DIR" -c "$WORK_DIR/gate-fd-cache" -f -- /bin/cat 2>/dev/null)
+	echo "$output" | /usr/bin/grep -qx "STDIN-PASSES"
+	verify_succeeded "$?" "gate sandboxed: stdin and stdout still pass through (got: $output)"
+else
+	echo "  skipped: no gate next to replay"
+fi
+
+
+# ===========================================================================
 # Unix sockets (macOS; Linux in test_sandbox_linux.sh). Two listeners, one inside the
 # write grant and one outside it; a step tries to connect to each with nc -U.
 if [ "$HOST_OS" = "Darwin" ]; then

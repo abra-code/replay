@@ -19,6 +19,7 @@
 #include "replay_version.h"
 #include "SandboxProfile.h"
 #include "PlaylistSandboxPaths.h"
+#include "ChildProcess.h"
 #include "FileHelpers.h"
 #include "MCPServer.h"
 #include "EnvVarExpand.h"
@@ -1159,6 +1160,9 @@ int main(int argc, const char * argv[])
 #endif
 		if(!sandboxed)
 			safe_exit(EXIT_FAILURE);
+		// The sandbox does not check a descriptor already open, so one this process got
+		// from its caller must not reach a command (threat model P-F9).
+		ChildProcess::CloseOtherDescriptorsInChildren();
 	}
 
 	// --mcp-server: start MCP stdio server.

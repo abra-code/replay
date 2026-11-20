@@ -1,6 +1,7 @@
 #include "ChildProcess.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <ctime>
@@ -20,17 +21,50 @@ namespace ChildProcess
 namespace
 {
 
+// Set by CloseOtherDescriptorsInChildren.
+std::atomic<bool> gCloseOtherDescriptors(false);
+
+// Linux: closing the other descriptors needs posix_spawn_file_actions_addclosefrom_np
+// (glibc 2.34). Without it (another C library) the build still works, but Run refuses
+// to start a child once the switch is on, rather than pass descriptors on.
+#if defined(__linux__) && defined(__GLIBC__) && ((__GLIBC__ > 2) || (__GLIBC_MINOR__ >= 34))
+#define REPLAY_HAS_ADDCLOSEFROM 1
+#else
+#define REPLAY_HAS_ADDCLOSEFROM 0
+#endif
+
 // Create a pipe with O_CLOEXEC on both ends so concurrent spawns don't
 // inherit each other's write-ends — that's what would otherwise leave a
 // pipe open in another process and stall the drain on this side.
+// Linux sets the flag in the same call; macOS has no pipe2, so a spawn on
+// another thread between pipe and fcntl can still inherit the ends there
+// (unless the children get only descriptors 0 to 2).
 int PipeCloexec(int fds[2])
 {
+#if defined(__linux__)
+    return pipe2(fds, O_CLOEXEC);
+#else
     if(pipe(fds) != 0)
         return -1;
     fcntl(fds[0], F_SETFD, FD_CLOEXEC);
     fcntl(fds[1], F_SETFD, FD_CLOEXEC);
     return 0;
+#endif
 }
+
+#if defined(__APPLE__)
+// POSIX_SPAWN_CLOEXEC_DEFAULT closes every descriptor no file action names, so a
+// standard descriptor the child should inherit as it is must be named; a closed one
+// cannot be (the spawn would fail), and stays closed in the child as before.
+// A close-on-exec one is not named either: an inherit action would clear the flag, and
+// without the sandbox (and on Linux) the child does not get it.
+void InheritIfOpen(posix_spawn_file_actions_t *fa, int fd)
+{
+    int flags = fcntl(fd, F_GETFD);
+    if((flags != -1) && ((flags & FD_CLOEXEC) == 0))
+        posix_spawn_file_actions_addinherit_np(fa, fd);
+}
+#endif
 
 void CloseIfOpen(int &fd)
 {
@@ -154,6 +188,11 @@ bool WaitForExit(pid_t pid, int *statusOut, long long deadlineMillis)
 
 } // namespace
 
+void CloseOtherDescriptorsInChildren()
+{
+    gCloseOtherDescriptors.store(true);
+}
+
 Result Run(const Options &opts)
 {
     Result res;
@@ -163,6 +202,14 @@ Result Run(const Options &opts)
         res.launch_error = "ChildProcess::Run: argv is empty";
         return res;
     }
+#if defined(__linux__) && !REPLAY_HAS_ADDCLOSEFROM
+    if(gCloseOtherDescriptors.load())
+    {
+        res.launch_error = "ChildProcess::Run: under the sandbox a child must not get the other "
+                           "descriptors, which needs posix_spawn_file_actions_addclosefrom_np (glibc 2.34)";
+        return res;
+    }
+#endif
 
     std::vector<const char*> argv;
     argv.reserve(opts.argv.size() + 1);
@@ -236,6 +283,24 @@ Result Run(const Options &opts)
     sigset_t emptyMask;
     sigemptyset(&emptyMask);
     posix_spawnattr_setsigmask(&spawnattr, &emptyMask);
+
+    // Under the sandbox, only descriptors 0 to 2 reach the child (see the header).
+    // After the dup2 actions above, so the standard descriptors they set stay open.
+    if(gCloseOtherDescriptors.load())
+    {
+#if defined(__APPLE__)
+        if(!opts.stdinDevNull)
+            InheritIfOpen(&fa, STDIN_FILENO);
+        if(!wantOut)
+            InheritIfOpen(&fa, STDOUT_FILENO);
+        if(!wantErr)
+            InheritIfOpen(&fa, STDERR_FILENO);
+        spawnFlags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
+        posix_spawnattr_setflags(&spawnattr, spawnFlags);
+#elif REPLAY_HAS_ADDCLOSEFROM
+        posix_spawn_file_actions_addclosefrom_np(&fa, STDERR_FILENO + 1);
+#endif
+    }
 
     pid_t pid = 0;
     int rc = posix_spawn(&pid, path, &fa, &spawnattr,

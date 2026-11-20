@@ -526,6 +526,9 @@ int main(int argc, char* argv[])
         if (!sandbox::InitializeSandbox(sandbox_profile_path, sandbox_allow_read, sandbox_allow_write, !sandbox_deny_network,
                                         g_verbose, {}, sandbox_deny_unix_sockets))
             return 2;
+        // The sandbox does not check a descriptor already open, so one gate got from its
+        // caller must not reach the command (threat model P-F9).
+        ChildProcess::CloseOtherDescriptorsInChildren();
 #if defined(__linux__)
         // The Linux sandbox denies xattr writes (seccomp), so a memo write could only fail,
         // after write_xattr_fileinfo had flipped a read-only input writable and back, which

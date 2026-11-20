@@ -3021,6 +3021,39 @@ def test_unix_sockets_limited(tmpdir: str) -> None:
     for s in listeners:
         s.close()
 
+def test_inherited_descriptors(tmpdir: str) -> None:
+    """A descriptor the server's caller left open on a file outside the grants must not
+    reach execute_command under the kernel sandbox, which does not check open
+    descriptors (threat model P-F9)."""
+    print("=== MCP: inherited descriptors under the sandbox ===")
+    granted = f"{tmpdir}/fd_granted"
+    outside = f"{tmpdir}/fd_outside"
+    os.makedirs(granted, exist_ok=True)
+    os.makedirs(outside, exist_ok=True)
+    with open(f"{outside}/secret.txt", "w") as f:
+        f.write("SECRET-OUTSIDE\n")
+    # A high number: on macOS a sandboxed process gets a socket of its own at a low one
+    # (3) after it starts, which `cat <&3` would wait on.
+    opened = os.open(f"{outside}/secret.txt", os.O_RDONLY)
+    fd = 20
+    os.dup2(opened, fd)
+    os.close(opened)
+    try:
+        call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "execute_command",
+                           "arguments": {"command": f"cat <&{fd} && echo fd-read || echo fd-refused"}}}
+        proc = subprocess.run([str(REPLAY), "--allow-write", granted, "--mcp-server"],
+                              input=json.dumps(call) + "\n", pass_fds=(fd,),
+                              capture_output=True, text=True, timeout=20)
+    finally:
+        os.close(fd)
+    text = ""
+    for line in proc.stdout.splitlines():
+        if line.strip():
+            text = text_of(json.loads(line))
+    check("sandboxed MCP: execute_command does not get the caller's descriptor",
+          "fd-refused" in text and "SECRET-OUTSIDE" not in text, text)
+
 def test_path_check_missing_tail(tmpdir: str) -> None:
     """The allowed-directory check on a path whose end does not exist yet: ".." after a
     missing folder, and a link to a missing target, used to pass as text and then land
@@ -3170,6 +3203,7 @@ def main() -> int:
         test_no_sandbox(tmpdir)
         test_sandbox_mode_texts(tmpdir)
         test_unix_sockets_limited(tmpdir)
+        test_inherited_descriptors(tmpdir)
         test_path_check_missing_tail(tmpdir)
         test_path_validation(tmpdir)
         test_missing_required_params(tmpdir)
