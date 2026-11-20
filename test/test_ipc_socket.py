@@ -19,6 +19,8 @@ Scenarios:
   8. a socket folder with the wrong mode, or a link, is refused
   9. dispatch wait returns when the server is killed with SIGKILL (the process exit watch)
  10. as root only: another user cannot reach the socket
+ 11. the token: a private 32 byte file; a request without it, or with a wrong one, is dropped
+ 12. a sandboxed playlist step cannot have the server run an action (it cannot read the token)
 
 Usage: python3 test_ipc_socket.py [/path/to/replay]
 Exit:  0 = all checks passed, 1 = one or more failures
@@ -126,16 +128,33 @@ def wait_for_socket(path: Path, server: subprocess.Popen, seconds: float = 5) ->
 def recv_exact(sock: socket.socket, size: int) -> bytes:
     data = b""
     while len(data) < size:
-        chunk = sock.recv(size - len(data))
+        try:
+            chunk = sock.recv(size - len(data))
+        except ConnectionResetError:
+            return data  # closed with bytes still unread: Linux resets instead
         if not chunk:
             return data
         data += chunk
     return data
 
 
-def request(path: Path, message_id: int, payload, want_reply: bool, timeout: float = 10):
-    """Sends one request frame; returns (status, payload) of the reply, or None when the
-    server closed the connection without one, or () when no reply was wanted."""
+def token_path(path: Path) -> Path:
+    return path.parent / (path.name + ".token")
+
+
+def read_token(path: Path) -> bytes:
+    """The server's token, which a client sends before its frame; b"" when unreadable."""
+    try:
+        return token_path(path).read_bytes()
+    except OSError:
+        return b""
+
+
+def request(path: Path, message_id: int, payload, want_reply: bool, timeout: float = 10,
+            token: bytes = None):
+    """Sends the token and one request frame; returns (status, payload) of the reply, or
+    None when the server closed the connection without one, or () when no reply was
+    wanted. token: what to send in place of the server's token."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(timeout)
         sock.connect(str(path))
@@ -144,7 +163,8 @@ def request(path: Path, message_id: int, payload, want_reply: bool, timeout: flo
         if payload is not None:
             flags |= FLAG_HAS_PAYLOAD
             body = payload
-        sock.sendall(HEADER.pack(b"RPLC", 1, flags, message_id, len(body)) + body)
+        sent_token = read_token(path) if token is None else token
+        sock.sendall(sent_token + HEADER.pack(b"RPLC", 1, flags, message_id, len(body)) + body)
         if not want_reply:
             return ()
         header = recv_exact(sock, HEADER.size)
@@ -180,11 +200,12 @@ def wait_for_answer(path: Path, server: subprocess.Popen, seconds: float = 10):
 
 
 def send_raw_then_read(path: Path, data: bytes, close_early: bool = False) -> bytes:
-    """Sends raw bytes; returns what the server sends back before it closes (b"" expected)."""
+    """Sends the token, then raw bytes; returns what the server sends back before it
+    closes (b"" expected)."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(5)
         sock.connect(str(path))
-        sock.sendall(data)
+        sock.sendall(read_token(path) + data)
         if close_early:
             return b""
         try:
@@ -233,6 +254,7 @@ def test_round_trip(replay: Path) -> None:
     out, err = finish(server, path)
     check("the server exits after FinishAndWait", server.returncode == 0, err)
     check("the server removes its socket", not path.exists())
+    check("the server removes its token", not token_path(path).exists())
 
 
 def test_bad_frames(replay: Path) -> None:
@@ -428,6 +450,66 @@ def test_other_user(replay: Path) -> None:
     finish(server, path)
 
 
+def test_token(replay: Path) -> None:
+    print("\n=== 11. the token ===")
+    folder = Folder()
+    path = folder.socket_path("ipct11")
+    # Without the token the server takes the frame's 16 bytes as half a token and waits
+    # for the rest until its receive timeout, shortened to 1 s.
+    server = start_server(replay, folder, "ipct11", REPLAY_IPC_TEST_RECEIVE_TIMEOUT="1")
+    if not wait_for_socket(path, server):
+        fail("the server creates its socket")
+        stop(server)
+        return
+    st = os.lstat(token_path(path))
+    check("the token is a plain file with mode 0600", (st.st_mode & 0o777) == 0o600 and (st.st_mode & 0o170000) == 0o100000,
+          oct(st.st_mode))
+    token = read_token(path)
+    check("the token has 32 bytes", len(token) == 32, repr(len(token)))
+    check("no token: closed without a reply", request(path, MSG_START_SERVER, None, True, timeout=5, token=b"") is None)
+    check("no token: the server keeps serving", ping(path) == server.pid)
+    wrong = bytes([token[0] ^ 1]) + token[1:]
+    check("a wrong token: closed without a reply", request(path, MSG_START_SERVER, None, True, timeout=5, token=wrong) is None)
+    check("a wrong token: the server keeps serving", ping(path) == server.pid)
+    finish(server, path)
+
+    second = start_server(replay, folder, "ipct11")
+    if wait_for_answer(path, second) is None:
+        fail("a second server under the name answers")
+        stop(second)
+        return
+    check("a server started again under the name has a new token", read_token(path) not in (b"", token))
+    finish(second, path)
+
+
+def test_sandboxed_step(replay: Path) -> None:
+    print("\n=== 12. a sandboxed playlist step ===")
+    dispatch = replay.parent / "dispatch"
+    if not dispatch.exists():
+        fail("dispatch next to replay", str(dispatch))
+        return
+    folder = Folder()
+    path = folder.socket_path("ipct12")
+    server = start_server(replay, folder, "ipct12")
+    if not wait_for_socket(path, server):
+        fail("the server creates its socket")
+        stop(server)
+        return
+    work = Path(tempfile.mkdtemp(prefix="ipcw"))
+    atexit.register(shutil.rmtree, work, True)
+    # Control: the same step unsandboxed reaches the server.
+    line = f"[execute]\t{dispatch}\tipct12\techo\tFROM-PLAIN-STEP\n"
+    subprocess.run([str(replay)], input=line, env=folder.env(), capture_output=True, text=True, timeout=30)
+    line = f"[execute]\t{dispatch}\tipct12\techo\tFROM-SANDBOXED-STEP\n"
+    boxed = subprocess.run([str(replay), "--allow-write", str(work)], input=line, env=folder.env(),
+                           capture_output=True, text=True, timeout=30)
+    out, err = finish(server, path)
+    check("control: an unsandboxed step has the server run an action", "FROM-PLAIN-STEP" in out, out[-300:] + err[-300:])
+    check("a sandboxed step cannot have the server run an action", "FROM-SANDBOXED-STEP" not in out, out[-300:])
+    check("the step says the token cannot be read", ".token" in boxed.stderr + boxed.stdout,
+          (boxed.stdout + boxed.stderr)[-400:])
+
+
 def connect_probe(path: str) -> int:
     """Run as another user by test 10: prints whether connecting works."""
     try:
@@ -460,6 +542,8 @@ def main() -> int:
     test_folder_checks(replay)
     test_dispatch_wait_on_kill(replay)
     test_other_user(replay)
+    test_token(replay)
+    test_sandboxed_step(replay)
 
     print(f"\nPassed: {_pass}  Failed: {_fail}")
     return 0 if _fail == 0 else 1

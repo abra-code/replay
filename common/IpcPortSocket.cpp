@@ -13,11 +13,21 @@
 //  flags (2 bytes: bit 0 reply wanted, bit 1 payload present), message id or status
 //  (4 bytes, signed), payload length (4 bytes, at most 16 MiB), payload.
 //
+//  Token: before its request frame a client sends the 32 bytes of <socket>.token, a file
+//  of random bytes the server writes (mode 0600) before it listens. The server drops a
+//  connection whose first 32 bytes differ. Connecting needs only the socket, which a
+//  sandboxed command can reach on Linux below Landlock ABI 9 and on macOS whenever Unix
+//  sockets are allowed; reading the token needs read access to the socket folder, which
+//  the sandbox does not give. So a sandboxed step cannot have a server, which runs
+//  unsandboxed, run actions for it (threat model P-F22).
+//
 
 #include "IpcPort.h"
 #include "IpcPortInternal.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <climits>
 #include <cmath>
 #include <cstdio>
@@ -30,6 +40,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/file.h>
+#include <sys/random.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -57,6 +68,9 @@ constexpr double kServerReceiveTimeout = 10;
 constexpr double kServerSendTimeout = 10;
 // How long CreateRemote waits for the connection that checks a server is there.
 constexpr double kProbeTimeout = 2;
+
+constexpr size_t kTokenSize = 32;
+using Token = std::array<uint8_t, kTokenSize>;
 
 enum class Io
 {
@@ -444,6 +458,115 @@ FillAddress(const std::string &path, struct sockaddr_un *address)
 	return true;
 }
 
+// ---------------------------------------------------------------- the token
+
+std::string
+TokenPath(const std::string &socketPath)
+{
+	return socketPath + ".token";
+}
+
+// Writes a new token to path, replacing an old server's file. The caller holds the
+// name's lock, so no other server writes it meanwhile. *deviceOut and *inodeOut identify
+// the file, so that Invalidate removes only its own.
+bool
+WriteToken(const std::string &path, Token *tokenOut, dev_t *deviceOut, ino_t *inodeOut)
+{
+	if (getentropy(tokenOut->data(), tokenOut->size()) != 0)
+	{
+		fprintf(stderr, "error: cannot get random bytes for %s: %s\n", path.c_str(), strerror(errno));
+		return false;
+	}
+	if ((unlink(path.c_str()) != 0) && (errno != ENOENT))
+	{
+		fprintf(stderr, "error: cannot remove the old %s: %s\n", path.c_str(), strerror(errno));
+		return false;
+	}
+	// O_EXCL after the unlink: a new file, never one planted in its place or a link.
+	int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0)
+	{
+		fprintf(stderr, "error: cannot create %s: %s\n", path.c_str(), strerror(errno));
+		return false;
+	}
+	size_t done = 0;
+	while (done < tokenOut->size())
+	{
+		ssize_t n = write(fd, tokenOut->data() + done, tokenOut->size() - done);
+		if ((n < 0) && (errno == EINTR))
+			continue;
+		if (n <= 0)
+		{
+			fprintf(stderr, "error: cannot write %s: %s\n", path.c_str(), (n < 0) ? strerror(errno) : "nothing written");
+			close(fd);
+			unlink(path.c_str());
+			return false;
+		}
+		done += (size_t)n;
+	}
+	struct stat st;
+	bool identified = (fstat(fd, &st) == 0);
+	if (identified)
+	{
+		*deviceOut = st.st_dev;
+		*inodeOut = st.st_ino;
+	}
+	// Closed at once: an open descriptor would show up in /proc/<pid>/fd.
+	if ((close(fd) != 0) || !identified)
+	{
+		fprintf(stderr, "error: cannot write %s: %s\n", path.c_str(), strerror(errno));
+		unlink(path.c_str());
+		return false;
+	}
+	return true;
+}
+
+// Reads a server's token. Refuses a file that is not a plain file of this user, closed to
+// others, of exactly the token's size. On false, errno says why (EINVAL for a wrong file).
+bool
+ReadToken(const std::string &path, Token *tokenOut)
+{
+	// O_NONBLOCK: a pipe planted in its place cannot hold the client (fstat refuses it next).
+	int fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+	if (fd < 0)
+		return false;
+	struct stat st;
+	if ((fstat(fd, &st) != 0) || !S_ISREG(st.st_mode) || (st.st_uid != getuid())
+	    || ((st.st_mode & 077) != 0) || (st.st_size != (off_t)tokenOut->size()))
+	{
+		close(fd);
+		errno = EINVAL;
+		return false;
+	}
+	size_t done = 0;
+	while (done < tokenOut->size())
+	{
+		ssize_t n = read(fd, tokenOut->data() + done, tokenOut->size() - done);
+		if ((n < 0) && (errno == EINTR))
+			continue;
+		if (n <= 0)
+		{
+			int error = (n < 0) ? errno : EINVAL;
+			close(fd);
+			errno = error;
+			return false;
+		}
+		done += (size_t)n;
+	}
+	close(fd);
+	return true;
+}
+
+// Compares in time that does not depend on where the first difference is.
+bool
+SameToken(const Token &a, const uint8_t *b)
+{
+	uint8_t difference = 0;
+	for (size_t i = 0; i < a.size(); i++)
+		difference |= (uint8_t)(a[i] ^ b[i]);
+	return difference == 0;
+}
+
 enum class Connect
 {
 	kOk,
@@ -513,8 +636,11 @@ class SocketLocalPort final : public Port
 {
 public:
 	// Takes ownership of both descriptors; lockFd holds the name's lock until Invalidate.
-	SocketLocalPort(int listenFd, int lockFd, std::string path, dev_t device, ino_t inode, Handler handler)
-		: mListenFd(listenFd), mLockFd(lockFd), mPath(std::move(path)), mDevice(device), mInode(inode), mHandler(std::move(handler))
+	// token is the content of the token file identified by tokenDevice and tokenInode.
+	SocketLocalPort(int listenFd, int lockFd, std::string path, dev_t device, ino_t inode,
+	                const Token &token, dev_t tokenDevice, ino_t tokenInode, Handler handler)
+		: mListenFd(listenFd), mLockFd(lockFd), mPath(std::move(path)), mDevice(device), mInode(inode),
+		  mToken(token), mTokenDevice(tokenDevice), mTokenInode(tokenInode), mHandler(std::move(handler))
 	{
 		const char *timeout = getenv("REPLAY_IPC_TEST_RECEIVE_TIMEOUT");
 		if (timeout != nullptr)
@@ -574,6 +700,10 @@ public:
 				unlink(mPath.c_str());
 			close(mListenFd);
 			mListenFd = -1;
+			// The token file likewise, before the lock is given up.
+			std::string tokenPath = TokenPath(mPath);
+			if ((lstat(tokenPath.c_str(), &st) == 0) && (st.st_dev == mTokenDevice) && (st.st_ino == mTokenInode))
+				unlink(tokenPath.c_str());
 		}
 		if (mLockFd >= 0)
 		{ // gives up the name: the next server may take it
@@ -612,12 +742,19 @@ private:
 
 	void Serve(int fd)
 	{
+		double deadline = DeadlineAfter(mReceiveTimeout);
+		// The token first: a peer that could not read the token file (a sandboxed command)
+		// is dropped before its frame is read.
+		uint8_t token[kTokenSize];
+		if ((ReadAll(fd, token, sizeof(token), deadline) != Io::kOk) || !SameToken(mToken, token))
+			return; // dropped without a reply: a probe, a peer that gave up, or a wrong token
+
 		uint16_t flags = 0;
 		int32_t messageId = 0;
 		CFObj<CFDataRef> request;
-		Io read = ReadFrame(fd, kRequestMagic, DeadlineAfter(mReceiveTimeout), &flags, &messageId, request);
+		Io read = ReadFrame(fd, kRequestMagic, deadline, &flags, &messageId, request);
 		if (read != Io::kOk)
-			return; // dropped without a reply: a probe, a peer that gave up, or a bad frame
+			return; // dropped without a reply: a peer that gave up, or a bad frame
 
 		CFObj<CFDataRef> reply;
 		if (mHandler)
@@ -632,6 +769,9 @@ private:
 	std::string mPath;
 	dev_t mDevice = 0;
 	ino_t mInode = 0;
+	Token mToken;
+	dev_t mTokenDevice = 0;
+	ino_t mTokenInode = 0;
 	Handler mHandler;
 	double mReceiveTimeout = kServerReceiveTimeout;
 	CFObj<CFSocketRef> mSocket;
@@ -660,6 +800,11 @@ public:
 		if (mPath.empty())
 			return kInvalid;
 
+		// Read for every request: a server started again under the name has a new token.
+		Token token;
+		if (!ReadToken(TokenPath(mPath), &token))
+			return (errno == ENOENT) ? kInvalid : kTransportError;
+
 		int fd = -1;
 		double sendDeadline = DeadlineAfter(sendTimeout);
 		Connect connected = ConnectTo(mPath, sendDeadline, &fd);
@@ -676,7 +821,9 @@ public:
 		}
 
 		uint16_t flags = (replyOut != nullptr) ? kFlagReplyWanted : 0;
-		Io written = WriteFrame(fd, kRequestMagic, flags, messageId, data, sendDeadline);
+		Io written = WriteAll(fd, token.data(), token.size(), sendDeadline);
+		if (written == Io::kOk)
+			written = WriteFrame(fd, kRequestMagic, flags, messageId, data, sendDeadline);
 		if (written != Io::kOk)
 		{
 			close(fd);
@@ -761,10 +908,21 @@ CreateSocketLocal(const std::string &name, Handler handler)
 		close(lockFd);
 		return nullptr;
 	}
+	// The token exists before the socket does, so a client that finds the socket finds it.
+	std::string tokenPath = TokenPath(path);
+	Token token;
+	dev_t tokenDevice = 0;
+	ino_t tokenInode = 0;
+	if (!WriteToken(tokenPath, &token, &tokenDevice, &tokenInode))
+	{
+		close(lockFd);
+		return nullptr;
+	}
 	int listenFd = NewStreamSocket();
 	if (listenFd < 0)
 	{
 		fprintf(stderr, "error: cannot create a socket: %s\n", strerror(errno));
+		unlink(tokenPath.c_str());
 		close(lockFd);
 		return nullptr;
 	}
@@ -775,10 +933,12 @@ CreateSocketLocal(const std::string &name, Handler handler)
 	{
 		fprintf(stderr, "error: cannot listen on %s: %s\n", path.c_str(), strerror(errno));
 		close(listenFd);
+		unlink(tokenPath.c_str());
 		close(lockFd);
 		return nullptr;
 	}
-	return std::unique_ptr<Port>(new SocketLocalPort(listenFd, lockFd, path, st.st_dev, st.st_ino, std::move(handler)));
+	return std::unique_ptr<Port>(new SocketLocalPort(listenFd, lockFd, path, st.st_dev, st.st_ino,
+	                                                 token, tokenDevice, tokenInode, std::move(handler)));
 }
 
 std::unique_ptr<Port>
@@ -796,6 +956,28 @@ CreateSocketRemote(const std::string &name)
 	close(fd);
 	if (!sameUser)
 		return nullptr;
+	// Say why when the token cannot be read: the server is there, but this client may not
+	// talk to it. Under the sandbox the read is refused unless the socket folder is granted.
+	std::string tokenPath = TokenPath(path);
+	Token token;
+	if (!ReadToken(tokenPath, &token))
+	{
+		int error = errno;
+		// Once per process: dispatch takes a null port for "no server", tries to start one
+		// and asks again for a few seconds, which would print this each time.
+		static std::atomic<bool> told(false);
+		if (!told.exchange(true))
+		{
+			if (error == ENOENT)
+				fprintf(stderr, "error: %s is missing: the server for this name may come from an older replay, "
+				        "or be stopping; if it keeps running, stop it and start it again\n", tokenPath.c_str());
+			else
+				fprintf(stderr, "error: cannot read %s, which a client needs to talk to the server: %s%s\n",
+				        tokenPath.c_str(), (error == EINVAL) ? "not a private file of yours of the right size" : strerror(error),
+				        ((error == EACCES) || (error == EPERM)) ? " (a sandboxed command cannot use the servers)" : "");
+		}
+		return nullptr;
+	}
 	return std::unique_ptr<Port>(new SocketRemotePort(path));
 }
 

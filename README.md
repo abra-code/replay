@@ -843,7 +843,8 @@ The server cannot run sandboxed: "start" with --sandbox, --allow-read, --allow-w
 --sandbox-profile, --deny-network or --deny-unix-sockets fails.
 On Linux "dispatch" reaches the server through a Unix socket in $XDG_RUNTIME_DIR/replay,
 or in /tmp/replay-<uid> when that variable does not name a folder you own, so both must run
-as the same user with the same XDG_RUNTIME_DIR.
+as the same user with the same XDG_RUNTIME_DIR. A client first sends the server's token,
+a private file next to the socket, so a command under the sandbox cannot use a server.
 
 Supported actions are the same as "replay" actions plus a couple of special control words:
 

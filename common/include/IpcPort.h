@@ -42,7 +42,8 @@ public:
 	// Null when the name is taken (by another process, or already by this one) or
 	// cannot be used as a port name.
 	static std::unique_ptr<Port> CreateLocal(const std::string &name, Handler handler);
-	// Null when nobody serves the name.
+	// Null when nobody serves the name, or (Unix socket) when this client cannot read the
+	// server's token file.
 	static std::unique_ptr<Port> CreateRemote(const std::string &name);
 
 	virtual ~Port() = default;
