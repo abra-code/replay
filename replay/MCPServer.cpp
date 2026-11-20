@@ -158,11 +158,34 @@ static PathResult resolve_path(const std::string &requested)
         size_t slash = cur.rfind('/');
         if (slash == std::string::npos || slash == 0)
             break;
-        suffix.push_back(cur.substr(slash + 1));
+        std::string component = cur.substr(slash + 1);
         cur = cur.substr(0, slash);
+        // The tail that does not exist yet is appended to the canonical ancestor as text,
+        // so it must hold only plain names. A ".." there would be checked as text below
+        // the ancestor but resolved by the kernel above it once the missing folders are
+        // created ("<allowed>/missing/../../x"). "." is refused with it; an empty
+        // component ("a//b") is harmless and skipped.
+        if (component == "." || component == "..")
+            return {false, {}, "Path not allowed: " + requested +
+                               " has \".\" or \"..\" after a folder that does not exist"};
+        if (!component.empty())
+            suffix.push_back(std::move(component));
         if (realpath(cur.c_str(), buf) != nullptr)
         {
             std::string result(buf);
+            // A missing name with more names after it must really be missing. If it exists
+            // while realpath failed, it is a broken or looping link (or unreadable), and
+            // creating folders or files below it would follow it wherever it points. The
+            // last name is left to the caller: deleting, moving or inspecting a broken link
+            // acts on the link itself, and write_file, which follows it, checks on its own.
+            if (suffix.size() > 1)
+            {
+                std::string first = result + "/" + suffix.back();
+                struct stat st;
+                if (lstat(first.c_str(), &st) == 0)
+                    return {false, {}, "Path not allowed: " + first +
+                                       " exists but cannot be resolved (a broken or looping link?)"};
+            }
             for (int i = (int)suffix.size() - 1; i >= 0; i--)
             {
                 result += '/';
@@ -575,6 +598,26 @@ static std::string validate_and_get(Json::Val args, const char *key,
     return vr.canonical;
 }
 
+// Create the parent folder of a validated path, then check it again now that it exists.
+// The first check saw the missing part only as text; another request (an execute_command
+// running at the same time, say) may have put a link there since, and posix_mkdir_p
+// follows links. A failed mkdir is left for the file operation to report, as before.
+// The remaining window between this check and the operation needs descriptor-based
+// calls (threat model P-R3).
+static bool make_parent_inside(const std::string &path, const MCPServerOptions &opts,
+                               ActionContext *ac, ReplayContext *context)
+{
+    std::string parent = posix_parent_dir(path);
+    posix_mkdir_p(parent);
+    auto vr = validate_path(parent, opts, true);
+    if (!vr.ok)
+    {
+        PrintMCPError(context, ac, -32001, vr.error);
+        return false;
+    }
+    return true;
+}
+
 // ============================================================================
 // execute_command response builder — declared in MCPServer.h, called via
 // PrintMCPExecuteResult in ReplayActionPrivate.h from ExecuteEchoActions.mm.
@@ -693,7 +736,18 @@ static void dispatch_mcp_tool(const std::string &tool,
             PrintMCPError(context, ac, -32602, "Missing required param: content");
             return;
         }
-        posix_mkdir_p(posix_parent_dir(path));
+        if (!make_parent_inside(path, *opts, ac, context))
+            return;
+        // The path passed the check either resolved (no link left in it) or as a missing
+        // name; a link found there now points nowhere, and writing would create its target
+        // wherever that is.
+        struct stat link_st;
+        if (lstat(path.c_str(), &link_st) == 0 && S_ISLNK(link_st.st_mode))
+        {
+            PrintMCPError(context, ac, -32001, "Path not allowed: " + path +
+                                               " is a link to a missing target");
+            return;
+        }
         CreateFile(path, std::string(*content_sv), context, ac);
     }
     else if (tool == "create_directory")
@@ -711,7 +765,8 @@ static void dispatch_mcp_tool(const std::string &tool,
         auto dst = validate_and_get(args, "destination", *opts, true, ac, context);
         if (dst.empty())
             return;
-        posix_mkdir_p(posix_parent_dir(dst));
+        if (!make_parent_inside(dst, *opts, ac, context))
+            return;
         MoveItem(src, dst, context, ac);
     }
     else if (tool == "delete_file")

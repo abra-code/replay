@@ -2976,6 +2976,62 @@ def test_sandbox_mode_texts(tmpdir: str) -> None:
           "kernel sandbox" in boxed_text and "without a kernel sandbox" not in boxed_text,
           boxed_text)
 
+def test_path_check_missing_tail(tmpdir: str) -> None:
+    """The allowed-directory check on a path whose end does not exist yet: ".." after a
+    missing folder, and a link to a missing target, used to pass as text and then land
+    outside (threat model P-F1). Run with --no-sandbox, so only the check stands."""
+    print("=== MCP: path check on the missing part of a path ===")
+
+    project = f"{tmpdir}/pc_project"
+    outside = f"{tmpdir}/pc_outside"
+    os.makedirs(project, exist_ok=True)
+    os.makedirs(outside, exist_ok=True)
+    with open(f"{outside}/victim.txt", "w") as f:
+        f.write("victim")
+    os.symlink(f"{outside}/via_link.txt", f"{project}/dangling")
+    os.symlink(f"{outside}/missing_dir", f"{project}/dangling_dir")
+
+    def call(i: int, name: str, args: dict) -> dict:
+        return {"jsonrpc": "2.0", "id": i, "method": "tools/call",
+                "params": {"name": name, "arguments": args}}
+
+    by_id = run_mcp([
+        call(1, "write_file", {"path": f"{project}/nope/../../escaped.txt", "content": "x"}),
+        call(2, "move_file", {"source": f"{project}/nope2/../../pc_outside/victim.txt",
+                              "destination": f"{project}/in/victim.txt"}),
+        call(3, "move_file", {"source": f"{project}/ok.txt",
+                              "destination": f"{project}/nope3/../../moved_out.txt"}),
+        call(4, "create_directory", {"path": f"{project}/nope4/../../made_dir"}),
+        call(5, "write_file", {"path": f"{project}/dangling", "content": "x"}),
+        call(6, "write_file", {"path": f"{project}/./nope5/x.txt", "content": "x"}),
+        call(7, "write_file", {"path": f"{project}/new/sub//deep.txt", "content": "deep"}),
+        call(8, "write_file", {"path": f"{project}/dangling_dir/x.txt", "content": "x"}),
+        call(9, "get_file_info", {"path": f"{project}/dangling"}),
+        call(10, "delete_file", {"path": f"{project}/dangling"}),
+    ], [project], extra_args=["--no-sandbox"], sequential=True)
+
+    check("write_file with \"..\" after a missing folder is refused",
+          is_error(by_id[1], -32001) and not os.path.exists(f"{tmpdir}/escaped.txt"), str(by_id[1]))
+    check("move_file source with \"..\" after a missing folder is refused",
+          is_error(by_id[2], -32001) and os.path.exists(f"{outside}/victim.txt"), str(by_id[2]))
+    check("move_file destination with \"..\" after a missing folder is refused",
+          is_error(by_id[3], -32001) and not os.path.exists(f"{tmpdir}/moved_out.txt"), str(by_id[3]))
+    check("create_directory with \"..\" after a missing folder is refused",
+          is_error(by_id[4], -32001) and not os.path.exists(f"{tmpdir}/made_dir"), str(by_id[4]))
+    check("write_file through a link to a missing target is refused",
+          is_error(by_id[5], -32001) and not os.path.exists(f"{outside}/via_link.txt"), str(by_id[5]))
+    check("\".\" inside the existing part still works (realpath resolves it)",
+          not is_error(by_id[6]) and os.path.exists(f"{project}/nope5/x.txt"), str(by_id[6]))
+    check("new nested folders and a doubled slash still work",
+          not is_error(by_id[7]) and os.path.exists(f"{project}/new/sub/deep.txt"), str(by_id[7]))
+    check("write_file below a broken link to a folder is refused",
+          is_error(by_id[8], -32001) and not os.path.exists(f"{outside}/missing_dir"), str(by_id[8]))
+    check("get_file_info on a broken link still works (it acts on the link)",
+          not is_error(by_id[9]), str(by_id[9]))
+    check("delete_file on a broken link still works (it removes the link)",
+          not is_error(by_id[10]) and not os.path.lexists(f"{project}/dangling"), str(by_id[10]))
+
+
 def main() -> int:
     if not REPLAY.exists():
         print(f"error: replay binary not found at {REPLAY}", file=sys.stderr)
@@ -3068,6 +3124,7 @@ def main() -> int:
         test_sandbox_profile_allowed_dirs(tmpdir)
         test_no_sandbox(tmpdir)
         test_sandbox_mode_texts(tmpdir)
+        test_path_check_missing_tail(tmpdir)
         test_path_validation(tmpdir)
         test_missing_required_params(tmpdir)
         test_readonly_dir(tmpdir)
