@@ -1163,6 +1163,9 @@ int main(int argc, const char * argv[])
 		// The sandbox does not check a descriptor already open, so one this process got
 		// from its caller must not reach a command (threat model P-F9).
 		ChildProcess::CloseOtherDescriptorsInChildren();
+		// And nothing sandboxed outlives the run, not even a command that left its
+		// process group with setsid (Linux; threat model P-F6).
+		ChildProcess::EndDescendantsAtExit();
 	}
 
 	// --mcp-server: start MCP stdio server.

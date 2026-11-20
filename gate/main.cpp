@@ -529,6 +529,9 @@ int main(int argc, char* argv[])
         // The sandbox does not check a descriptor already open, so one gate got from its
         // caller must not reach the command (threat model P-F9).
         ChildProcess::CloseOtherDescriptorsInChildren();
+        // And nothing sandboxed outlives gate, not even a process that left the
+        // command's process group with setsid (Linux; threat model P-F6).
+        ChildProcess::EndDescendantsAtExit();
 #if defined(__linux__)
         // The Linux sandbox denies xattr writes (seccomp), so a memo write could only fail,
         // after write_xattr_fileinfo had flipped a read-only input writable and back, which

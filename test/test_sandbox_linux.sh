@@ -552,5 +552,74 @@ else
 fi
 
 echo ""
+echo "=== 13b. adopted orphans are reaped during the run ==="
+# As subreaper replay adopts every orphaned descendant; one that exits must not stay a
+# zombie until replay exits. Step 1 leaves an orphan that exits after 0.3 s, step 2
+# waits, step 3 counts replay's zombie children (replay is the steps' parent, $PPID).
+ZOMBIE_COUNT='cat /proc/[0-9]*/stat 2>/dev/null | /usr/bin/awk -v p="$PPID" '"'"'{ sub(/.*\) /, ""); if ($2 == p && $1 == "Z") n++ } END { print "zombies=" n+0 }'"'"''
+run_stdin "$(printf '[execute]\t/bin/sh\t-c\t(/bin/sleep 0.3 &)\n[execute]\t/bin/sleep\t1\n[execute]\t/bin/sh\t-c\t%s' "$ZOMBIE_COUNT")" \
+    --serial --allow-write "$ALLOWED"
+case "$out" in *"zombies=0"*) r=0 ;; *) r=1 ;; esac
+check $r "sandboxed playlist: an adopted orphan that exited is reaped before the next step ends" "$out"
+
+echo ""
+echo "=== 14. processes that leave with setsid ==="
+# A command that starts a process in its own session escapes the process group that a
+# timeout kills. Under the sandbox replay and gate are its subreaper and end it when
+# they exit; unsandboxed it keeps running, as before.
+# The command waits (up to 2 s) for the pid file, so the file exists before replay or
+# gate can exit and end the process: otherwise it could be ended before writing it.
+SURVIVOR="setsid /bin/sh -c 'echo \$\$ > PIDFILE; exec sleep 300' < /dev/null > /dev/null 2>&1 & for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s PIDFILE ] && break; sleep 0.1; done"
+
+# Waits up to 3 s for the process in $1 (a pid file) to be gone; returns 0 when gone.
+gone_within_3s() {
+    local pid
+    pid="$(/bin/cat "$1" 2>/dev/null)"
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+        kill -0 "$pid" 2>/dev/null || return 0
+        /bin/sleep 0.2
+    done
+    return 1
+}
+
+survivor_step() { # $1: pid file
+    printf '[execute]\t/bin/sh\t-c\t%s\n' "${SURVIVOR//PIDFILE/$1}"
+}
+
+run_stdin "$(survivor_step "$ALLOWED/plain.pid")"
+test -s "$ALLOWED/plain.pid" && ! gone_within_3s "$ALLOWED/plain.pid"
+check $? "control: unsandboxed, the setsid process outlives replay" "$out"
+
+run_stdin "$(survivor_step "$ALLOWED/boxed.pid")" --allow-write "$ALLOWED"
+test -s "$ALLOWED/boxed.pid" && gone_within_3s "$ALLOWED/boxed.pid"
+check $? "sandboxed playlist: the setsid process ends with replay" "$out"
+
+mcp_command="${SURVIVOR//PIDFILE/$ALLOWED/mcp.pid}"
+mcp_command="${mcp_command//\\/\\\\}"
+mcp_command="${mcp_command//\"/\\\"}"
+out="$(printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"execute_command\",\"arguments\":{\"command\":\"$mcp_command\"}}}" \
+    | "$REPLAY" --allow-write "$ALLOWED" --mcp-server 2>&1)"
+test -s "$ALLOWED/mcp.pid" && gone_within_3s "$ALLOWED/mcp.pid"
+check $? "sandboxed MCP server: the setsid process ends when the server exits" "$out"
+
+GATE="$(/usr/bin/dirname -- "$REPLAY")/gate"
+if [ -x "$GATE" ]; then
+    out="$("$GATE" --allow-write "$ALLOWED" -c "$ALLOWED/gate-cache-setsid" -f -- \
+           /bin/sh -c "${SURVIVOR//PIDFILE/$ALLOWED/gate.pid}" 2>&1)"
+    test -s "$ALLOWED/gate.pid" && gone_within_3s "$ALLOWED/gate.pid"
+    check $? "sandboxed gate: the setsid process ends with gate" "$out"
+else
+    echo "  skipped: no gate next to replay"
+fi
+
+# End the control's process, and any that a failed check above left running.
+for name in plain boxed mcp gate; do
+    pid="$(/bin/cat "$ALLOWED/$name.pid" 2>/dev/null)"
+    case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null ;; esac
+done
+
+echo ""
 echo "Passed: $pass  Failed: $fail"
 [ "$fail" -eq 0 ]

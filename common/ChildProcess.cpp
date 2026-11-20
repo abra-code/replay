@@ -12,6 +12,15 @@
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <vector>
+#if defined(__linux__)
+#include <cstdio>
+#include <cstdlib>
+#include <dirent.h>
+#include <mutex>
+#include <set>
+#include <sys/prctl.h>
+#endif
 
 extern char **environ;
 
@@ -193,6 +202,140 @@ void CloseOtherDescriptorsInChildren()
     gCloseOtherDescriptors.store(true);
 }
 
+#if defined(__linux__)
+namespace
+{
+
+// The processes whose parent is this one, from /proc/<pid>/stat (field 4, after the
+// command name, which is in parentheses and may itself contain ") "). Zombies included:
+// they are reaped by the caller.
+std::vector<pid_t> DirectChildren()
+{
+    std::vector<pid_t> children;
+    const pid_t self = getpid();
+    DIR *proc = opendir("/proc");
+    if(proc == nullptr)
+        return children;
+    while(struct dirent *entry = readdir(proc))
+    {
+        char *end = nullptr;
+        long pid = strtol(entry->d_name, &end, 10);
+        if((end == entry->d_name) || (*end != '\0') || (pid <= 0))
+            continue;
+        char path[64];
+        snprintf(path, sizeof(path), "/proc/%ld/stat", pid);
+        FILE *f = fopen(path, "re");
+        if(f == nullptr)
+            continue; // gone meanwhile
+        char line[1024];
+        bool read = (fgets(line, sizeof(line), f) != nullptr);
+        fclose(f);
+        if(!read)
+            continue;
+        const char *close = strrchr(line, ')');
+        char state = 0;
+        long ppid = 0;
+        if((close != nullptr) && (sscanf(close + 1, " %c %ld", &state, &ppid) == 2) && (ppid == self))
+            children.push_back((pid_t)pid);
+    }
+    closedir(proc);
+    return children;
+}
+
+// While this process is a subreaper: the children a Run call waits for, which only
+// that call may reap. Changed under gChildrenMutex, which posix_spawn also runs under,
+// so a child that exits at once is in the set before anyone can see it exit.
+std::atomic<bool> gSubreaper(false);
+std::mutex gChildrenMutex;
+std::set<pid_t> gRunChildren;
+
+// A subreaper adopts every orphaned descendant, and an adopted one that exits stays a
+// zombie until this process reaps it (before, the system did). Called after each Run:
+// reaps exited children that no Run waits for. Stops at one that a Run waits for,
+// which that Run reaps soon; the rest are reaped after the next Run.
+void ReapAdoptedOrphans()
+{
+    std::lock_guard<std::mutex> lock(gChildrenMutex);
+    for(int i = 0; i < 64; i++)
+    {
+        siginfo_t info;
+        memset(&info, 0, sizeof(info));
+        if((waitid(P_ALL, 0, &info, WEXITED | WNOHANG | WNOWAIT) != 0) || (info.si_pid == 0))
+            return;
+        if(gRunChildren.count(info.si_pid) != 0)
+            return;
+        waitpid(info.si_pid, nullptr, WNOHANG);
+    }
+}
+
+// Reaps the children that have exited, without waiting.
+void ReapExited()
+{
+    while(waitpid(-1, nullptr, WNOHANG) > 0)
+    {
+    }
+}
+
+void EndRemainingDescendants()
+{
+    std::vector<pid_t> children = DirectChildren();
+    if(children.empty())
+        return;
+    std::set<pid_t> asked;
+    for(pid_t pid : children)
+    {
+        kill(pid, SIGTERM);
+        asked.insert(pid);
+    }
+    // A second for them to finish; their own children are re-parented here as they go,
+    // and are asked too.
+    long long deadline = NowMillis() + 1000;
+    while(NowMillis() < deadline)
+    {
+        ReapExited();
+        children = DirectChildren();
+        if(children.empty())
+            return;
+        for(pid_t pid : children)
+        {
+            if(asked.insert(pid).second)
+                kill(pid, SIGTERM);
+        }
+        usleep(20000);
+    }
+    // Then SIGKILL, round by round: each one killed hands its children to this process.
+    for(int round = 0; round < 100; round++)
+    {
+        children = DirectChildren();
+        if(children.empty())
+            return;
+        for(pid_t pid : children)
+            kill(pid, SIGKILL);
+        usleep(10000);
+        ReapExited();
+    }
+}
+
+} // namespace
+#endif
+
+void EndDescendantsAtExit()
+{
+#if defined(__linux__)
+    static std::atomic<bool> registered(false);
+    if(registered.exchange(true))
+        return;
+    if(prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0)
+    {
+        fprintf(stderr, "warning: cannot become the subreaper of the commands (%s): a process that "
+                        "leaves its session with setsid can outlive this run\n", strerror(errno));
+        return;
+    }
+    gSubreaper.store(true);
+    std::atexit(EndRemainingDescendants);
+#endif
+}
+
 Result Run(const Options &opts)
 {
     Result res;
@@ -303,8 +446,22 @@ Result Run(const Options &opts)
     }
 
     pid_t pid = 0;
-    int rc = posix_spawn(&pid, path, &fa, &spawnattr,
+    int rc;
+#if defined(__linux__)
+    if(gSubreaper.load())
+    {
+        std::lock_guard<std::mutex> lock(gChildrenMutex);
+        rc = posix_spawn(&pid, path, &fa, &spawnattr,
                          const_cast<char* const*>(argv.data()), envp);
+        if((rc == 0) && !opts.detach)
+            gRunChildren.insert(pid);
+    }
+    else
+#endif
+    {
+        rc = posix_spawn(&pid, path, &fa, &spawnattr,
+                         const_cast<char* const*>(argv.data()), envp);
+    }
     posix_spawnattr_destroy(&spawnattr);
     posix_spawn_file_actions_destroy(&fa);
 
@@ -389,6 +546,16 @@ Result Run(const Options &opts)
         do { r = waitpid(pid, &status, 0); } while(r < 0 && errno == EINTR);
         reaped = (r == pid);
     }
+#if defined(__linux__)
+    if(gSubreaper.load())
+    {
+        {
+            std::lock_guard<std::mutex> lock(gChildrenMutex);
+            gRunChildren.erase(pid);
+        }
+        ReapAdoptedOrphans();
+    }
+#endif
 
     if(reaped && WIFEXITED(status))
     {

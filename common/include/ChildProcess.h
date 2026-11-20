@@ -77,4 +77,13 @@ Result Run(const Options &opts);
 // descriptors on, as a classic make jobserver needs.
 void CloseOtherDescriptorsInChildren();
 
+// Linux: makes this process the subreaper of everything it starts, so a descendant that
+// leaves its process group and session (setsid) is re-parented to this process rather
+// than to the system, and ends every remaining descendant when this process exits
+// normally (SIGTERM, then SIGKILL after a second). replay and gate call it once their
+// kernel sandbox is on, so that nothing sandboxed outlives the run (threat model
+// P-F6). Not when killed by a signal, which runs no exit handlers. macOS has no
+// subreaper; there it does nothing.
+void EndDescendantsAtExit();
+
 } // namespace ChildProcess
