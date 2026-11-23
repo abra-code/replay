@@ -3032,10 +3032,11 @@ def test_inherited_descriptors(tmpdir: str) -> None:
     os.makedirs(outside, exist_ok=True)
     with open(f"{outside}/secret.txt", "w") as f:
         f.write("SECRET-OUTSIDE\n")
-    # A high number: on macOS a sandboxed process gets a socket of its own at a low one
-    # (3) after it starts, which `cat <&3` would wait on.
+    # Not 3: on macOS a sandboxed process gets a socket of its own there after it starts,
+    # which `cat <&3` would wait on. A single digit: dash, /bin/sh on Debian, takes no
+    # other descriptor number in a redirection.
     opened = os.open(f"{outside}/secret.txt", os.O_RDONLY)
-    fd = 20
+    fd = 9
     os.dup2(opened, fd)
     os.close(opened)
     try:
