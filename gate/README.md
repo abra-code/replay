@@ -251,4 +251,4 @@ Failed commands (non-zero exit) are never cached. Missing outputs after a succes
 
 ## Concurrency
 
-Multiple gate instances can safely share the same cache directory. Each task has its own cache file, so different tasks never contend. Same-task concurrency uses file-level locking: reads use shared locks (`flock LOCK_SH`), writes use exclusive locks (`flock LOCK_EX`), and writes are atomic (temp file + rename).
+Multiple gate instances can safely share the same cache directory. Each task has its own cache file, so different tasks never contend. A write goes to a temp file of the writing process's own and is renamed over the entry, so a reader sees the old entry or the new one, never part of one; when two runs of the same task finish together, the last one to finish wins, and either entry is complete.

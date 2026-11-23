@@ -1116,6 +1116,77 @@ else
 fi
 
 # ============================================================
+echo "=== Cache writer ==="
+
+# The writer must not follow a link planted in the cache folder (a shared cache folder,
+# or a sandboxed command that can write there), must leave no temp file behind, and must
+# report a cache folder it cannot use instead of ignoring the failure.
+CW_DIR="$TEST_DIR/cache_writer"
+/bin/mkdir -p "$CW_DIR"
+echo "cw" > "$CW_DIR/in.txt"
+echo "victim content" > "$CW_DIR/victim.txt"
+
+output=$("$GATE" -v -c "$CW_DIR/cache" -i "$CW_DIR/in.txt" -- /usr/bin/true 2>&1)
+cw_sig=$(echo "$output" | /usr/bin/sed -n 's/^gate: task signature: \([0-9a-f]*\)$/\1/p')
+if [ -z "$cw_sig" ] || [ ! -f "$CW_DIR/cache/$cw_sig.plist" ]; then
+    fail "Cache writer: first run stores an entry named by the signature"
+    echo "$output"
+else
+    pass "Cache writer: first run stores an entry named by the signature"
+fi
+
+# A link at the temp name the writer used to use: the write must not land in its target.
+/bin/ln -s "$CW_DIR/victim.txt" "$CW_DIR/cache/$cw_sig.plist.tmp"
+echo "cw changed" > "$CW_DIR/in.txt"
+output=$("$GATE" -v -c "$CW_DIR/cache" -i "$CW_DIR/in.txt" -- /usr/bin/true 2>&1)
+victim=$(/bin/cat "$CW_DIR/victim.txt")
+stored=$(echo "$output" | /usr/bin/grep "task cache stored in")
+if [ "$victim" = "victim content" ] && [ -n "$stored" ] && [ -f "$CW_DIR/cache/$cw_sig.plist" ]; then
+    pass "Cache writer: a link planted at a temp name is not followed"
+else
+    fail "Cache writer: a link planted at a temp name is not followed (victim: $victim)"
+    echo "$output"
+fi
+/bin/rm -f "$CW_DIR/cache/$cw_sig.plist.tmp"
+
+leftover=$(/usr/bin/find "$CW_DIR/cache" -name '*.tmp' | /usr/bin/wc -l | /usr/bin/tr -d ' ')
+if [ "$leftover" = "0" ]; then
+    pass "Cache writer: no temp file is left after a store"
+else
+    fail "Cache writer: no temp file is left after a store ($leftover found)"
+    /bin/ls -la "$CW_DIR/cache"
+fi
+
+# The entry name taken by a folder that is not empty: the rename fails, which is reported,
+# and the temp file is removed.
+/bin/rm -f "$CW_DIR/cache/$cw_sig.plist"
+/bin/mkdir -p "$CW_DIR/cache/$cw_sig.plist/inner"
+echo "cw changed again" > "$CW_DIR/in.txt"
+output=$("$GATE" -v -c "$CW_DIR/cache" -i "$CW_DIR/in.txt" -- /usr/bin/true 2>&1)
+rc=$?
+leftover=$(/usr/bin/find "$CW_DIR/cache" -name '*.tmp' | /usr/bin/wc -l | /usr/bin/tr -d ' ')
+matched=$(echo "$output" | /usr/bin/grep "cannot replace cache file")
+if [ "$rc" -eq 0 ] && [ -n "$matched" ] && [ "$leftover" = "0" ]; then
+    pass "Cache writer: a failed rename is reported and leaves no temp file"
+else
+    fail "Cache writer: a failed rename is reported and leaves no temp file (exit $rc, $leftover left)"
+    echo "$output"
+fi
+
+# The cache folder path taken by a file: reported, and the command still succeeds.
+echo "not a folder" > "$CW_DIR/cache_file"
+output=$("$GATE" -v -c "$CW_DIR/cache_file" -i "$CW_DIR/in.txt" -- /usr/bin/true 2>&1)
+rc=$?
+matched=$(echo "$output" | /usr/bin/grep "cache folder is not a folder")
+content=$(/bin/cat "$CW_DIR/cache_file")
+if [ "$rc" -eq 0 ] && [ -n "$matched" ] && [ "$content" = "not a folder" ]; then
+    pass "Cache writer: a cache folder path taken by a file is reported"
+else
+    fail "Cache writer: a cache folder path taken by a file is reported (exit $rc)"
+    echo "$output"
+fi
+
+# ============================================================
 echo ""
 echo "Results: $PASS passed, $FAIL failed out of $((PASS + FAIL)) tests"
 

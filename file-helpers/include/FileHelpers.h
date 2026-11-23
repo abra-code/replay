@@ -2,7 +2,7 @@
 //  FileHelpers.h
 //  file-helpers
 //
-//  Header-only utilities for file path resolution.
+//  Header-only utilities for file path resolution, and a write helper.
 //  Handles symlinks correctly for both existing and non-existing paths.
 //
 
@@ -11,6 +11,7 @@
 
 #include <string>
 #include <vector>
+#include <cerrno>
 #include <cstring>
 #include <climits>
 #include <unistd.h>
@@ -162,6 +163,31 @@ inline std::string resolve_path(const std::string& path)
     if (!resolved_prefix.empty() && resolved_prefix.back() != '/')
         resolved_prefix += '/';
     return resolved_prefix + suffix;
+}
+
+// Write all of `size` bytes to `fd`, retrying short writes and EINTR.
+// Returns false on any other failure, with errno set by write().
+inline bool write_all(int fd, const void* data, size_t size)
+{
+    const char* cursor = static_cast<const char*>(data);
+    while (size > 0)
+    {
+        ssize_t count = write(fd, cursor, size);
+        if (count < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            return false;
+        }
+        if (count == 0)
+        {
+            errno = EIO;
+            return false;
+        }
+        cursor += count;
+        size -= (size_t)count;
+    }
+    return true;
 }
 
 }  // namespace file_helpers

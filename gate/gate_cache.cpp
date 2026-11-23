@@ -2,7 +2,7 @@
 //  gate_cache.cpp
 //  gate
 //
-//  Per-task cache files with flock concurrency control.
+//  Per-task cache files, each replaced whole by renaming a temp file over it.
 //  Each task gets its own file: <cache_dir>/<signature>.<format>
 //  Supports binary plist (default) and JSON formats.
 //
@@ -13,7 +13,10 @@
 #include <fstream>
 #include <algorithm>
 #include <cstdio>
-#include <sys/file.h>
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/stat.h>
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -228,8 +231,8 @@ static void populate_cache_cfdict(const CacheEntry& entry, CFMutableDict& dict)
     dict.SetValue(CFSTR("timestamp"), CFStr(entry.timestamp));
 }
 
-// Serialize a CFDictionary to a binary plist file. Returns 0 on success.
-static int serialize_dict_to_plist(CFDictionaryRef dict, const std::string& path)
+// Serialize a CFDictionary to binary plist bytes. Returns false on failure.
+static bool serialize_dict_to_plist(CFDictionaryRef dict, std::string& out_bytes)
 {
     CFObj<CFErrorRef> error;
     CFObj<CFDataRef> data(CFPropertyListCreateData(kCFAllocatorDefault, dict,
@@ -243,18 +246,11 @@ static int serialize_dict_to_plist(CFDictionaryRef dict, const std::string& path
             std::cerr << ": " << CFStr::ToString(desc);
         }
         std::cerr << '\n';
-        return 1;
+        return false;
     }
 
-    std::ofstream out(path, std::ios::out | std::ios::binary);
-    if (out.fail())
-    {
-        std::cerr << "error: cannot open cache file for writing: " << path << '\n';
-        return 1;
-    }
-
-    out.write(reinterpret_cast<const char*>(CFDataGetBytePtr(data)), CFDataGetLength(data));
-    return out.fail() ? 1 : 0;
+    out_bytes.assign(reinterpret_cast<const char*>(CFDataGetBytePtr(data)), (size_t)CFDataGetLength(data));
+    return true;
 }
 
 // Load a binary plist into a CFMutableDictionary. Returns empty CFMutableDict on failure.
@@ -296,18 +292,16 @@ bool cache_lookup(const std::string& cache_dir,
 {
     std::string path = cache_file_path(cache_dir, signature, format);
 
-    // Try to open and lock for reading
-    int fd = open(path.c_str(), O_RDONLY);
-    if (fd < 0)
+    // No entry yet is the common case and not worth a message. No lock is needed:
+    // cache_store replaces an entry by renaming a complete file over it, so a reader
+    // sees the old entry or the new one, never part of one.
+    struct stat entry_info;
+    if (stat(path.c_str(), &entry_info) != 0)
         return false;
-
-    flock(fd, LOCK_SH);
 
     CFMutableDict dict = (format == CacheFormat::Json)
         ? load_json_file_as_cfdict(path.c_str())
         : load_plist_as_cfdict(path);
-    flock(fd, LOCK_UN);
-    close(fd);
 
     if (dict == nullptr)
         return false;
@@ -354,54 +348,86 @@ bool cache_store(const std::string& cache_dir,
                  const std::string& signature,
                  const CacheEntry& entry)
 {
-    // Ensure cache directory exists
-    mkdir(cache_dir.c_str(), 0755);
-
-    std::string path = cache_file_path(cache_dir, signature, format);
-
-    // Open/create and lock exclusively
-    int fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
-    if (fd < 0)
+    // Create the cache folder if it is missing; a failure other than "already there",
+    // or something in its place that is not a folder, ends the store with a message.
+    if (mkdir(cache_dir.c_str(), 0755) != 0 && errno != EEXIST)
     {
-        std::cerr << "error: cannot open cache file: " << path << '\n';
+        std::cerr << "error: cannot create cache folder " << cache_dir << ": " << strerror(errno) << '\n';
         return false;
     }
-    flock(fd, LOCK_EX);
+    struct stat dir_info;
+    if (stat(cache_dir.c_str(), &dir_info) != 0 || !S_ISDIR(dir_info.st_mode))
+    {
+        std::cerr << "error: cache folder is not a folder: " << cache_dir << '\n';
+        return false;
+    }
 
-    // Atomic write: serialize to temp file, then rename.
+    // Serialize first, so a failure here leaves nothing behind in the cache folder.
     // JSON path bypasses CFDictionary entirely (parallel yyjson builder).
-    std::string tmp_path = path + ".tmp";
-    int result;
+    std::string bytes;
     if (format == CacheFormat::Json)
     {
         Json::MutableDoc doc;
         build_cache_json(entry, doc);
-        result = write_json_doc_to_file(doc, tmp_path.c_str());
+        bytes = doc.to_string(YYJSON_WRITE_PRETTY);
+        if (bytes.empty())
+        {
+            std::cerr << "error: failed to serialize cache entry as JSON\n";
+            return false;
+        }
     }
     else
     {
         CFMutableDict dict;
         populate_cache_cfdict(entry, dict);
-        result = serialize_dict_to_plist(dict, tmp_path);
-    }
-    if (result == 0)
-    {
-        rename(tmp_path.c_str(), path.c_str());
-        if (g_verbose)
-        {
-            std::string absolute_path = file_helpers::resolve_path(path);
-            std::cerr << "gate: task cache stored in: " << absolute_path << '\n';
-            std::cerr << "\tnew input fingerprint:  " << std::hex << entry.input_fingerprint << '\n'
-                      << "\tnew output fingerprint: " << entry.output_fingerprint << std::dec << '\n';
-        }
-    }
-    else
-    {
-        std::cerr << "error: failed to write cache\n";
+        if (!serialize_dict_to_plist(dict, bytes))
+            return false;
     }
 
-    flock(fd, LOCK_UN);
-    close(fd);
+    // Atomic write: a temp file of this process's own, then rename over the entry.
+    // The process id in the name keeps two runs of the same task from writing one temp
+    // file; the last rename wins, and either entry is complete. O_EXCL|O_NOFOLLOW
+    // refuses anything already at that name, a link planted by another user of a shared
+    // cache folder included; the unlink first clears a temp left by a crashed run that
+    // had the same process id.
+    std::string path = cache_file_path(cache_dir, signature, format);
+    std::string tmp_path = path + "." + std::to_string((long)getpid()) + ".tmp";
+    unlink(tmp_path.c_str());
+    int fd = open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (fd < 0)
+    {
+        std::cerr << "error: cannot create cache file " << tmp_path << ": " << strerror(errno) << '\n';
+        return false;
+    }
 
-    return (result == 0);
+    bool written = file_helpers::write_all(fd, bytes.data(), bytes.size());
+    int write_errno = errno;
+    if (close(fd) != 0 && written)
+    {
+        written = false;
+        write_errno = errno;
+    }
+    if (!written)
+    {
+        std::cerr << "error: cannot write cache file " << tmp_path << ": " << strerror(write_errno) << '\n';
+        unlink(tmp_path.c_str());
+        return false;
+    }
+
+    if (rename(tmp_path.c_str(), path.c_str()) != 0)
+    {
+        std::cerr << "error: cannot replace cache file " << path << ": " << strerror(errno) << '\n';
+        unlink(tmp_path.c_str());
+        return false;
+    }
+
+    if (g_verbose)
+    {
+        std::string absolute_path = file_helpers::resolve_path(path);
+        std::cerr << "gate: task cache stored in: " << absolute_path << '\n';
+        std::cerr << "\tnew input fingerprint:  " << std::hex << entry.input_fingerprint << '\n'
+                  << "\tnew output fingerprint: " << entry.output_fingerprint << std::dec << '\n';
+    }
+
+    return true;
 }

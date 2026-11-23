@@ -4,6 +4,7 @@
 #include "LogStream.h"
 #include "OutputSerializer.h"
 #include "PosixFileOps.h"
+#include "FileHelpers.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -377,7 +378,7 @@ static CFMutableDict load_plist_file_as_cfdict(const std::string &path)
 	return CFMutableDict((CFMutableDictionaryRef)(CFTypeRef)plist, kCFObjRetain);
 }
 
-static int write_plist_dict_to_file(CFDictionaryRef dict, const std::string &path)
+static int serialize_plist_dict(CFDictionaryRef dict, std::string &outBytes)
 {
 	CFObj<CFErrorRef> error;
 	CFObj<CFDataRef> data(CFPropertyListCreateData(kCFAllocatorDefault, dict,
@@ -388,24 +389,7 @@ static int write_plist_dict_to_file(CFDictionaryRef dict, const std::string &pat
 		return EXIT_FAILURE;
 	}
 
-	std::ofstream out(path, std::ios::out | std::ios::binary);
-	if(out.fail())
-	{
-		LogError("error: cannot open cache manifest for writing: %s\n", path.c_str());
-		return EXIT_FAILURE;
-	}
-
-	out.write(reinterpret_cast<const char *>(CFDataGetBytePtr(data)), CFDataGetLength(data));
-
-	// Close explicitly: write() only buffers, so a full disk or quota hit surfaces at
-	// flush time. Reporting success here and then renaming would put a truncated plist
-	// over a good manifest.
-	out.close();
-	if(out.fail())
-	{
-		LogError("error: cannot write cache manifest: %s\n", path.c_str());
-		return EXIT_FAILURE;
-	}
+	outBytes.assign(reinterpret_cast<const char *>(CFDataGetBytePtr(data)), (size_t)CFDataGetLength(data));
 	return EXIT_SUCCESS;
 }
 
@@ -914,22 +898,8 @@ CacheSession::write_manifest(const std::unordered_map<std::string, StoredCacheEn
 	// write the same temp file and hand each other a half-written manifest.
 	std::string tempPath = mManifestPath + "." + std::to_string((long)getpid()) + ".tmp";
 
-	// Claim the temp name before the writers open it by path. Both writers (yyjson's
-	// fopen and std::ofstream) follow symlinks, so in a shared cache directory a name
-	// planted by another user would redirect the manifest write onto any file WE can
-	// write. O_EXCL|O_NOFOLLOW refuses anything already sitting there, including a
-	// symlink; the unlink first clears a stale temp left behind by a crashed run that
-	// happened to have this pid.
-	unlink(tempPath.c_str());
-	int tempFd = open(tempPath.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0644);
-	if(tempFd < 0)
-	{
-		LogError("error: cannot create temporary cache manifest: %s\n", tempPath.c_str());
-		return false;
-	}
-	close(tempFd);
-
 	int result;
+	std::string bytes;
 
 	// unordered_map iteration order varies run to run; sort so an unchanged cache
 	// produces a byte-identical manifest and the JSON form stays diffable.
@@ -965,7 +935,16 @@ CacheSession::write_manifest(const std::unordered_map<std::string, StoredCacheEn
 		doc.obj_add(root, "tasks", tasks);
 		doc.set_root(root);
 
-		result = write_json_doc_to_file(doc, tempPath.c_str());
+		bytes = doc.to_string(YYJSON_WRITE_PRETTY);
+		if(bytes.empty())
+		{
+			LogError("error: failed to serialize cache manifest JSON\n");
+			result = EXIT_FAILURE;
+		}
+		else
+		{
+			result = EXIT_SUCCESS;
+		}
 	}
 	else
 	{
@@ -989,7 +968,39 @@ CacheSession::write_manifest(const std::unordered_map<std::string, StoredCacheEn
 		}
 		root.SetValue(CFSTR("tasks"), (CFTypeRef)(CFMutableDictionaryRef)tasks);
 
-		result = write_plist_dict_to_file(root, tempPath);
+		result = serialize_plist_dict(root, bytes);
+	}
+	if(result != EXIT_SUCCESS)
+		return false;
+
+	// Create the temp file only now that the bytes are ready, so nothing between the open
+	// and the close can leave the descriptor or the file behind. Write through this
+	// descriptor only, never by opening the name again: in a shared cache directory a
+	// name planted by another user would redirect the manifest write onto any file WE can
+	// write. O_EXCL|O_NOFOLLOW refuses anything already sitting there, including a
+	// symlink; the unlink first clears a stale temp left behind by a crashed run that
+	// happened to have this pid.
+	unlink(tempPath.c_str());
+	int tempFd = open(tempPath.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0644);
+	if(tempFd < 0)
+	{
+		LogError("error: cannot create temporary cache manifest: %s\n", tempPath.c_str());
+		return false;
+	}
+
+	// Check the close too: a full disk or quota hit can surface only there, and renaming
+	// a truncated file would put it over a good manifest.
+	bool written = file_helpers::write_all(tempFd, bytes.data(), bytes.size());
+	int writeErrno = errno;
+	if((close(tempFd) != 0) && written)
+	{
+		written = false;
+		writeErrno = errno;
+	}
+	if(!written)
+	{
+		LogError("error: cannot write cache manifest %s: %s\n", tempPath.c_str(), strerror(writeErrno));
+		result = EXIT_FAILURE;
 	}
 
 	if(result == EXIT_SUCCESS)

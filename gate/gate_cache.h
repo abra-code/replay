@@ -50,7 +50,7 @@ bool cache_lookup(const std::string& cache_dir,
                   CacheEntry& out_entry);
 
 // Store a cache entry by signature. Creates cache_dir if needed.
-// Uses atomic write (temp file + rename) and flock for concurrency.
+// Uses an atomic write: a temp file of this process's own, then rename.
 bool cache_store(const std::string& cache_dir,
                  CacheFormat format,
                  const std::string& signature,
