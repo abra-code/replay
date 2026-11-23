@@ -13,8 +13,7 @@ with complex implicit dependencies and glob-based fan-in/fan-out:
   App:        final link with concrete inputs
 
 For detailed profiling, run under Instruments (Time Profiler or os_signpost)
-to see time breakdown per phase. See stress_build_design.md for the full
-dependency graph analysis.
+to see time breakdown per phase.
 
 Usage: python3 test_replay_stress_playlist.py [/path/to/replay]
 Exit:  0 = all checks passed, 1 = one or more failures

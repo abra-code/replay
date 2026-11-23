@@ -972,7 +972,7 @@ int main(int argc, const char * argv[])
 	// A sandboxed server does not work: on macOS the sandbox denies registering its message
 	// port, and on Linux the grant it would need (the shared socket folder) would let one
 	// batch's sandboxed actions reach the other batches' servers, which may run unsandboxed.
-	// Refused until it is designed (private/linux_phase4_ipc_design.md, section 5).
+	// Refused until it is designed.
 	if(sandboxRequested && !context.batchName.empty())
 	{
 		LogError("error: --start-server cannot run sandboxed: leave out --sandbox, --sandbox-profile, --allow-read, --allow-write, --deny-network and --deny-unix-sockets\n");
@@ -1050,7 +1050,7 @@ int main(int argc, const char * argv[])
 		// Configuration for the fingerprint code shared with gate/fingerprint.
 #if defined(__linux__)
 		// The Linux sandbox denies every extended attribute write, so this backend could
-		// only fail there (private/linux_phase5a_sandbox_design.md, section 6). The
+		// only fail there. The
 		// default sidecar keeps working: it lives in the cache folder.
 		if(sandboxRequested && context.cacheMemo == CacheMemo::Xattr)
 		{
@@ -1158,8 +1158,8 @@ int main(int argc, const char * argv[])
 #endif
 		// In MCP server mode an AI agent chooses the commands, so the sandbox limits Unix
 		// sockets: they reach the user's daemons, and through the D-Bus session bus a child
-		// could start a program outside the sandbox (private/linux_phase5a_sandbox_design.md,
-		// section 9). Playlists, whose commands the user wrote, keep them unless
+		// could start a program outside the sandbox.
+		// Playlists, whose commands the user wrote, keep them unless
 		// --deny-unix-sockets asks otherwise: builds use them (ssh-agent, Docker, and
 		// Python's default process pool on Linux).
 		bool sandboxed = sandbox::InitializeSandbox(sandboxProfilePath, sandboxAllowRead, sandboxAllowWrite,

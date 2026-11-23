@@ -7,7 +7,7 @@
 //  These were originally private to fingerprint.cpp. They keep no state of
 //  their own beyond the process-wide configuration globals (g_hash, g_verbose)
 //  and are safe to call concurrently from any thread, so they are shared with
-//  replay's synchronous TaskFingerprint module (see private/replay_caching_design.md 4.8).
+//  replay's synchronous TaskFingerprint module.
 //  Keeping a single implementation guarantees that replay, gate and fingerprint
 //  agree on the "public.fingerprint.*" xattr format.
 //

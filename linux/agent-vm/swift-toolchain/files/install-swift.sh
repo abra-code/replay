@@ -1,7 +1,7 @@
 #!/bin/bash
 # Install a swift.org Swift toolchain into /usr, the layout of the official Swift images, so
 # build-linux.sh finds /usr/bin/swift and the runtime lands in /usr/lib/swift/linux, which is
-# on the replay tools' RUNPATH (private/linux_port_plan.md, D2).
+# on the replay tools' RUNPATH.
 #
 # Usage: install-swift.sh <version> <platform> <sha256>
 #   version   e.g. 6.2.4

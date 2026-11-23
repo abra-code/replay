@@ -1,6 +1,6 @@
 #!/bin/bash
-# The Linux sandbox's own behavior (private/linux_phase5a_sandbox_design.md, and
-# linux_phase5b_design.md for the network and process creation), beyond what the shared
+# The Linux sandbox's own behavior, including the network and process creation,
+# beyond what the shared
 # sandbox suites check on both platforms: denials outside the grants, paths that do not
 # exist yet, hard links, refused options, the --verbose listing, the system call filter,
 # the denied network and process creation, the i386 compat entry on x86_64, the documented gaps, and terminals. Linux only; it reports itself skipped elsewhere.

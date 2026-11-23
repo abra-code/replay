@@ -102,7 +102,7 @@ bool IsAvailable();
 bool ApplyProfile(const std::string& sbpl_profile, bool verbose = false);
 
 // macOS: GenerateSbplProfile + ApplyProfile. Linux: Landlock rules built from the
-// config (private/linux_phase5a_sandbox_design.md), applied to this process and every
+// config, applied to this process and every
 // process it starts.
 // If verbose is true, prints the SBPL profile (macOS) or the rule list (Linux) to
 // stdout before applying.

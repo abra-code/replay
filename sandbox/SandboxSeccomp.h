@@ -2,8 +2,7 @@
 //  SandboxSeccomp.h
 //
 //  The Linux sandbox's system call filter (seccomp), installed after Landlock on every
-//  thread. It covers what Landlock does not and the cache relies on
-//  (private/linux_phase5a_sandbox_design.md, section 6):
+//  thread. It covers what Landlock does not and the cache relies on:
 //    - extended attribute writes and removals are denied everywhere (EACCES), so a
 //      sandboxed command cannot forge a fingerprint memo on a file it cannot write;
 //    - io_uring is unavailable (ENOSYS): its own SETXATTR operations bypass any

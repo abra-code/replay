@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-test_ipc_socket.py - the Unix domain socket backend of replay's IPC (common/IpcPortSocket.cpp,
-private/linux_phase4_ipc_design.md section 4), talked to directly through its socket.
+test_ipc_socket.py - the Unix domain socket backend of replay's IPC (common/IpcPortSocket.cpp),
+talked to directly through its socket.
 
 Runs on Linux, where the socket backend is the only one, and on macOS, where it is selected
 with REPLAY_IPC_BACKEND=socket. Each case gets its own socket folder: XDG_RUNTIME_DIR (Linux)

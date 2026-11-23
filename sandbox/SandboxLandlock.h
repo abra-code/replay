@@ -2,8 +2,7 @@
 //  SandboxLandlock.h
 //
 //  The Linux sandbox: Landlock rules built from sandbox::Config. Internal to the
-//  sandbox module; SandboxProfile.cpp calls it on Linux. Design and decisions:
-//  private/linux_phase5a_sandbox_design.md (sections 3 to 7 for what is built here).
+//  sandbox module; SandboxProfile.cpp calls it on Linux.
 //
 
 #pragma once
@@ -39,7 +38,7 @@ constexpr uint64_t kMakeBlock   = 1ULL << 11;
 constexpr uint64_t kMakeSym     = 1ULL << 12;
 constexpr uint64_t kRefer       = 1ULL << 13; // ABI 2
 constexpr uint64_t kTruncate    = 1ULL << 14; // ABI 3
-constexpr uint64_t kIoctlDev    = 1ULL << 15; // ABI 5, never handled (design section 4)
+constexpr uint64_t kIoctlDev    = 1ULL << 15; // ABI 5, never handled
 constexpr uint64_t kResolveUnix = 1ULL << 16; // ABI 9
 
 constexpr uint64_t kScopeAbstractUnix = 1ULL << 0; // ABI 6

@@ -2,7 +2,7 @@
 //  IpcPort.h
 //
 //  A named port for requests between dispatch and the replay server
-//  (private/linux_phase4_ipc_design.md). On macOS it wraps CFMessagePort; on Linux,
+//  On macOS it wraps CFMessagePort; on Linux,
 //  and on macOS when REPLAY_IPC_BACKEND=socket (for tests), it uses a Unix domain
 //  socket (common/IpcPortSocket.cpp).
 //

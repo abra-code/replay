@@ -29,8 +29,8 @@ if [ "$HOST_OS" = "Linux" ]; then
     export SWIFT_BACKTRACE="${SWIFT_BACKTRACE:-enable=no}"
 fi
 
-# Whole suites that cannot pass on Linux yet, with the reason and the plan phase
-# (private/linux_port_plan.md) that removes the entry. Prints nothing for a suite
+# Whole suites that cannot pass on Linux yet, with the reason and the step
+# that removes the entry. Prints nothing for a suite
 # that runs.
 linux_skip_reason() {
     case "$1" in

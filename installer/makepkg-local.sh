@@ -76,7 +76,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# The same value rules the app enforces (its design section 4.4): these are
+# The same value rules the app enforces: these are
 # spliced into a filename and into XML, so they are constrained before they go
 # anywhere.
 case "$project_name" in

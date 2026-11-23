@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run the Linux build and test suites on x86_64 (plan Phase 3, private/linux_port_plan.md),
+# Run the Linux build and test suites on x86_64,
 # on an Intel Mac with macOS 13 or newer, in a Lima virtual machine (Ubuntu 24.04, Apple's
 # Virtualization framework). Run it from a copy of the sources on that Mac, such as the one
 # linux/x86-check-send.sh puts there; it needs no Homebrew and no administrator rights.

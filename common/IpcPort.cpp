@@ -2,7 +2,7 @@
 //  IpcPort.cpp
 //
 //  ipc::Port's factories and its macOS backend, CFMessagePort, unchanged in behavior
-//  from the code it replaced (private/linux_phase4_ipc_design.md, section 3). Linux uses
+//  from the code it replaced. Linux uses
 //  the Unix domain socket backend (IpcPortSocket.cpp); macOS uses it too when
 //  REPLAY_IPC_BACKEND=socket, so the test suites can run it on a Mac.
 //

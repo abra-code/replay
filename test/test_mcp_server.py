@@ -1924,8 +1924,7 @@ def test_stress_concurrent_leak_detection(tmpdir: str) -> None:
               len(responses) == num_iterations, f"got {len(responses)}")
 
         if IS_LINUX:
-            # leaks(1) is macOS only; on Linux the LeakSanitizer build covers this
-            # (private/linux_port_plan.md, Phase 2b).
+            # leaks(1) is macOS only; on Linux the LeakSanitizer build covers this.
             print("  skipped on Linux: the leaks tool is macOS only (use the LeakSanitizer build)")
             return
 

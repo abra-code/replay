@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 test_replay_fs_semantics.py - file system behavior replay keeps the same on macOS and
-Linux, although the file systems differ (private/linux_port_plan.md D7).
+Linux, although the file systems differ.
 
 Scenarios:
   1. info "created" is the file's birth time, not its inode change time or its

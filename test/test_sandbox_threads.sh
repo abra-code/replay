@@ -1,5 +1,5 @@
 #!/bin/bash
-# The Linux sandbox's thread check (private/linux_phase5a_sandbox_design.md, section 2).
+# The Linux sandbox's thread check.
 #
 #   1. sandbox/SandboxThreads.cpp, built here with test/sandbox_threads_check.cpp: an
 #      unexpected thread fails the check and is named; an allowed one passes.

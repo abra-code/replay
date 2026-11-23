@@ -82,7 +82,7 @@ uint64_t HandledFor(int abi)
     return rights;
 }
 
-// What each kind of grant allows (design section 4), before masking with the ABI.
+// What each kind of grant allows, before masking with the ABI.
 constexpr uint64_t kReadOnlyDir  = kReadFile | kReadDir;
 constexpr uint64_t kReadWriteDir = kReadFile | kReadDir | kWriteFile | kRemoveDir | kRemoveFile
                                  | kMakeDir | kMakeReg | kMakeSock | kMakeFifo | kMakeSym
@@ -116,7 +116,7 @@ std::string ParentOf(const std::string& path)
     return path.substr(0, slash);
 }
 
-// Folders of the baseline (design section 5), read-only. Links (on merged-/usr
+// Folders of the baseline, read-only. Links (on merged-/usr
 // systems /bin, /lib... point into /usr) resolve to a folder already listed.
 const char *const kBaselineReadOnlyDirs[] = {
     "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/etc", "/proc", "/sys/devices/system/cpu",
@@ -127,7 +127,7 @@ const char *const kBaselineDevices[] = {
     "/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom", "/dev/tty",
 };
 
-// Folders a missing write path must never widen to (design section 7): the root,
+// Folders a missing write path must never widen to: the root,
 // the home folder, and the baseline's own folders.
 bool TooBroadToGrantInstead(const std::string& dir)
 {
@@ -171,7 +171,7 @@ void AddDeduplicated(std::vector<std::string> paths, uint64_t dirAccess, uint64_
     }
 }
 
-// What the links directly in /etc point to (design section 5). Landlock judges the
+// What the links directly in /etc point to. Landlock judges the
 // resolved path, so a link whose target lies outside the other rules leaves that /etc
 // entry unreadable. The usual case: /etc/resolv.conf links into /run on systems with
 // systemd-resolved (Ubuntu, Fedora), NetworkManager or resolvconf, and without its
@@ -256,7 +256,7 @@ std::vector<std::string> MappedLibraryDirs()
         if (realpath(path, resolved) == nullptr)
             continue;
         // A library directly in "/" (LD_PRELOAD=/x.so) must not grant the whole file
-        // system (design section 4: a grant of "/" is refused).
+        // system (a grant of "/" is refused).
         std::string dir = ParentOf(resolved);
         if (dir == "/")
             continue;
@@ -362,7 +362,7 @@ bool BuildRules(const Config& config, int abi, RuleSet& out, std::string& error)
     }
     AddDeduplicated(reads, kReadOnlyDir, kReadOnlyFile, "granted", result.rules);
 
-    // 3. The baseline (design section 5).
+    // 3. The baseline.
     if (config.import_baseline)
     {
         std::vector<std::string> baseline;
@@ -392,7 +392,7 @@ bool BuildRules(const Config& config, int abi, RuleSet& out, std::string& error)
         // works when they are one. Only those: all of /dev/pts would let a command read
         // what the user types into another terminal and write into it; this process
         // can use these through its descriptors anyway. The dangerous terminal ioctls
-        // are denied separately (design section 6).
+        // are denied separately.
         std::vector<std::string> terminals;
         for (int fd = 0; fd <= 2; fd++)
         {
@@ -404,7 +404,7 @@ bool BuildRules(const Config& config, int abi, RuleSet& out, std::string& error)
                         "baseline: the terminal on descriptor 0, 1 or 2", result.rules);
     }
 
-    // 4. Running programs anywhere (design section 4).
+    // 4. Running programs anywhere.
     if (config.allow_exec)
         result.rules.push_back({"/", kExecute, true, "allow_exec"});
 

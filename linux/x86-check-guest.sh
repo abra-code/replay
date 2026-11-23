@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs inside the Lima virtual machine of linux/x86-check.sh (Ubuntu 24.04, x86_64), as the
-# guest's user, from the copy of the sources that linux/x86-check.sh puts there. Plan Phase 3
-# (private/linux_port_plan.md): the build and the test suites on x86_64.
+# guest's user, from the copy of the sources that linux/x86-check.sh puts there.
+# It runs the build and the test suites on x86_64.
 #
 # Usage: linux/x86-check-guest.sh [--package DIR] [debug|release|both]   (default both)
 #   --package DIR  when every step passed, also pack the release build with linux/package.sh

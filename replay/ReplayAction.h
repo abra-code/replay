@@ -119,7 +119,7 @@ typedef struct
 	bool orderedOutput;
 	bool mcpServer;
 
-	// Incremental execution cache (see private/replay_caching_design.md).
+	// Incremental execution cache.
 	// cacheEnabled is false unless --cache (or a --cache-* option) was passed and
 	// the execution mode supports it, so every other mode is untouched.
 	bool cacheEnabled;

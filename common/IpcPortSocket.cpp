@@ -1,8 +1,8 @@
 //
 //  IpcPortSocket.cpp
 //
-//  The Unix domain socket backend of ipc::Port (private/linux_phase4_ipc_design.md,
-//  section 4). Used on Linux, and on macOS when REPLAY_IPC_BACKEND=socket (tests).
+//  The Unix domain socket backend of ipc::Port.
+//  Used on Linux, and on macOS when REPLAY_IPC_BACKEND=socket (tests).
 //
 //  One stream connection per request: the client connects, sends one frame, reads the
 //  reply frame when it wants one, and closes. The server accepts on its run loop

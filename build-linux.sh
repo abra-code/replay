@@ -6,8 +6,7 @@
 # .build-linux/<machine>/<config>/ (replay, dispatch, fingerprint, gate).
 #
 # The Linux-only compiler and linker flags live here, not in Package.swift, because SwiftPM
-# refuses unsafeFlags in a package used as a dependency. Background and decisions:
-# private/linux_port_plan.md, D1 (flags) and D2 (where the Swift runtime is found).
+# refuses unsafeFlags in a package used as a dependency.
 
 CONFIG="debug"
 SCRATCH_PATH=""

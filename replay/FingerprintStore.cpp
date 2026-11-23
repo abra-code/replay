@@ -960,8 +960,8 @@ FingerprintStore::~FingerprintStore()
 
 // The store's host id: 16 bytes that are stable on one machine and different between
 // machines. Nothing reads it back as a UUID, so it is derived rather than the raw machine
-// id, which then appears in no file name or header (private/fingerprint_store_design.md
-// 4.8, plan D8). BLAKE3's key-derivation mode with a fixed context string per source keeps
+// id, which then appears in no file name or header.
+// BLAKE3's key-derivation mode with a fixed context string per source keeps
 // an id derived from a host name from ever equaling one derived from a machine id.
 static void derive_host_id(const char *context, const void *material, size_t length, uint8_t hostId[16])
 {

@@ -5,7 +5,7 @@
 //  applies it and the threads that thread creates afterwards; a thread that already
 //  runs stays unrestricted, and so does everything it starts later. Before applying
 //  Landlock, the sandbox therefore makes sure no other thread runs except those the
-//  caller knows to be harmless (private/linux_phase5a_sandbox_design.md, section 2).
+//  caller knows to be harmless.
 //
 
 #pragma once

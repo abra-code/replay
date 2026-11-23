@@ -400,7 +400,7 @@ bool ApplyProfile(const std::string& sbpl_profile, bool verbose)
 
 #if defined(__linux__)
 
-// The Linux sandbox (private/linux_phase5a_sandbox_design.md). Fails closed: every
+// The Linux sandbox. Fails closed: every
 // failure prints why and returns false, and the callers then exit.
 static bool ApplyLinuxConfig(const Config& config, bool verbose, const std::vector<pid_t>& allowed_threads)
 {

@@ -1,6 +1,5 @@
 #pragma once
 // Per-playlist incremental execution cache: task signatures and the run manifest.
-// See private/replay_caching_design.md sections 4.4 and 4.5.
 
 #include "TaskCacheTypes.h"
 #include "ReplayAction.h"

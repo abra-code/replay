@@ -1,6 +1,5 @@
 #pragma once
 // Sidecar memoization of per-file content hashes, for the incremental execution cache.
-// See private/fingerprint_store_plan.md.
 //
 // The xattr memoization (FileHashing.h, shared with the gate and fingerprint tools) keeps
 // a file's {inode, size, mtime, hash} record in the file's own extended attributes. That
