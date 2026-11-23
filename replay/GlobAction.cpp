@@ -46,7 +46,7 @@ GlobFiles(const std::string &rootDir, const std::vector<std::string> &globPatter
 				summary += " [truncated at " + std::to_string(maxR) + "]";
 		}
 		PrintMCPResourceLinkResult(context, actionContext, std::move(summary), matches,
-		                           doc.to_string());
+		                           MCPJsonText(doc));
 		return true;
 	}
 

@@ -15,7 +15,15 @@ struct MCPServerOptions {
     bool kernelSandbox = true;  // false: no Seatbelt sandbox (--no-sandbox, or no allow flags)
 };
 
-// JSON-RPC result/error builders — implemented in MCPServer.mm.
+namespace Json { class MutableDoc; }
+
+// The JSON text of a reply or of its structured content. A string that is not valid
+// UTF-8 (command output or a file name in another encoding) makes the plain writer
+// fail; then each invalid sequence is written as U+FFFD and all non-ASCII is escaped,
+// so the text stays valid JSON. Empty only when even that fails.
+std::string MCPJsonText(const Json::MutableDoc &doc);
+
+// JSON-RPC result/error builders, implemented in MCPServer.cpp.
 // Called from action files via the PrintMCP* helpers in ReplayActionPrivate.h.
 std::string MakeMCPTextResult(const std::string &id_raw, std::string text);
 // Binary contents as an embedded resource content block. filePath is the absolute

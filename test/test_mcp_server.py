@@ -3055,6 +3055,41 @@ def test_inherited_descriptors(tmpdir: str) -> None:
     check("sandboxed MCP: execute_command does not get the caller's descriptor",
           "fd-refused" in text and "SECRET-OUTSIDE" not in text, text)
 
+def test_invalid_utf8_replies(tmpdir: str) -> None:
+    """Command output or a file name that is not valid UTF-8 used to make the reply
+    impossible to write: the server sent an empty line and the client waited for an
+    answer forever. Now each invalid sequence arrives as U+FFFD."""
+    print("=== MCP: replies with text that is not valid UTF-8 ===")
+    d = f"{tmpdir}/bad_utf8"
+    os.makedirs(d, exist_ok=True)
+    # APFS refuses a name that is not valid UTF-8; Linux file systems take it.
+    bad_name_made = True
+    try:
+        os.close(os.open(os.path.join(d.encode(), b"bad\xffname"), os.O_CREAT | os.O_WRONLY, 0o644))
+    except OSError:
+        bad_name_made = False
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "execute_command",
+                    "arguments": {"command": "printf 'a\\377b'"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "execute_command", "arguments": {"command": "echo after"}}},
+    ]
+    if bad_name_made:
+        messages.append({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                         "params": {"name": "list_directory", "arguments": {"path": d}}})
+    by_id = run_mcp(messages, [tmpdir])
+    check("invalid UTF-8: execute_command output gets a reply, with U+FFFD for the bad byte",
+          1 in by_id and "a\ufffdb" in text_of(by_id[1]), str(by_id.get(1)))
+    check("invalid UTF-8: the next request is answered",
+          2 in by_id and "after" in text_of(by_id[2]), str(by_id.get(2)))
+    if bad_name_made:
+        check("invalid UTF-8: list_directory with a bad file name gets a reply",
+              3 in by_id and "bad\ufffdname" in json.dumps(by_id[3], ensure_ascii=False),
+              str(by_id.get(3)))
+    else:
+        print("  skipped: list_directory with a bad file name (the file system refuses the name)")
+
 def test_path_check_missing_tail(tmpdir: str) -> None:
     """The allowed-directory check on a path whose end does not exist yet: ".." after a
     missing folder, and a link to a missing target, used to pass as text and then land
@@ -3206,6 +3241,7 @@ def main() -> int:
         test_unix_sockets_limited(tmpdir)
         test_inherited_descriptors(tmpdir)
         test_path_check_missing_tail(tmpdir)
+        test_invalid_utf8_replies(tmpdir)
         test_path_validation(tmpdir)
         test_missing_required_params(tmpdir)
         test_readonly_dir(tmpdir)

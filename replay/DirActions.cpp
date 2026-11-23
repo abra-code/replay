@@ -40,7 +40,7 @@ ListDirectory(const std::string &dirPath, ReplayContext *context, ActionContext 
 		doc.obj_add(structured, "entries", entryArray);
 		doc.set_root(structured);
 
-		PrintMCPStructuredResult(context, actionContext, std::move(text), doc.to_string());
+		PrintMCPStructuredResult(context, actionContext, std::move(text), MCPJsonText(doc));
 		return true;
 	}
 
@@ -117,7 +117,7 @@ DirectoryTree(const std::string &dirPath, intptr_t maxDepth, ReplayContext *cont
 		}
 		Json::MutableDoc doc;
 		doc.set_root(TreeNodeToVal(doc, root));
-		std::string jsonStr = doc.to_string();
+		std::string jsonStr = MCPJsonText(doc);
 		if(jsonStr.empty())
 		{
 			// Was "{}", which is not a tree - it satisfies neither the caller nor the

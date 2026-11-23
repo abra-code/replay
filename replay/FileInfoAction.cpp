@@ -99,7 +99,7 @@ GetFileInfo(const std::string &path, ReplayContext *context, ActionContext *acti
 		doc.obj_add(structured, "permissions", doc.new_str(perms));
 		doc.set_root(structured);
 
-		PrintMCPStructuredResult(context, actionContext, std::move(output), doc.to_string());
+		PrintMCPStructuredResult(context, actionContext, std::move(output), MCPJsonText(doc));
 		return true;
 	}
 

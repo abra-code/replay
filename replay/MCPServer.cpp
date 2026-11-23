@@ -24,6 +24,7 @@
 #include <cstring>
 #include <cerrno>
 #include <cassert>
+#include <exception>
 
 #include <string>
 #include <string_view>
@@ -264,6 +265,22 @@ static std::string make_file_uri(std::string_view path)
 // JSON-RPC response builders (private)
 // ============================================================================
 
+std::string MCPJsonText(const Json::MutableDoc &doc)
+{
+    std::string json = doc.to_string();
+    if (json.empty())
+        json = doc.to_string(YYJSON_WRITE_ALLOW_INVALID_UNICODE | YYJSON_WRITE_ESCAPE_UNICODE);
+    return json;
+}
+
+// The last resort when a reply cannot be written at all: an error built by hand, so the
+// client still gets an answer to its request instead of waiting for one forever.
+static std::string unencodable_reply(const std::string &request_id)
+{
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + request_id +
+           ",\"error\":{\"code\":-32603,\"message\":\"the reply could not be encoded as JSON\"}}\n";
+}
+
 static std::string make_error_response(const std::string &request_id, int code,
                                         const std::string &msg)
 {
@@ -276,7 +293,9 @@ static std::string make_error_response(const std::string &request_id, int code,
     doc.obj_add(err, "message", doc.new_str(msg));
     doc.obj_add(root, "error", err);
     doc.set_root(root);
-    std::string json = doc.to_string();
+    std::string json = MCPJsonText(doc);
+    if (json.empty())
+        return unencodable_reply(request_id);
     json.push_back('\n');
     return json;
 }
@@ -290,7 +309,9 @@ static std::string make_result_response(const std::string &request_id,
     doc.obj_add(root, "id",      doc.new_raw(request_id));
     doc.obj_add(root, "result",  result);
     doc.set_root(root);
-    std::string json = doc.to_string();
+    std::string json = MCPJsonText(doc);
+    if (json.empty())
+        return unencodable_reply(request_id);
     json.push_back('\n');
     return json;
 }
@@ -1064,7 +1085,7 @@ static void dispatch_mcp_tool(const std::string &tool,
             ? std::string("(no matches found)")
             : "[" + std::to_string(matches.size()) + " match" +
               (matches.size() == 1 ? "" : "es") + "]";
-        PrintMCPResourceLinkResult(context, ac, std::move(summary), matches, doc.to_string());
+        PrintMCPResourceLinkResult(context, ac, std::move(summary), matches, MCPJsonText(doc));
     }
     else if (tool == "grep_files")
     {
@@ -1278,7 +1299,7 @@ static void dispatch_mcp_tool(const std::string &tool,
             doc.obj_add(structured, "truncated", doc.new_bool(truncated));
             doc.obj_add(structured, "skipped",   doc.new_sint((int64_t)skipped_outside));
             doc.set_root(structured);
-            return doc.to_string();
+            return MCPJsonText(doc);
         };
 
         if (files.empty())
@@ -1459,7 +1480,7 @@ static void dispatch_mcp_tool(const std::string &tool,
         PrintMCPStructuredResult(context, ac,
                                   text.empty() ? "(no directories configured: the file tools accept no path)"
                                                : text,
-                                  doc.to_string());
+                                  MCPJsonText(doc));
     }
     else
     {
@@ -2423,7 +2444,20 @@ static void handle_message(const std::string &line,
             Json::Val req_params = shared_doc->root().obj_get("params");
             Json::Val tool_args  = req_params.obj_get("arguments");
 
-            dispatch_mcp_tool(captured_tool, tool_args, context, &ac, opts);
+            // An exception must not leave this block: it would end the server and leave
+            // the client's other requests unanswered. The call is answered with an error.
+            try
+            {
+                dispatch_mcp_tool(captured_tool, tool_args, context, &ac, opts);
+            }
+            catch (const std::exception &error)
+            {
+                PrintMCPError(context, &ac, -32603, std::string("internal error in ") + captured_tool + ": " + error.what());
+            }
+            catch (...)
+            {
+                PrintMCPError(context, &ac, -32603, std::string("internal error in ") + captured_tool);
+            }
         });
         return;
     }
