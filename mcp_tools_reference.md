@@ -47,14 +47,14 @@ path list in `content[0].text`. Negotiate `2025-06-18` or later to get the struc
 | `create_directory` | `path` | | `mkdir -p` semantics. |
 | `list_directory` | `path` | | Each entry prefixed `[FILE]` or `[DIR]`. |
 | `directory_tree` | `path` | ✓ | JSON tree. Optional `depth` (omit = unlimited; 0 = root only; `find -maxdepth` semantics). |
-| `move_file` | `source`, `destination` | | Creates destination parent dirs. |
-| `delete_file` | `path` | | Recursive for directories. |
-| `get_file_info` | `path` | | path, type, size, created/modified timestamps, permissions. Also as typed `structuredContent`. |
+| `move_file` | `source`, `destination` | | Creates destination parent dirs. A `source` that is a link moves the link, as `mv` does; a trailing slash asks for its target. |
+| `delete_file` | `path` | | Recursive for directories. A link is deleted itself, not its target, as `rm` does. |
+| `get_file_info` | `path` | | path, type, size, created/modified timestamps, permissions. A link is described itself (type `symlink`). Also as typed `structuredContent`. |
 | `list_allowed_directories` | — | | Lists configured dirs with access mode. |
 | `search_files` | `directory`, `nameContains` | | Case-insensitive literal substring match against basenames. No result cap. Returns `resource_link` items; paths in `structuredContent.matches`. `nameContains` is not a glob or regex. Legacy `path`/`pattern`/`excludePatterns` accepted as silent aliases. |
 | `edit_file` | `path`, `edits` | ✓ | Structured edits: literal/regex, backrefs, limit, caseInsensitive. |
 | `edit_files` | `paths`, `edits` | ✓ | Multi-file edit with glob expansion. |
-| `glob_search` | `directory`, `globs` | ✓ | Filename-glob search; `globs` array, brace alternation `{a,b}`, `excludeGlobs`. Returns files only (not directories), as `resource_link` items; paths in `structuredContent.matches`, with `truncated` when the `max` cap was hit. |
+| `glob_search` | `directory`, `globs` | ✓ | Filename-glob search; `globs` array, brace alternation `{a,b}`, `excludeGlobs`. Returns files only (not directories), and only those inside the allowed directories (a link that leads out is not followed into the result), as `resource_link` items; paths in `structuredContent.matches`, with `truncated` when the `max` cap was hit. |
 | `grep_files` | `regex` | ✓ | Content search (grep), always ECMAScript regex. Requires `directory` and/or `globs`. Case-insensitive, context lines. |
 | `execute_command` | `command` | ✓ | Shell execution; confined by the kernel sandbox when a sandbox option is given, unconfined otherwise. |
 
@@ -80,7 +80,7 @@ Optional: `caseInsensitive`, `contextLines` (default 0, max 50), `maxResults` (d
 
 File selection:
 - **`directory`** (string) — the directory to walk recursively. **Set this whenever you want to restrict the search to a specific directory.** Omitting it silently widens the search to the whole project directory.
-- **`globs`** (array) — file filters. A **relative** glob (e.g. `**/*.sh`) is *anchored to `directory`* (or, when `directory` is omitted, to the project directory); an **absolute** glob (starting with `/`) is used as-is. Omit `globs` to search every file under `directory`. A relative glob alone does **not** scope the search the way `directory` does — it filters filenames, but the walk root is still `directory`/project directory.
+- **`globs`** (array): file filters. A **relative** glob (e.g. `**/*.sh`) is *anchored to `directory`* (or, when `directory` is omitted, to the project directory); an **absolute** glob (starting with `/`) is used as-is, and refused when its fixed part (before the first wildcard) lies outside the allowed directories. Omit `globs` to search every file under `directory`. A relative glob alone does **not** scope the search the way `directory` does: it filters filenames, but the walk root is still `directory`/project directory.
 - `directory` and `globs` **compose** — `directory` is the root, `globs` filter within it. (This differs from the old `path`/`paths`, where `paths` silently overrode `path`.)
 - Without a `directory`, relative globs resolve under the **project directory** (the first allowed directory; see [Access control](#access-control)) — **never** the process working directory.
 - `excludeGlobs` — exclusion globs, honored in every mode.
@@ -90,7 +90,7 @@ Example — find `TODO` in Swift files under `/src/app` (and nowhere else):
 { "regex": "TODO", "directory": "/src/app", "globs": ["**/*.swift"] }
 ```
 
-Output is grep-style `file:linenum:content`. Context lines use `-` separators (`file-linenum-context`). Groups separated by `--`. Binary files are skipped silently. A `[N matches]` footer is always appended. When results are truncated by `maxResults`, a truncation notice is prepended. Candidate paths that resolve outside the allowed directories (e.g. an absolute glob, or a symlink escaping the sandbox) are skipped — not fatal — and reported in a `[N path(s) skipped …]` note. An invalid `regex` is a hard `-32603` error.
+Output is grep-style `file:linenum:content`. Context lines use `-` separators (`file-linenum-context`). Groups separated by `--`. Binary files are skipped silently. A `[N matches]` footer is always appended. When results are truncated by `maxResults`, a truncation notice is prepended. Candidate paths that resolve outside the allowed directories (a symlink escaping them) are skipped: not fatal: and reported in a `[N path(s) skipped ...]` note. An invalid `regex` is a hard `-32603` error.
 
 **vs. `glob_search`**: `glob_search` finds files by *filename glob*. `grep_files` finds text *inside* files.
 

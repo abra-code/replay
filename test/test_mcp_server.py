@@ -27,7 +27,7 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 REPO_DIR   = SCRIPT_DIR.parent
 
 DEFAULT_REPLAY = REPO_DIR / "build" / "Release" / "replay"
-REPLAY = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_REPLAY
+REPLAY = Path(sys.argv[1]).absolute() if len(sys.argv) > 1 else DEFAULT_REPLAY
 
 # ---------------------------------------------------------------------------
 # Minimal test harness
@@ -3111,6 +3111,117 @@ def test_read_and_edit_file_limits(tmpdir: str) -> None:
     check("grep_files: a FIFO in the searched folder does not block the search",
           6 in by_id and not is_error(by_id[6]), str(by_id.get(6))[:300])
 
+def test_links_acted_on_as_entries(tmpdir: str) -> None:
+    """delete_file, move_file and get_file_info act on a link itself, as rm and mv do,
+    not on its target; glob_search does not report files reached through a link that
+    leaves the allowed directories; grep_files refuses an absolute glob that starts
+    outside them instead of walking there. Run with --no-sandbox, so only the check
+    stands."""
+    print("=== MCP: links are entries; globs stay inside ===")
+    project = f"{tmpdir}/p9_project"
+    outside = f"{tmpdir}/p9_outside"
+    os.makedirs(project, exist_ok=True)
+    os.makedirs(outside, exist_ok=True)
+    with open(f"{project}/target.txt", "w") as f:
+        f.write("inside target\n")
+    with open(f"{outside}/secret.txt", "w") as f:
+        f.write("needle outside\n")
+    for name, target in (("in_link", f"{project}/target.txt"),
+                         ("out_link", f"{outside}/secret.txt"),
+                         ("mv_link", f"{project}/target.txt"),
+                         ("info_link", f"{outside}/secret.txt"),
+                         ("out_dir", outside)):
+        if not os.path.lexists(f"{project}/{name}"):
+            os.symlink(target, f"{project}/{name}")
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "delete_file", "arguments": {"path": f"{project}/in_link"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "delete_file", "arguments": {"path": f"{project}/out_link"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "move_file", "arguments": {"source": f"{project}/mv_link",
+                                                      "destination": f"{project}/moved_link"}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "get_file_info", "arguments": {"path": f"{project}/info_link"}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+         "params": {"name": "glob_search", "arguments": {"directory": project, "globs": ["**/*.txt"]}}},
+        {"jsonrpc": "2.0", "id": 6, "method": "tools/call",
+         "params": {"name": "grep_files", "arguments": {"regex": "needle", "globs": [f"{outside}/*.txt"]}}},
+    ], [project], extra_args=["--no-sandbox"], sequential=True)
+    check("delete_file on a link deletes the link, not its target",
+          not is_error(by_id[1]) and not os.path.lexists(f"{project}/in_link")
+          and os.path.exists(f"{project}/target.txt"), str(by_id[1]))
+    check("delete_file on a link to an outside file deletes the link and leaves the file",
+          not is_error(by_id[2]) and not os.path.lexists(f"{project}/out_link")
+          and os.path.exists(f"{outside}/secret.txt"), str(by_id[2]))
+    check("move_file on a link moves the link",
+          not is_error(by_id[3]) and os.path.islink(f"{project}/moved_link")
+          and os.path.exists(f"{project}/target.txt"), str(by_id[3]))
+    check("get_file_info on a link to an outside file describes the link",
+          not is_error(by_id[4]) and structured_of(by_id[4]).get("type") == "symlink",
+          str(by_id[4])[:300])
+    found = json.dumps(by_id[5])
+    check("glob_search does not report files reached through a link that leaves the allowed directories",
+          not is_error(by_id[5]) and "secret.txt" not in found and "target.txt" in found, found[:300])
+    check("grep_files refuses an absolute glob that starts outside the allowed directories",
+          is_error(by_id[6], -32001) and "starts outside" in json.dumps(by_id[6]), str(by_id[6]))
+
+    # A dropped match must not use up a place under glob_search's cap: 20 links out and
+    # 20 plain files with max 20 is a full, truncated page of plain files.
+    many = f"{project}/many"
+    os.makedirs(many, exist_ok=True)
+    for i in range(20):
+        with open(f"{outside}/s{i}.txt", "w") as f:
+            f.write("x\n")
+        with open(f"{many}/f{i}.txt", "w") as f:
+            f.write("x\n")
+        if not os.path.lexists(f"{many}/l{i}.txt"):
+            os.symlink(f"{outside}/s{i}.txt", f"{many}/l{i}.txt")
+    with open(f"{project}/rel_target.txt", "w") as f:
+        f.write("t\n")
+    if not os.path.lexists(f"{project}/rel_link"):
+        os.symlink(f"{project}/rel_target.txt", f"{project}/rel_link")
+    previous_cwd = os.getcwd()
+    os.chdir(project)
+    try:
+        by_id = run_mcp([
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+             "params": {"name": "glob_search", "arguments": {"directory": many, "globs": ["*.txt"], "max": 20}}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+             "params": {"name": "delete_file", "arguments": {"path": "rel_link"}}},
+        ], [project], extra_args=["--no-sandbox"], sequential=True)
+    finally:
+        os.chdir(previous_cwd)
+    page = structured_of(by_id[1])
+    check("glob_search: matches dropped as outside do not count toward max",
+          page.get("count") == 20 and page.get("truncated") is True
+          and all("/f" in m for m in page.get("matches", [])), json.dumps(page)[:300])
+    check("delete_file on a bare relative link name deletes the link, not its target",
+          not is_error(by_id[2]) and not os.path.lexists(f"{project}/rel_link")
+          and os.path.exists(f"{project}/rel_target.txt"), str(by_id[2]))
+
+    # A link outside the allowed directories that names one of them: describing it is
+    # allowed (it is the allowed folder), deleting it is not (the link is outside).
+    alias = f"{tmpdir}/p9_alias"
+    if not os.path.lexists(alias):
+        os.symlink(project, alias)
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "get_file_info", "arguments": {"path": alias}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "delete_file", "arguments": {"path": alias}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "grep_files", "arguments": {"regex": "needle", "directory": project}}},
+    ], [project], extra_args=["--no-sandbox"], sequential=True)
+    check("get_file_info on an outside link that names an allowed folder works",
+          not is_error(by_id[1]), str(by_id[1])[:300])
+    check("delete_file on an outside link that names an allowed folder is refused",
+          is_error(by_id[2], -32001) and os.path.islink(alias), str(by_id[2]))
+    grep_page = structured_of(by_id[3])
+    check("grep_files does not follow a link out of the folder, nor count what is there",
+          not is_error(by_id[3]) and grep_page.get("skipped") == 0
+          and "needle outside" not in json.dumps(by_id[3]), json.dumps(by_id[3])[:300])
+
 def test_invalid_utf8_replies(tmpdir: str) -> None:
     """Command output or a file name that is not valid UTF-8 used to make the reply
     impossible to write: the server sent an empty line and the client waited for an
@@ -3299,6 +3410,7 @@ def main() -> int:
         test_path_check_missing_tail(tmpdir)
         test_invalid_utf8_replies(tmpdir)
         test_read_and_edit_file_limits(tmpdir)
+        test_links_acted_on_as_entries(tmpdir)
         test_path_validation(tmpdir)
         test_missing_required_params(tmpdir)
         test_readonly_dir(tmpdir)

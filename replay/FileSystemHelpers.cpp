@@ -331,12 +331,13 @@ glob_walk_one(const std::string &dir,
               const std::vector<Glob> &compiled_globs,
               const CompiledExcludes &compiled_excl,
               size_t max,
+              const std::function<bool(const std::string &)> *keep,
               std::set<std::string> *seen_ptr,
               std::unordered_set<std::string> &visited_dirs)
 {
 	std::vector<std::string> symlinks;
 	FileMatchedBlock on_match = ^(const char *abs_path, struct stat *) {
-		if (max == 0 || seen_ptr->size() < max)
+		if ((max == 0 || seen_ptr->size() < max) && (!*keep || (*keep)(abs_path)))
 			seen_ptr->insert(abs_path);
 	};
 	walk_directory(dir, compiled_globs, {}, compiled_excl, on_match, &symlinks);
@@ -363,7 +364,7 @@ glob_walk_one(const std::string &dir,
 		if (stat(target.c_str(), &st) != 0 || !S_ISDIR(st.st_mode))
 			continue;
 
-		glob_walk_one(target, root, compiled_globs, compiled_excl, max, seen_ptr, visited_dirs);
+		glob_walk_one(target, root, compiled_globs, compiled_excl, max, keep, seen_ptr, visited_dirs);
 	}
 }
 
@@ -437,7 +438,8 @@ std::vector<std::string> glob_files_in_dir(
 	const std::string &root_dir,
 	const std::vector<std::string> &relative_glob_patterns,
 	const std::vector<std::string> &exclude_patterns,
-	size_t max_results)
+	size_t max_results,
+	const std::function<bool(const std::string &)> &keep)
 {
 	// Strip trailing slash for consistent prefix comparisons in glob_walk_one
 	std::string root = root_dir;
@@ -454,7 +456,7 @@ std::vector<std::string> glob_files_in_dir(
 	std::unordered_set<std::string> visited_dirs;
 	visited_dirs.insert(root);
 
-	glob_walk_one(root, root, compiled_globs, compiled_excl, max_results, &seen, visited_dirs);
+	glob_walk_one(root, root, compiled_globs, compiled_excl, max_results, &keep, &seen, visited_dirs);
 
 	return std::vector<std::string>(seen.begin(), seen.end());
 }

@@ -169,7 +169,10 @@ bool ReadFile(const std::string &filePath, ReplayContext *context, ActionContext
 bool ListDirectory(const std::string &dirPath, ReplayContext *context, ActionContext *actionContext);
 bool DirectoryTree(const std::string &dirPath, intptr_t maxDepth, ReplayContext *context, ActionContext *actionContext);
 bool GetFileInfo(const std::string &path, ReplayContext *context, ActionContext *actionContext);
-bool GlobFiles(const std::string &rootDir, const std::vector<std::string> &globPatterns, const std::vector<std::string> &excludePatterns, intptr_t maxResults, ReplayContext *context, ActionContext *actionContext);
+// keepMatch (MCP mode): a match it returns false for is left out of the result, e.g. a
+// file reached through a link that leaves the allowed directories.
+bool GlobFiles(const std::string &rootDir, const std::vector<std::string> &globPatterns, const std::vector<std::string> &excludePatterns, intptr_t maxResults, ReplayContext *context, ActionContext *actionContext,
+               const std::function<bool(const std::string &)> &keepMatch = nullptr);
 bool EditFile(const std::string &filePath, const std::vector<FileEdit> &edits, bool actionDryRun, ReplayContext *context, ActionContext *actionContext);
 bool ExcecuteTool(const std::string &toolPath, const std::vector<std::string> &arguments, ReplayContext *context, ActionContext *actionContext);
 bool Echo(const std::string &text, ReplayContext *context, ActionContext *actionContext);

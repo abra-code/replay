@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -52,11 +53,13 @@ std::vector<std::string> search_files(
 //   - no '/': basename-only glob (e.g. '*.gen.swift' matches any depth)
 //   - with '/': relative path glob matched against the path relative to root_dir
 // Results are sorted and deduplicated. max_results=0 means unlimited.
+// keep: a match it returns false for is left out and does not count toward max_results.
 std::vector<std::string> glob_files_in_dir(
 	const std::string &root_dir,
 	const std::vector<std::string> &relative_glob_patterns,
 	const std::vector<std::string> &exclude_patterns,
-	size_t max_results = 1000);
+	size_t max_results = 1000,
+	const std::function<bool(const std::string &)> &keep = nullptr);
 
 // Walk root_dir recursively, returning absolute paths of files and directories whose
 // basename contains name_substr (case-insensitive substring match).

@@ -630,6 +630,50 @@ static std::string validate_and_get(Json::Val args, const char *key,
     return vr.canonical;
 }
 
+// For the tools that act on a directory entry itself (delete_file, move_file's source,
+// get_file_info), as rm and mv do: when the final name is a link, the link is checked by
+// the folder that holds it and acted on, not followed to its target. Otherwise the same
+// as validate_and_get. A trailing slash asks for the target, as it does for rm and mv.
+static std::string validate_entry_and_get(Json::Val args, const char *key,
+                                          const MCPServerOptions &opts, bool need_writable,
+                                          ActionContext *ac, ReplayContext *context)
+{
+    auto sv = args.obj_get(key).get_str();
+    if (!sv)
+    {
+        PrintMCPError(context, ac, -32602, std::string("Missing required param: ") + key);
+        return {};
+    }
+    std::string requested(*sv);
+    size_t slash = requested.rfind('/');
+    struct stat entry_st;
+    bool final_name_is_link = !requested.empty() && requested.back() != '/' &&
+                              lstat(requested.c_str(), &entry_st) == 0 && S_ISLNK(entry_st.st_mode);
+    if (!final_name_is_link)
+        return validate_and_get(args, key, opts, need_writable, ac, context);
+
+    // A bare name ("link") is relative to the working folder, as lstat just read it.
+    std::string folder = (slash == std::string::npos) ? std::string(".")
+                         : (slash == 0)               ? std::string("/")
+                                                      : requested.substr(0, slash);
+    auto vr = validate_path(folder, opts, need_writable);
+    if (!vr.ok)
+    {
+        // A link outside the allowed directories that names one of them (/tmp when the
+        // allowed folder is /private/tmp on macOS): describing it is describing an allowed
+        // folder, so get_file_info keeps the full check. Deleting or moving the link would
+        // change something outside, so those stay refused.
+        if (!need_writable)
+            return validate_and_get(args, key, opts, need_writable, ac, context);
+        PrintMCPError(context, ac, -32001, vr.error);
+        return {};
+    }
+    std::string entry = vr.canonical;
+    if (entry.back() != '/')
+        entry += '/';
+    return entry + ((slash == std::string::npos) ? requested : requested.substr(slash + 1));
+}
+
 // Create the parent folder of a validated path, then check it again now that it exists.
 // The first check saw the missing part only as text; another request (an execute_command
 // running at the same time, say) may have put a link there since, and posix_mkdir_p
@@ -752,7 +796,7 @@ static void dispatch_mcp_tool(const std::string &tool,
     }
     else if (tool == "get_file_info")
     {
-        auto path = validate_and_get(args, "path", *opts, false, ac, context);
+        auto path = validate_entry_and_get(args, "path", *opts, false, ac, context);
         if (path.empty())
             return;
         GetFileInfo(path, context, ac);
@@ -791,7 +835,7 @@ static void dispatch_mcp_tool(const std::string &tool,
     }
     else if (tool == "move_file")
     {
-        auto src = validate_and_get(args, "source", *opts, true, ac, context);
+        auto src = validate_entry_and_get(args, "source", *opts, true, ac, context);
         if (src.empty())
             return;
         auto dst = validate_and_get(args, "destination", *opts, true, ac, context);
@@ -803,7 +847,7 @@ static void dispatch_mcp_tool(const std::string &tool,
     }
     else if (tool == "delete_file")
     {
-        auto path = validate_and_get(args, "path", *opts, true, ac, context);
+        auto path = validate_entry_and_get(args, "path", *opts, true, ac, context);
         if (path.empty())
             return;
         DeleteItem(path, context, ac);
@@ -1228,6 +1272,22 @@ static void dispatch_mcp_tool(const std::string &tool,
                           "Provide directory and/or globs to select files to search");
             return;
         }
+        // An absolute glob is walked as given. Its fixed part must lie inside the allowed
+        // directories before any walk: walking outside and only filtering the results
+        // would still tell, through the count of skipped paths, which outside files exist.
+        for (const auto &absolute_glob : absolute_globs)
+        {
+            std::string fixed_part = globoverlap::glob_concrete_prefix(absolute_glob);
+            if (fixed_part.empty())
+                fixed_part = "/";
+            auto fixed_validation = validate_path(fixed_part, *opts, false);
+            if (!fixed_validation.ok)
+            {
+                PrintMCPError(context, ac, -32001, "Path not allowed: the glob " + absolute_glob +
+                                                   " starts outside the allowed directories");
+                return;
+            }
+        }
         if (!have_directory && !relative_globs.empty() && opts->allowedDirs.empty())
         {
             PrintMCPError(context, ac, -32001,
@@ -1249,7 +1309,10 @@ static void dispatch_mcp_tool(const std::string &tool,
         {
             const std::string &walk_root =
                 have_directory ? root_directory : opts->allowedDirs.front().path;
-            auto matched_files = glob_files_in_dir(walk_root, walk_patterns, exclude_globs, 0);
+            // Links that lead out of the allowed directories are not followed into the
+            // candidates: counting them as skipped would tell which outside files exist.
+            auto matched_files = glob_files_in_dir(walk_root, walk_patterns, exclude_globs, 0,
+                [opts](const std::string &match) { return validate_path(match, *opts, false).ok; });
             candidate_files.insert(matched_files.begin(), matched_files.end());
         }
 
@@ -1409,7 +1472,10 @@ static void dispatch_mcp_tool(const std::string &tool,
         else if (auto unsigned_max = args.obj_get("max").get_uint(); unsigned_max)
             max_results = (intptr_t)*unsigned_max;
 
-        GlobFiles(directory, globs, exclude_globs, max_results, context, ac);
+        // Results reached through a link that leaves the allowed directories are dropped,
+        // as grep_files does with its candidates.
+        GlobFiles(directory, globs, exclude_globs, max_results, context, ac,
+                  [opts](const std::string &match) { return validate_path(match, *opts, false).ok; });
     }
     else if (tool == "read_multiple_files")
     {

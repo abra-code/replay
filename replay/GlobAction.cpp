@@ -2,13 +2,15 @@
 #include "ReplayActionPrivate.h"
 #include "FileSystemHelpers.h"
 #include "yyjson.hpp"
+#include <functional>
 #include <string>
 #include <vector>
 
 bool
 GlobFiles(const std::string &rootDir, const std::vector<std::string> &globPatterns,
           const std::vector<std::string> &excludePatterns, intptr_t maxResults,
-          ReplayContext *context, ActionContext *actionContext)
+          ReplayContext *context, ActionContext *actionContext,
+          const std::function<bool(const std::string &)> &keepMatch)
 {
 	if(!context->mcpServer && context->stopOnError && context->lastError.hasError())
 		return false;
@@ -16,7 +18,10 @@ GlobFiles(const std::string &rootDir, const std::vector<std::string> &globPatter
 	if(context->mcpServer)
 	{
 		size_t maxR = (maxResults > 0) ? (size_t)maxResults : 1000;
-		auto matches = glob_files_in_dir(rootDir, globPatterns, excludePatterns, maxR);
+		// The walk follows links out of the root; what they reach outside the allowed
+		// directories is not reported. The filter runs inside the walk, so a dropped match
+		// does not use up a place under the cap and the truncated flag below stays honest.
+		auto matches = glob_files_in_dir(rootDir, globPatterns, excludePatterns, maxR, keepMatch);
 
 		// Hitting the cap exactly is the only signal the glob engine gives us, so a
 		// complete result set of exactly maxR entries reports truncated=true. Erring
