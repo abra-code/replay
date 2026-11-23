@@ -5,7 +5,7 @@ Calculate a combined hash (fingerprint) of files matching specified patterns.
 ## Features
 
 - **Single file & directory fingerprinting** - Compute 16-character hex fingerprints for files or entire directory trees
-- **Multiple hash algorithms** - CRC32C (default, fast) or BLAKE3 (cryptographic)
+- **Multiple hash algorithms** - CRC32C (default, fast) or BLAKE3 (64 bits of it kept). Both detect changes; neither proves that a tree was not altered on purpose, since 64 bits can be matched by a deliberate collision search
 - **Glob pattern filtering** - Include files with patterns like `*.cpp`, `src/**/*.c`, `*.{h,cpp}`
 - **Regex filtering** - Extended regex patterns (ECMAScript syntax)
 - **Exclusion patterns** - Subtract specific paths or globs (`-e`) from broader inputs

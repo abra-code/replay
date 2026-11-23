@@ -113,7 +113,7 @@ When `import_baseline` is `true` (the default), the profile imports Apple's `bsd
 
 - **dyld / dynamic linker**: loading system dylibs from `/usr/lib`, `/System/Library`, `/private/var/db/dyld`, and similar system paths
 - **Mach IPC**: bootstrap port, task and thread ports — needed for Obj-C runtime, XPC, etc.
-- **`/dev` nodes**: `/dev/null`, `/dev/random`, `/dev/urandom`, `/dev/tty`
+- **`/dev` nodes**: `/dev/null`, `/dev/random`, `/dev/urandom`, `/dev/dtracehelper` (not `/dev/tty`: the baseline has no rule for it, checked on macOS 27.2)
 - **`/tmp` symlink**: only `file-read-metadata` on the `/tmp` literal itself (so `stat` of the symlink resolves). Neither reads nor writes to files under `/tmp` are allowed by the baseline — those require explicit `read_only` or `read_write` entries.
 - **Network**: `bsd.sb` does not grant network access on its own. Network is allowed or denied by an explicit rule that `replay`/`gate` always emits - `(allow network*)` when `allow_network` is true (the default), `(deny network*)` when it is false or `--deny-network` is passed.
 
