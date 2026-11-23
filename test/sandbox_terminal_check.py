@@ -5,7 +5,7 @@ sandbox_terminal_check.py - used by test_sandbox_linux.sh (section 13).
 Runs a sandboxed replay whose descriptors 0 to 2 are one pseudo-terminal ("own"), while
 a second pseudo-terminal ("other") stands for another terminal of the user. A step
 writes to its own terminal by name, which must work, and opens the other one for
-writing and for reading, which the sandbox must refuse (threat model P-F6).
+writing and for reading, which the sandbox must refuse.
 
 Usage: sandbox_terminal_check.py /path/to/replay /granted/folder
 Prints the step's result lines (OWN-WRITE-..., OTHER-WRITE-..., OTHER-READ-...).

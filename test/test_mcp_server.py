@@ -2978,7 +2978,7 @@ def test_sandbox_mode_texts(tmpdir: str) -> None:
 
 def test_unix_sockets_limited(tmpdir: str) -> None:
     """Under the kernel sandbox an MCP command can connect only to Unix sockets inside
-    the write grants (threat model P-F3: on macOS it reached every socket of the user,
+    the write grants (on macOS it used to reach every socket of the user,
     ssh-agent and Docker included). Linux: test_sandbox_linux.sh section 8."""
     if sys.platform != "darwin":
         return
@@ -3024,7 +3024,7 @@ def test_unix_sockets_limited(tmpdir: str) -> None:
 def test_inherited_descriptors(tmpdir: str) -> None:
     """A descriptor the server's caller left open on a file outside the grants must not
     reach execute_command under the kernel sandbox, which does not check open
-    descriptors (threat model P-F9)."""
+    descriptors."""
     print("=== MCP: inherited descriptors under the sandbox ===")
     granted = f"{tmpdir}/fd_granted"
     outside = f"{tmpdir}/fd_outside"
@@ -3057,7 +3057,7 @@ def test_inherited_descriptors(tmpdir: str) -> None:
 def test_path_check_missing_tail(tmpdir: str) -> None:
     """The allowed-directory check on a path whose end does not exist yet: ".." after a
     missing folder, and a link to a missing target, used to pass as text and then land
-    outside (threat model P-F1). Run with --no-sandbox, so only the check stands."""
+    outside. Run with --no-sandbox, so only the check stands."""
     print("=== MCP: path check on the missing part of a path ===")
 
     project = f"{tmpdir}/pc_project"

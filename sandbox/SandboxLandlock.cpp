@@ -390,9 +390,9 @@ bool BuildRules(const Config& config, int abi, RuleSet& out, std::string& error)
 
         // The terminals on descriptors 0 to 2, so that opening /dev/stdin or /dev/stderr
         // works when they are one. Only those: all of /dev/pts would let a command read
-        // what the user types into another terminal and write into it (threat model
-        // P-F6); this process can use these through its descriptors anyway. The
-        // dangerous terminal ioctls are denied separately (design section 6).
+        // what the user types into another terminal and write into it; this process
+        // can use these through its descriptors anyway. The dangerous terminal ioctls
+        // are denied separately (design section 6).
         std::vector<std::string> terminals;
         for (int fd = 0; fd <= 2; fd++)
         {

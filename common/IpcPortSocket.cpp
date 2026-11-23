@@ -19,7 +19,7 @@
 //  sandboxed command can reach on Linux below Landlock ABI 9 and on macOS whenever Unix
 //  sockets are allowed; reading the token needs read access to the socket folder, which
 //  the sandbox does not give. So a sandboxed step cannot have a server, which runs
-//  unsandboxed, run actions for it (threat model P-F22).
+//  unsandboxed, run actions for it.
 //
 
 #include "IpcPort.h"

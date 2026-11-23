@@ -603,7 +603,7 @@ static std::string validate_and_get(Json::Val args, const char *key,
 // running at the same time, say) may have put a link there since, and posix_mkdir_p
 // follows links. A failed mkdir is left for the file operation to report, as before.
 // The remaining window between this check and the operation needs descriptor-based
-// calls (threat model P-R3).
+// calls.
 static bool make_parent_inside(const std::string &path, const MCPServerOptions &opts,
                                ActionContext *ac, ReplayContext *context)
 {

@@ -527,10 +527,10 @@ int main(int argc, char* argv[])
                                         g_verbose, {}, sandbox_deny_unix_sockets))
             return 2;
         // The sandbox does not check a descriptor already open, so one gate got from its
-        // caller must not reach the command (threat model P-F9).
+        // caller must not reach the command.
         ChildProcess::CloseOtherDescriptorsInChildren();
         // And nothing sandboxed outlives gate, not even a process that left the
-        // command's process group with setsid (Linux; threat model P-F6).
+        // command's process group with setsid (Linux).
         ChildProcess::EndDescendantsAtExit();
 #if defined(__linux__)
         // The Linux sandbox denies xattr writes (seccomp), so a memo write could only fail,
