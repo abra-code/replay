@@ -152,6 +152,10 @@ tarball only when the system has no Swift runtime. Pass options after
 - `--from DIR` for tarballs already downloaded;
 - `--with-runtime`, `--no-runtime`, `--uninstall`.
 
+Every download goes over HTTPS only, and each tarball is checked against the
+`.sha256` file beside it. That check catches a damaged download, not a replaced
+one: the checksum comes from the same release as the tarball.
+
 The same `install.sh` is in the tools tarball, so
 `replay_<version>_linux_<arch>/install.sh` installs from an unpacked copy,
 taking the runtime tarball from the folder beside it. By hand, into a prefix:

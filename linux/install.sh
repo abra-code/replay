@@ -255,11 +255,11 @@ trap cleanup EXIT
 # Downloads $1 (a URL) to $2. curl or wget, whichever the system has.
 fetch() {
     if [ -x /usr/bin/curl ]; then
-        /usr/bin/curl -fsSL --retry 3 -o "$2" "$1"
+        /usr/bin/curl -fsSL --proto '=https' --tlsv1.2 --retry 3 -o "$2" "$1"
         return $?
     fi
     if [ -x /usr/bin/wget ]; then
-        /usr/bin/wget -q -O "$2" "$1"
+        /usr/bin/wget -q --https-only -O "$2" "$1"
         return $?
     fi
     echo "Error: neither curl nor wget is installed" >&2
@@ -310,12 +310,12 @@ else
     if [ -z "$VERSION" ]; then
         # GitHub redirects .../releases/latest to .../releases/tag/<tag>.
         if [ -x /usr/bin/curl ]; then
-            LATEST="$(/usr/bin/curl -fsSLI -o /dev/null -w '%{url_effective}' "$LATEST_URL")"
+            LATEST="$(/usr/bin/curl -fsSLI --proto '=https' --tlsv1.2 -o /dev/null -w '%{url_effective}' "$LATEST_URL")"
             status=$?
         elif [ -x /usr/bin/wget ]; then
             # Without following the redirect: its Location header names the tag. wget exits
             # with a nonzero status when it stops at a redirect, so the header decides.
-            LATEST="$(/usr/bin/wget -q -S --max-redirect=0 -O /dev/null "$LATEST_URL" 2>&1 | /usr/bin/sed -n 's/^ *[Ll]ocation: *\([^ ]*\).*/\1/p' | /usr/bin/tr -d '\r' | /usr/bin/tail -n 1)"
+            LATEST="$(/usr/bin/wget -q --https-only -S --max-redirect=0 -O /dev/null "$LATEST_URL" 2>&1 | /usr/bin/sed -n 's/^ *[Ll]ocation: *\([^ ]*\).*/\1/p' | /usr/bin/tr -d '\r' | /usr/bin/tail -n 1)"
             status=0
         else
             echo "Error: neither curl nor wget is installed" >&2

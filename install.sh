@@ -144,7 +144,7 @@ build_from_zip() {
     local repo_name="$3"
 
     echo "Downloading $zip_url"
-    /usr/bin/curl -fsSL -o "$dest_dir/archive.zip" "$zip_url"
+    /usr/bin/curl -fsSL --proto '=https' --tlsv1.2 -o "$dest_dir/archive.zip" "$zip_url"
 
     echo "Unpacking"
     /usr/bin/unzip -q "$dest_dir/archive.zip" -d "$dest_dir/unpacked"
