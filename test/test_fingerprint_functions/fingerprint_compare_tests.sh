@@ -338,3 +338,76 @@ test_compare_different_hash_algorithm() {
 }
 
 
+
+# ============================================================================
+# Compare: a damaged snapshot is reported, not a crash
+# ============================================================================
+test_compare_malformed_tsv_snapshot() {
+    log_test "Compare: a snapshot line with a malformed number"
+    log_info "A hand-edited or damaged .tsv snapshot must not end fingerprint (it used std::stoll in a noexcept function)"
+
+    /bin/mkdir -p "$TEST_DIR/cmp_bad_tsv"
+    echo "alpha" > "$TEST_DIR/cmp_bad_tsv/a.txt"
+    ${FINGERPRINT_BIN} --xattr=off -s "$TEST_DIR/cmp_bad_tsv_good.tsv" "$TEST_DIR/cmp_bad_tsv" > /dev/null 2>&1
+    # Replace the size column (third field) of the data line with text that is not a number.
+    /usr/bin/awk -F'\t' 'BEGIN { OFS = "\t" } NR > 1 { $3 = "x12" } { print }' "$TEST_DIR/cmp_bad_tsv_good.tsv" > "$TEST_DIR/cmp_bad_tsv_bad.tsv"
+
+    local output
+    output=$(${FINGERPRINT_BIN} --compare="$TEST_DIR/cmp_bad_tsv_bad.tsv" --compare="$TEST_DIR/cmp_bad_tsv_good.tsv" 2>&1)
+    local status=$?
+    # The bad line is skipped, so its file shows up as added in the comparison.
+    if [ "$status" -lt 128 ] && output_contains "$output" "a.txt"; then
+        log_pass "Malformed snapshot line handled (exit $status)"
+    else
+        log_fail "Malformed snapshot line not handled: crash or no comparison (exit $status)"
+        log_info "Output: $output"
+    fi
+}
+
+test_compare_deeply_nested_json_snapshot() {
+    log_test "Compare: a JSON snapshot nested far deeper than any real one"
+    log_info "The conversion recursed once per level; 10000 levels must be refused, not overflow the stack"
+
+    local opening
+    opening=$(/usr/bin/printf '[%.0s' $(/usr/bin/seq 1 10000))
+    local closing
+    closing=$(/usr/bin/printf ']%.0s' $(/usr/bin/seq 1 10000))
+    /usr/bin/printf '{"files":%s%s}\n' "$opening" "$closing" > "$TEST_DIR/cmp_deep.json"
+    /bin/mkdir -p "$TEST_DIR/cmp_deep_dir"
+    echo "alpha" > "$TEST_DIR/cmp_deep_dir/a.txt"
+    ${FINGERPRINT_BIN} --xattr=off -s "$TEST_DIR/cmp_deep_good.json" "$TEST_DIR/cmp_deep_dir" > /dev/null 2>&1
+
+    local output
+    output=$(${FINGERPRINT_BIN} --compare="$TEST_DIR/cmp_deep.json" --compare="$TEST_DIR/cmp_deep_good.json" 2>&1)
+    local status=$?
+    if [ "$status" -ne 0 ] && [ "$status" -lt 128 ] && output_contains "$output" "nested too deeply"; then
+        log_pass "Deeply nested snapshot refused (exit $status)"
+    else
+        log_fail "Deeply nested snapshot not refused cleanly (exit $status)"
+        log_info "Output: $output"
+    fi
+}
+
+test_compare_missing_snapshot_fails() {
+    log_test "Compare: a snapshot that cannot be read fails the comparison"
+    log_info "A missing or unreadable snapshot used to load as empty and the comparison exited 0"
+
+    /bin/mkdir -p "$TEST_DIR/cmp_missing_dir"
+    echo "alpha" > "$TEST_DIR/cmp_missing_dir/a.txt"
+    ${FINGERPRINT_BIN} --xattr=off -s "$TEST_DIR/cmp_missing_good.tsv" "$TEST_DIR/cmp_missing_dir" > /dev/null 2>&1
+
+    local failures=""
+    local ext
+    for ext in tsv json; do
+        ${FINGERPRINT_BIN} --compare="$TEST_DIR/cmp_missing_nothing.$ext" --compare="$TEST_DIR/cmp_missing_good.tsv" > /dev/null 2>&1
+        local status=$?
+        if [ "$status" -eq 0 ] || [ "$status" -ge 128 ]; then
+            failures="$failures .$ext:$status"
+        fi
+    done
+    if [ -z "$failures" ]; then
+        log_pass "A missing .tsv or .json snapshot fails the comparison"
+    else
+        log_fail "A missing snapshot did not fail the comparison:$failures"
+    fi
+}

@@ -21,10 +21,20 @@
 // All containers are created mutable so callers (compare_snapshots, cache_lookup)
 // can resort / mutate them in place — matching the prior NSJSONReadingMutableContainers
 // behavior.
-static CFObj<CFTypeRef> yyjson_to_cf(Json::Val v) noexcept
+// Containers nested deeper than this fail the conversion: it recurses once per level
+// (the parser does not), so a cache or snapshot file with very deep nesting would
+// otherwise overflow the stack. The files these tools write nest three levels.
+static constexpr int kMaxJsonNesting = 256;
+
+static CFObj<CFTypeRef> yyjson_to_cf(Json::Val v, int depth, bool &too_deep) noexcept
 {
     if (!v.valid())
         return CFObj<CFTypeRef>();
+    if (depth > kMaxJsonNesting)
+    {
+        too_deep = true;
+        return CFObj<CFTypeRef>();
+    }
 
     if (v.is_str())
     {
@@ -65,7 +75,9 @@ static CFObj<CFTypeRef> yyjson_to_cf(Json::Val v) noexcept
         Json::ArrIter it(v);
         while (it.has_next())
         {
-            CFObj<CFTypeRef> cf(yyjson_to_cf(it.next()));
+            CFObj<CFTypeRef> cf(yyjson_to_cf(it.next(), depth + 1, too_deep));
+            if (too_deep)
+                return CFObj<CFTypeRef>();
             if (cf != nullptr)
                 arr.AppendValue(cf);
         }
@@ -84,7 +96,9 @@ static CFObj<CFTypeRef> yyjson_to_cf(Json::Val v) noexcept
             CFStr cf_key(*ksv);
             if (cf_key == nullptr)
                 continue;
-            CFObj<CFTypeRef> cf_val(yyjson_to_cf(Json::ObjIter::val(key)));
+            CFObj<CFTypeRef> cf_val(yyjson_to_cf(Json::ObjIter::val(key), depth + 1, too_deep));
+            if (too_deep)
+                return CFObj<CFTypeRef>();
             if (cf_val != nullptr)
                 dict.SetValue(cf_key, (CFTypeRef)cf_val);
         }
@@ -130,5 +144,13 @@ CFMutableDict load_json_file_as_cfdict(const char* path, bool quiet)
         return {};
     }
 
-    return CFMutableDict((CFMutableDictionaryRef)yyjson_to_cf(root).Detach(), kCFObjDontRetain);
+    bool too_deep = false;
+    CFObj<CFTypeRef> converted(yyjson_to_cf(root, 0, too_deep));
+    if (too_deep)
+    {
+        if (!quiet)
+            std::fprintf(stderr, "Error: JSON nested too deeply: %s\n", path);
+        return {};
+    }
+    return CFMutableDict((CFMutableDictionaryRef)converted.Detach(), kCFObjDontRetain);
 }

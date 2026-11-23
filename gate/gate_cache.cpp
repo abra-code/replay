@@ -275,13 +275,15 @@ static CFMutableDict load_plist_as_cfdict(const std::string& path)
 
     CFObj<CFErrorRef> error;
     CFPropertyListFormat plist_format;
-    CFMutableDict dict((CFMutableDictionaryRef)CFPropertyListCreateWithData(
-        kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &plist_format, &error), kCFObjDontRetain);
+    CFObj<CFPropertyListRef> plist(CFPropertyListCreateWithData(
+        kCFAllocatorDefault, data, kCFPropertyListMutableContainers, &plist_format, &error));
 
-    if (dict == nullptr)
+    // A damaged or planted entry whose root is not a dictionary must not be used as one:
+    // CFDictionary calls on an array or a string abort the process.
+    if (plist == nullptr || CFGetTypeID(plist) != CFDictionaryGetTypeID())
         return {};
 
-    return dict;
+    return CFMutableDict((CFMutableDictionaryRef)(CFPropertyListRef)plist, kCFObjRetain);
 }
 
 
@@ -303,7 +305,8 @@ bool cache_lookup(const std::string& cache_dir,
         ? load_json_file_as_cfdict(path.c_str())
         : load_plist_as_cfdict(path);
 
-    if (dict == nullptr)
+    // The loaders return an empty dictionary for a file they could not read or parse.
+    if (dict == nullptr || CFDictionaryGetCount(dict) == 0)
         return false;
 
     // Extract fields directly from the flat dictionary

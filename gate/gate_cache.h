@@ -24,8 +24,8 @@ struct CacheEntry
     std::vector<std::string> inputs;
     std::vector<std::string> outputs;
     std::vector<std::string> exclude_inputs;
-    uint64_t input_fingerprint;
-    uint64_t output_fingerprint;
+    uint64_t input_fingerprint = 0;  // zero, so an entry without them never matches by
+    uint64_t output_fingerprint = 0; // chance of uninitialized memory
     std::string hash_algorithm;
     std::string timestamp;
 };

@@ -10,6 +10,8 @@
 #include <fstream>
 #include <memory>
 #include <regex>
+#include <cerrno>
+#include <cstdlib>
 #include <ctime>
 #include <map>
 #include <unordered_map>
@@ -837,20 +839,47 @@ void fingerprint::list_matched_files() noexcept
     {
         if (info.is_nonexistent()) continue;
 
-        char line[PATH_MAX + 64];
-        int len;
-
+        // The hash in a small buffer, the path appended as a string: a path longer than
+        // any fixed line buffer would otherwise be cut, and the length snprintf reports
+        // would read past the buffer.
+        char hash_hex[32];
         if (g_hash == FileHashAlgorithm::CRC32C)
-            len = std::snprintf(line, sizeof(line), "%08x\t%s\n",
-                                info.hash.crc32c, path.c_str());
+            std::snprintf(hash_hex, sizeof(hash_hex), "%08x", info.hash.crc32c);
         else
-            len = std::snprintf(line, sizeof(line), "%016llx\t%s\n",
-                                (unsigned long long)info.hash.blake3, path.c_str());
+            std::snprintf(hash_hex, sizeof(hash_hex), "%016llx", (unsigned long long)info.hash.blake3);
 
-        out.append(line, len);
+        out += hash_hex;
+        out += '\t';
+        out += path;
+        out += '\n';
     }
 
     std::fwrite(out.data(), 1, out.size(), stdout);
+}
+
+// Parse line[begin, end) as a whole decimal number. Inodes are written unsigned and can
+// use all 64 bits; they are stored as int64_t the same way the old code did.
+static bool parse_int64_field(const std::string& line, size_t begin, size_t end, int64_t& out) noexcept
+{
+    if (begin >= end || end > line.size())
+        return false;
+    std::string field = line.substr(begin, end - begin);
+    const char* text = field.c_str();
+    char* stop = nullptr;
+    errno = 0;
+    if (text[0] == '-')
+    {
+        long long value = std::strtoll(text, &stop, 10);
+        if (errno != 0 || stop == text || *stop != '\0')
+            return false;
+        out = (int64_t)value;
+        return true;
+    }
+    unsigned long long value = std::strtoull(text, &stop, 10);
+    if (errno != 0 || stop == text || *stop != '\0')
+        return false;
+    out = (int64_t)value;
+    return true;
 }
 
 static CFMutableDict load_tsv_as_cfdict(const std::string& path) noexcept
@@ -896,9 +925,18 @@ static CFMutableDict load_tsv_as_cfdict(const std::string& path) noexcept
 
         file_dict.SetValue(CFSTR("path"), CFStr(line.substr(0, tab1)));
         file_dict.SetValue(CFSTR("hash"), CFStr(line.substr(tab1 + 1, tab2 - tab1 - 1)));
-        file_dict.SetValue(CFSTR("size"), (int64_t)std::stoll(line.substr(tab2 + 1, tab3 - tab2 - 1)));
-        file_dict.SetValue(CFSTR("inode"), (int64_t)std::stoull(line.substr(tab3 + 1, tab4 - tab3 - 1)));
-        file_dict.SetValue(CFSTR("mtime_ns"), (int64_t)std::stoll(line.substr(tab4 + 1, tab5 - tab4 - 1)));
+        // A malformed number skips the line: std::stoll would throw, and this function is
+        // noexcept, so a damaged or hand-edited snapshot ended the process.
+        int64_t size_value = 0;
+        int64_t inode_value = 0;
+        int64_t mtime_value = 0;
+        if (!parse_int64_field(line, tab2 + 1, tab3, size_value) ||
+            !parse_int64_field(line, tab3 + 1, tab4, inode_value) ||
+            !parse_int64_field(line, tab4 + 1, tab5, mtime_value))
+            continue;
+        file_dict.SetValue(CFSTR("size"), size_value);
+        file_dict.SetValue(CFSTR("inode"), inode_value);
+        file_dict.SetValue(CFSTR("mtime_ns"), mtime_value);
         file_dict.SetValue(CFSTR("mode"), CFStr(line.substr(tab5 + 1)));
 
         files_arr.AppendValue(file_dict);
@@ -952,9 +990,6 @@ int fingerprint::save_snapshot_tsv(const std::string& path, const SnapshotMetada
     {
         if (info.is_nonexistent()) continue;
 
-        char line[PATH_MAX + 128];
-        int len;
-
         char hash_hex[32];
         if (g_hash == FileHashAlgorithm::CRC32C)
             std::snprintf(hash_hex, sizeof(hash_hex), "%08x", info.hash.crc32c);
@@ -964,12 +999,16 @@ int fingerprint::save_snapshot_tsv(const std::string& path, const SnapshotMetada
         char mode_hex[16];
         std::snprintf(mode_hex, sizeof(mode_hex), "%04o", info.mode & 07777);
 
-        len = std::snprintf(line, sizeof(line), "%s\t%s\t%lld\t%llu\t%lld\t%s\n",
-                            file_path.c_str(), hash_hex,
-                            (long long)info.size, (unsigned long long)info.inode,
-                            (long long)info.mtime_ns, mode_hex);
+        // The numbers in a small buffer, the path appended as a string: a path longer than
+        // any fixed line buffer would otherwise be cut, and the length snprintf reports
+        // would read past the buffer.
+        char fields[160];
+        std::snprintf(fields, sizeof(fields), "\t%s\t%lld\t%llu\t%lld\t%s\n",
+                      hash_hex, (long long)info.size, (unsigned long long)info.inode,
+                      (long long)info.mtime_ns, mode_hex);
 
-        out.append(line, len);
+        out += file_path;
+        out += fields;
     }
 
     std::ofstream outfile(path, std::ios::out | std::ios::binary);
@@ -1305,8 +1344,14 @@ CFMutableDictionaryRef fingerprint::load_snapshot(const std::string& path) noexc
     if (ext == ".tsv" || ext.empty())
     {
         CFMutableDict snapshot = load_tsv_as_cfdict(path);
-        if (snapshot == nullptr)
+        // The loaders return an empty dictionary when they fail (the file is missing or
+        // cannot be read); a snapshot that loaded always has keys. Without this check a
+        // comparison with a missing or unreadable snapshot reported no difference.
+        if (snapshot == nullptr || CFDictionaryGetCount(snapshot) == 0)
+        {
+            std::cerr << "Error: cannot use snapshot: " << path << "\n";
             return nullptr;
+        }
         sort_snapshot_files(snapshot);
         return snapshot.Detach();
     }
@@ -1314,8 +1359,11 @@ CFMutableDictionaryRef fingerprint::load_snapshot(const std::string& path) noexc
     if (ext == ".json")
     {
         CFMutableDict snapshot = load_json_file_as_cfdict(path.c_str());
-        if (snapshot == nullptr)
+        if (snapshot == nullptr || CFDictionaryGetCount(snapshot) == 0)
+        {
+            std::cerr << "Error: cannot use snapshot: " << path << "\n";
             return nullptr;
+        }
         sort_snapshot_files(snapshot);
         return snapshot.Detach();
     }
@@ -1328,6 +1376,11 @@ CFMutableDictionaryRef fingerprint::load_snapshot(const std::string& path) noexc
     }
 
     std::streamsize size = file.tellg();
+    if (size < 0)
+    {
+        std::cerr << "Error: failed to read snapshot file: " << path << "\n";
+        return nullptr;
+    }
     file.seekg(0, std::ios::beg);
 
     std::vector<char> buffer(size);

@@ -1116,6 +1116,42 @@ else
 fi
 
 # ============================================================
+echo "=== Damaged cache entries ==="
+
+# An entry that cannot be read as a cache entry (a plist whose root is not a dictionary,
+# JSON that does not parse) must make gate run the command again, not crash or skip it.
+DMG_DIR="$TEST_DIR/damaged_cache"
+/bin/mkdir -p "$DMG_DIR"
+echo "dmg" > "$DMG_DIR/in.txt"
+output=$("$GATE" -v -c "$DMG_DIR/cache" -i "$DMG_DIR/in.txt" -- /usr/bin/true 2>&1)
+dmg_sig=$(echo "$output" | /usr/bin/sed -n 's/^gate: task signature: \([0-9a-f]*\)$/\1/p')
+
+/usr/bin/printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><array><string>x</string></array></plist>\n' > "$DMG_DIR/cache/$dmg_sig.plist"
+output=$("$GATE" -v -c "$DMG_DIR/cache" -i "$DMG_DIR/in.txt" -- /bin/echo "dmg ran" 2>&1)
+rc=$?
+matched=$(echo "$output" | /usr/bin/grep "dmg ran")
+if [ "$rc" -eq 0 ] && [ -n "$matched" ]; then
+    pass "Damaged cache: a plist entry whose root is an array makes the command run"
+else
+    fail "Damaged cache: a plist entry whose root is an array makes the command run (exit $rc)"
+    echo "$output"
+fi
+
+output=$("$GATE" -v -C json -c "$DMG_DIR/cache_json" -i "$DMG_DIR/in.txt" -- /usr/bin/true 2>&1)
+dmg_json_sig=$(echo "$output" | /usr/bin/sed -n 's/^gate: task signature: \([0-9a-f]*\)$/\1/p')
+/usr/bin/printf '{"command": ' > "$DMG_DIR/cache_json/$dmg_json_sig.json"
+output=$("$GATE" -v -C json -c "$DMG_DIR/cache_json" -i "$DMG_DIR/in.txt" -- /bin/echo "dmg json ran" 2>&1)
+rc=$?
+matched=$(echo "$output" | /usr/bin/grep "dmg json ran")
+hit=$(echo "$output" | /usr/bin/grep "cache hit")
+if [ "$rc" -eq 0 ] && [ -n "$matched" ] && [ -z "$hit" ]; then
+    pass "Damaged cache: a JSON entry that does not parse makes the command run"
+else
+    fail "Damaged cache: a JSON entry that does not parse makes the command run (exit $rc)"
+    echo "$output"
+fi
+
+# ============================================================
 echo "=== Tool names and PATH ==="
 
 # A name without a slash comes from the absolute folders of PATH, never from the current
