@@ -1116,6 +1116,49 @@ else
 fi
 
 # ============================================================
+echo "=== Tool names and PATH ==="
+
+# A name without a slash comes from the absolute folders of PATH, never from the current
+# folder, not even when PATH has an empty or relative entry (which a shell takes as the
+# current folder).
+TN_DIR="$TEST_DIR/tool_names"
+/bin/mkdir -p "$TN_DIR/work" "$TN_DIR/bin"
+echo "tn" > "$TN_DIR/in.txt"
+printf '#!/bin/sh\necho planted > "%s"\n' "$TN_DIR/planted_ran" > "$TN_DIR/work/ls"
+/bin/chmod 755 "$TN_DIR/work/ls"
+printf '#!/bin/sh\necho "path tool ran"\n' > "$TN_DIR/bin/tn_path_tool"
+/bin/chmod 755 "$TN_DIR/bin/tn_path_tool"
+
+output=$(cd "$TN_DIR/work" && PATH=":/usr/bin:/bin" "$GATE" -f -c "$TN_DIR/cache" -i "$TN_DIR/in.txt" -- ls 2>&1)
+rc=$?
+if [ "$rc" -eq 0 ] && [ ! -e "$TN_DIR/planted_ran" ]; then
+    pass "Tool names: a tool planted in the current folder does not run in place of the one in PATH"
+else
+    fail "Tool names: a tool planted in the current folder does not run in place of the one in PATH (exit $rc)"
+    echo "$output"
+fi
+
+output=$(PATH="$TN_DIR/bin:/usr/bin:/bin" "$GATE" -f -c "$TN_DIR/cache" -i "$TN_DIR/in.txt" -- tn_path_tool 2>&1)
+rc=$?
+matched=$(echo "$output" | /usr/bin/grep "path tool ran")
+if [ "$rc" -eq 0 ] && [ -n "$matched" ]; then
+    pass "Tool names: a name is found in a PATH folder"
+else
+    fail "Tool names: a name is found in a PATH folder (exit $rc)"
+    echo "$output"
+fi
+
+output=$(cd "$TN_DIR" && PATH="bin:/usr/bin:/bin" "$GATE" -f -c "$TN_DIR/cache" -i "$TN_DIR/in.txt" -- tn_path_tool 2>&1)
+rc=$?
+matched=$(echo "$output" | /usr/bin/grep "tn_path_tool: not found in PATH")
+if [ "$rc" -ne 0 ] && [ -n "$matched" ]; then
+    pass "Tool names: a relative PATH entry is skipped and the name is reported as not found"
+else
+    fail "Tool names: a relative PATH entry is skipped and the name is reported as not found (exit $rc)"
+    echo "$output"
+fi
+
+# ============================================================
 echo "=== Cache writer ==="
 
 # The writer must not follow a link planted in the cache folder (a shared cache folder,

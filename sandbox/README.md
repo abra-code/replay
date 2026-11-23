@@ -167,16 +167,18 @@ Or for Homebrew tools:
 
 `allow_exec: true` emits `(allow process-exec*)` — a blanket allow for any executable path. There is no supported way to allow only specific binaries without dropping to raw `extra_rules`. If you need to restrict which tools can be launched, do it in application logic (whitelist the `tool` field) rather than SBPL.
 
-### Tool paths must be absolute under sandbox
+### Tool names and PATH
 
-`replay`'s `execute` action and `gate`'s wrapped command (after `--`) must specify the tool by an **absolute path** when `--sandbox` is active:
+`replay`'s `execute` action and `gate`'s wrapped command (after `--`) take a path or a bare name. A name without a slash is looked up in the absolute folders of `PATH`, in order; an empty or relative entry, which would mean the current folder, is skipped, so a tool planted in the working folder never runs in place of the one in `PATH`. If `PATH` is not set, `/usr/bin` and `/bin` are searched.
+
+Under `--sandbox` the lookup happens before the sandbox starts, and the tool it finds gets read access (`gate`: the file; `replay`'s automatic sandbox: its folder):
 
 ```sh
-gate --sandbox -i src.c -o out.o -- /usr/bin/clang -c src.c -o out.o    # OK
-gate --sandbox -i src.c -o out.o -- clang        -c src.c -o out.o      # may fail
+gate --sandbox -i src.c -o out.o -- clang -c src.c -o out.o              # clang from PATH
+gate --sandbox -i src.c -o out.o -- /usr/bin/clang -c src.c -o out.o     # a path, used as given
 ```
 
-`$PATH` lookup happens inside `posix_spawn`/`NSTask` after the sandbox is active, so a bare name like `clang` cannot be turned into an allowlist entry at startup. Tools in `/bin`, `/usr/bin`, `/sbin`, `/usr/sbin` happen to keep working with bare names because `bsd.sb` covers those locations, but anything else (Homebrew, Python virtualenv, custom installs) needs the absolute path so the right read entries can be added.
+The grant covers the tool itself, not what it loads or reads: a tool that runs other programs, reads its own support files outside the system folders, or is a script whose interpreter lives elsewhere still needs `--allow-read` for those.
 
 ---
 

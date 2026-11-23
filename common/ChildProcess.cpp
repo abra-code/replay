@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <string>
@@ -10,6 +11,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
@@ -336,6 +338,39 @@ void EndDescendantsAtExit()
 #endif
 }
 
+std::string FindExecutable(const std::string &name)
+{
+    if(name.empty() || (name.find('/') != std::string::npos))
+        return name;
+
+    const char *pathVar = getenv("PATH");
+    std::string folders = (pathVar != nullptr) ? pathVar : "/usr/bin:/bin";
+    size_t start = 0;
+    while(start <= folders.size())
+    {
+        size_t end = folders.find(':', start);
+        if(end == std::string::npos)
+            end = folders.size();
+        std::string folder = folders.substr(start, end - start);
+        start = end + 1;
+
+        // An empty or relative entry means the current folder: a tool planted there
+        // must not run in place of the one the user expects.
+        if(folder.empty() || (folder[0] != '/'))
+            continue;
+
+        std::string candidate = folder;
+        if(candidate.back() != '/')
+            candidate += '/';
+        candidate += name;
+        struct stat info;
+        if((stat(candidate.c_str(), &info) == 0) && S_ISREG(info.st_mode)
+           && (access(candidate.c_str(), X_OK) == 0))
+            return candidate;
+    }
+    return {};
+}
+
 Result Run(const Options &opts)
 {
     Result res;
@@ -360,7 +395,14 @@ Result Run(const Options &opts)
         argv.push_back(arg.c_str());
     argv.push_back(nullptr);
 
-    const char *path = opts.argv[0].c_str();
+    const std::string executable = FindExecutable(opts.argv[0]);
+    if(executable.empty())
+    {
+        res.launch_error = opts.argv[0].empty() ? std::string("the command name is empty")
+                                                : opts.argv[0] + ": not found in PATH";
+        return res;
+    }
+    const char *path = executable.c_str();
 
     int outPipe[2] = {-1, -1};
     int errPipe[2] = {-1, -1};

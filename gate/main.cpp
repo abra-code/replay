@@ -46,6 +46,7 @@ static void print_usage(std::ostream& stream)
     stream << "\n";
     stream << "Usage: gate [OPTIONS] -- COMMAND [ARGS...]\n";
     stream << "Execute COMMAND only if inputs have changed or outputs are missing.\n";
+    stream << "A COMMAND without a slash is looked up in the absolute folders of PATH.\n";
     stream << "\n";
     stream << "OPTIONS:\n";
     stream << "  -i, --input=PATH       Input file (repeatable, supports ${VAR}/$(VAR))\n";
@@ -73,9 +74,9 @@ static void print_usage(std::ostream& stream)
     stream << "  -f, --force            Force execution, ignore cache (still update cache after)\n";
     stream << "  --dry-run              Report hit/miss without executing\n";
     stream << "  --sandbox             Enable hard sandbox. Use --allow-read, --allow-write, --sandbox-profile\n";
-    stream << "                         for additional paths. The wrapped command (after --) must use an\n";
-    stream << "                         absolute path (e.g. /usr/bin/clang), not a bare name - $PATH lookup\n";
-    stream << "                         happens after the sandbox is active. Violations return EPERM\n";
+    stream << "                         for additional paths. The executable of the wrapped command (after --)\n";
+    stream << "                         gets read access; a name without a slash is looked up in PATH before\n";
+    stream << "                         the sandbox starts. Violations return EPERM\n";
     stream << "                         (macOS) or EACCES (Linux) to the caller. macOS: to discover path\n";
     stream << "                         requirements, use sandbox/sandbox-discover.py; to stream\n";
     stream << "                         violations in real time run:\n";
@@ -509,16 +510,13 @@ int main(int argc, char* argv[])
                 sandbox_allow_write.push_back(sp);
         }
 
-        // Allow read access to the child tool being executed.
-        // Tool path must be absolute when --sandbox is used: $PATH lookup happens
-        // inside posix_spawn after the sandbox is active, so a bare name like
-        // "clang" cannot be turned into a real allowlist entry here. Bare names
-        // still happen to work for /bin and /usr/bin tools because bsd.sb covers
-        // those, but anything else (Homebrew, Python venvs, custom installs)
-        // requires the absolute path.
+        // Allow read access to the child tool being executed. A name without a slash
+        // is looked up in PATH the way the spawn will look it up, so the tool found
+        // there gets the grant (one from Homebrew or a Python virtualenv, say).
         if (cmd_argc > 0 && cmd_argv[0] != nullptr)
         {
-            std::string tool_path = file_helpers::resolve_path(cmd_argv[0]);
+            std::string tool = ChildProcess::FindExecutable(cmd_argv[0]);
+            std::string tool_path = tool.empty() ? std::string() : file_helpers::resolve_path(tool);
             if (!tool_path.empty())
                 sandbox_allow_read.push_back(tool_path);
         }

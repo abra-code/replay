@@ -12,6 +12,7 @@
 #include "GlobOverlap.h"
 #include "PosixFileOps.h"
 #include "EnvVarExpand.h"
+#include "ChildProcess.h"
 
 #include <string>
 #include <unordered_map>
@@ -159,7 +160,9 @@ static void ExtractPathsFromAction(const ActionStep& action,
             auto toolExpanded = expand_env_vars(tool->c_str(), env);
             if (toolExpanded.has_value() && !toolExpanded->empty())
             {
-                std::string toolPath = file_helpers::resolve_literal_path(*toolExpanded);
+                // A name without a slash is looked up in PATH, as the spawn will do it.
+                std::string toolFound = ChildProcess::FindExecutable(*toolExpanded);
+                std::string toolPath = toolFound.empty() ? std::string() : file_helpers::resolve_literal_path(toolFound);
                 std::string toolParent = posix_parent_dir(toolPath);
                 if (toolParent.size() > 1)
                     reads.push_back(toolParent);

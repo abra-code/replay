@@ -185,7 +185,9 @@ StartReplayAndOpenRemotePort(const std::string &pathToDispatch, const std::strin
 {
 	std::unique_ptr<ipc::Port> remotePort;
 
-	// replay is expected to be in the same directory as dispatch
+	// replay is expected to be in the same directory as dispatch. The caller passes the
+	// running executable's own path; only when that is unknown does argv[0] stand in, and
+	// a bare "replay" is then looked up in PATH.
 	std::string replayPath;
 	{
 		size_t slashPos = pathToDispatch.find_last_of('/');

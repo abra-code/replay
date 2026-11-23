@@ -18,7 +18,8 @@ namespace ChildProcess
 
 struct Options
 {
-    // argv[0] is the executable path passed to posix_spawn.
+    // argv[0] names the executable: a path when it contains a slash, otherwise a name
+    // looked up with FindExecutable. The child gets argv[0] as given.
     std::vector<std::string> argv;
 
     // Empty = inherit the parent's working directory.
@@ -66,6 +67,13 @@ struct Result
     std::string stdout_text;
     std::string stderr_text;
 };
+
+// The executable a command name stands for. A name containing a slash is returned as
+// given. A name without one is looked up in the folders of PATH, in order (if PATH is
+// not set, in /usr/bin and /bin); only absolute folders count, so an empty or relative
+// entry, which would mean the current folder, is skipped. Returns the first regular file
+// there that the user may execute, or an empty string.
+std::string FindExecutable(const std::string &name);
 
 Result Run(const Options &opts);
 

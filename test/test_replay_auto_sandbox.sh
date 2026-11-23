@@ -428,6 +428,38 @@ verify_succeeded "$?" "sandbox envvar multi-key write: file created at env-var-r
 content=$(cat "$ENVVAR_WRITEDIR/write_test.txt" 2>/dev/null)
 verify_content "$content" "write test" "sandbox envvar multi-key write: content correct"
 
+# ===========================================================================
+echo "------------------------------"
+echo "execute: a tool named without a slash comes from PATH, not the current folder"
+echo ""
+
+PATH_TOOL_DIR="$WORK_DIR/path_tool_bin"
+PLANT_DIR="$WORK_DIR/plant"
+/bin/mkdir -p "$PATH_TOOL_DIR" "$PLANT_DIR"
+printf '#!/bin/sh\necho "path tool ran"\n' > "$PATH_TOOL_DIR/replay_path_tool"
+/bin/chmod 755 "$PATH_TOOL_DIR/replay_path_tool"
+printf '#!/bin/sh\necho planted > "%s"\n' "$WORK_DIR/planted_ran" > "$PLANT_DIR/replay_path_tool"
+/bin/chmod 755 "$PLANT_DIR/replay_path_tool"
+
+cat > "$WORK_DIR/execute_path.json" << EOF
+[{ "action": "execute", "tool": "replay_path_tool", "arguments": [] }]
+EOF
+
+output=$(cd "$PLANT_DIR" && PATH=":$PATH_TOOL_DIR:/usr/bin:/bin" "$REPLAY_TOOL" "$WORK_DIR/execute_path.json" 2>&1)
+verify_succeeded "$?" "execute PATH tool: replay exited successfully"
+echo "$output" | /usr/bin/grep -qF "path tool ran"
+verify_succeeded "$?" "execute PATH tool: the tool from PATH ran"
+test ! -e "$WORK_DIR/planted_ran"
+verify_succeeded "$?" "execute PATH tool: the tool planted in the current folder did not run"
+
+echo "--sandbox: the same tool under the automatic sandbox"
+output=$(cd "$PLANT_DIR" && PATH=":$PATH_TOOL_DIR:/usr/bin:/bin" "$REPLAY_TOOL" --sandbox "$WORK_DIR/execute_path.json" 2>&1)
+verify_succeeded "$?" "sandbox PATH tool: replay exited successfully"
+echo "$output" | /usr/bin/grep -qF "path tool ran"
+verify_succeeded "$?" "sandbox PATH tool: the tool from PATH ran"
+test ! -e "$WORK_DIR/planted_ran"
+verify_succeeded "$?" "sandbox PATH tool: the tool planted in the current folder did not run"
+
 report_test_stats
 
 [ "$failure_counter" -eq 0 ]

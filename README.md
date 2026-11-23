@@ -325,8 +325,8 @@ Options:
   --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay
                      auto-discovers declared paths from the playlist and adds them to the policy.
                      Combine with --allow-read, --allow-write, --sandbox-profile for additional paths.
-                     Tool paths in "execute" actions must be absolute (e.g. /usr/bin/python3),
-                     not bare names - $PATH lookup happens after the sandbox is active.
+                     A tool named without a slash in an "execute" action is looked up in PATH
+                     before the sandbox starts, and its folder gets read access.
                      Violations return EPERM (macOS) or EACCES (Linux) to the caller.
                      macOS: to discover path requirements, use sandbox/sandbox-discover.py;
                      to stream violations in real time run:
@@ -614,7 +614,7 @@ Actions and parameters:
               In dry-run mode output is: [edit-dry-run:path]<newline> followed by one line per
               operation: "oldText" -> "newText" (limit=N [regex])
   execute     Run an executable as a child process.
-    tool      Full path to a tool to execute.
+    tool      Path of the tool to execute, or a name looked up in the absolute folders of PATH.
     arguments   Array of arguments to pass to the tool (optional).
     inputs    Array of file paths read by the tool during execution (optional).
     exclusive inputs    Array of file paths invalidated (items deleted or moved) by the tool (rare, optional).
@@ -975,6 +975,7 @@ The content of `gate --help`:
 ```
 Usage: gate [OPTIONS] -- COMMAND [ARGS...]
 Execute COMMAND only if inputs have changed or outputs are missing.
+A COMMAND without a slash is looked up in the absolute folders of PATH.
 
 OPTIONS:
   -i, --input=PATH       Input file (repeatable, supports ${VAR}/$(VAR))
@@ -1002,9 +1003,9 @@ OPTIONS:
   -f, --force            Force execution, ignore cache (still update cache after)
   --dry-run              Report hit/miss without executing
   --sandbox             Enable hard sandbox. Use --allow-read, --allow-write, --sandbox-profile
-                         for additional paths. The wrapped command (after --) must use an
-                         absolute path (e.g. /usr/bin/clang), not a bare name - $PATH lookup
-                         happens after the sandbox is active. Violations return EPERM
+                         for additional paths. The executable of the wrapped command (after --)
+                         gets read access; a name without a slash is looked up in PATH before
+                         the sandbox starts. Violations return EPERM
                          (macOS) or EACCES (Linux) to the caller. macOS: to discover path
                          requirements, use sandbox/sandbox-discover.py; to stream
                          violations in real time run:

@@ -402,6 +402,25 @@ verify_failed "$?" "sandbox glob deny: write outside glob prefix is denied"
 test ! -f "$GLOB_DENY_FILE"
 verify_succeeded "$?" "sandbox glob deny: file not created outside glob prefix"
 
+# ===========================================================================
+echo "------------------------------"
+echo "--sandbox: a tool named without a slash is found in PATH and gets read access"
+echo ""
+
+PATH_TOOL_DIR="$WORK_DIR/path_tool_bin"
+/bin/mkdir -p "$PATH_TOOL_DIR"
+printf '#!/bin/sh\necho "path tool ran"\n' > "$PATH_TOOL_DIR/gate_path_tool"
+/bin/chmod 755 "$PATH_TOOL_DIR/gate_path_tool"
+printf 'path tool input' > "$WORK_DIR/path_tool_input.txt"
+
+output=$(PATH="$PATH_TOOL_DIR:/usr/bin:/bin" "$GATE_TOOL" --sandbox -f \
+	-i "$WORK_DIR/path_tool_input.txt" \
+	-c "$CACHE_DIR" \
+	-- gate_path_tool 2>&1)
+verify_succeeded "$?" "sandbox PATH tool: gate exited successfully"
+echo "$output" | /usr/bin/grep -qF "path tool ran"
+verify_succeeded "$?" "sandbox PATH tool: the tool ran"
+
 report_test_stats
 
 [ "$failure_counter" -eq 0 ]

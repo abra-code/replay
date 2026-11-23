@@ -503,6 +503,29 @@ verify_failed "$?" "dispatch edit missing newText: should have exited with error
 rm -rf "$EDIT_WORK_DIR"
 
 
+echo ""
+echo "------------------------------"
+echo ""
+echo "dispatch started by name takes replay from its own folder, not the current one"
+echo ""
+
+# A replay planted in the current folder must not be started in place of the one beside
+# dispatch, and dispatch is found through PATH (argv[0] without a slash).
+PLANT_DIR=$(/usr/bin/mktemp -d "$HOME/.replay-test-plant.XXXXXX")
+if [ -z "$PLANT_DIR" ] || [ ! -d "$PLANT_DIR" ]; then echo "error: mktemp failed for PLANT_DIR" >&2; exit 1; fi
+printf '#!/bin/sh\necho planted > "%s"\n' "$PLANT_DIR/planted_ran" > "$PLANT_DIR/replay"
+/bin/chmod 755 "$PLANT_DIR/replay"
+by_name_output=$(cd "$PLANT_DIR" && PATH="$REPLAY_PARENT_DIR:/usr/bin:/bin" dispatch "by-name" start \
+	&& PATH="$REPLAY_PARENT_DIR:/usr/bin:/bin" dispatch "by-name" echo "hello by name" \
+	&& PATH="$REPLAY_PARENT_DIR:/usr/bin:/bin" dispatch "by-name" wait 2>&1)
+verify_succeeded "$?" "dispatch by name: start, echo and wait succeeded"
+echo "$by_name_output" | /usr/bin/grep -qF "hello by name"
+verify_succeeded "$?" "dispatch by name: the replay server printed the echo"
+test ! -e "$PLANT_DIR/planted_ran"
+verify_succeeded "$?" "dispatch by name: the replay planted in the current folder did not run"
+/bin/rm -rf "$PLANT_DIR"
+
+
 # verify there is no orphaned "replay" server running
 # count the lines returned by ps for processes with "replay" in name
 # there is one system "replayd" we exclude by adding space after "replay"
