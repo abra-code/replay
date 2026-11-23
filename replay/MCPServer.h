@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,9 @@ namespace Json { class MutableDoc; }
 // fail; then each invalid sequence is written as U+FFFD and all non-ASCII is escaped,
 // so the text stays valid JSON. Empty only when even that fails.
 std::string MCPJsonText(const Json::MutableDoc &doc);
+
+// The most read_file and read_multiple_files return of one file, as their descriptions say.
+constexpr std::size_t kMCPMaxFileSize = 10u * 1024u * 1024u;
 
 // JSON-RPC result/error builders, implemented in MCPServer.cpp.
 // Called from action files via the PrintMCP* helpers in ReplayActionPrivate.h.

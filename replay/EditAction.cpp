@@ -1,11 +1,81 @@
 #include "ReplayAction.h"
 #include "ReplayActionPrivate.h"
+#include "FileHelpers.h"
 #include <regex>
 #include <unistd.h>
 #include <cerrno>
+#include <cstdlib>
+#include <fcntl.h>
 #include <fstream>
 #include <string>
+#include <sys/stat.h>
 #include <vector>
+
+enum class ReadStatus { Ok, OpenFailed, NotRegular, ReadFailed };
+
+// Read a whole regular file. Anything else is refused before it is opened: a FIFO
+// would block this thread until a writer comes, and a device has no size to read by.
+// openErrno is set for OpenFailed.
+static ReadStatus read_regular_file(const std::string &filePath, std::string &content, int &openErrno)
+{
+	openErrno = 0;
+	struct stat info;
+	if (stat(filePath.c_str(), &info) != 0)
+	{
+		openErrno = errno;
+		return ReadStatus::OpenFailed;
+	}
+	if (!S_ISREG(info.st_mode))
+		return ReadStatus::NotRegular;
+
+	std::ifstream f(filePath, std::ios::binary | std::ios::ate);
+	if (!f.is_open())
+	{
+		openErrno = errno;
+		return ReadStatus::OpenFailed;
+	}
+	std::streamoff fileSize = f.tellg();
+	if (fileSize < 0)
+		return ReadStatus::ReadFailed;
+	f.seekg(0, std::ios::beg);
+	content.assign((size_t)fileSize, '\0');
+	if (fileSize > 0 && !f.read(&content[0], fileSize))
+		return ReadStatus::ReadFailed;
+	return ReadStatus::Ok;
+}
+
+// Replace filePath's contents atomically: a temp file in the same folder, renamed over
+// it. The temp file gets the original's permission bits; mkostemp creates it 0600, which
+// would make an edited script lose its execute bit and a shared file its group read.
+// Returns 0 or an errno value; tempCreated says whether the failure came after the temp
+// file existed (it is removed again then).
+static int replace_file_contents(const std::string &filePath, const std::string &content, bool &tempCreated)
+{
+	tempCreated = false;
+	struct stat original;
+	bool haveOriginal = (stat(filePath.c_str(), &original) == 0);
+
+	size_t lastSlash = filePath.rfind('/');
+	std::string dir = (lastSlash != std::string::npos) ? filePath.substr(0, lastSlash) : ".";
+	std::string tmpl = dir + "/.replay_edit_XXXXXX";
+	int tmpFd = mkostemp(&tmpl[0], O_CLOEXEC);
+	if (tmpFd < 0)
+		return errno;
+	tempCreated = true;
+
+	int err = 0;
+	if (haveOriginal && fchmod(tmpFd, original.st_mode & 07777) != 0)
+		err = errno;
+	if (err == 0 && !file_helpers::write_all(tmpFd, content.data(), content.size()))
+		err = errno;
+	if (::close(tmpFd) != 0 && err == 0)
+		err = errno;
+	if (err == 0 && ::rename(tmpl.c_str(), filePath.c_str()) != 0)
+		err = errno;
+	if (err != 0)
+		::unlink(tmpl.c_str());
+	return err;
+}
 
 // ============================================================================
 // EditFile — search-replace with literal or ECMAScript regex (inspired by filt)
@@ -645,16 +715,15 @@ EditFileMCPCore(const std::string &filePath, const std::vector<FileEdit> &edits,
 	if (dryRun)
 	{
 		// Read file, apply edits to a copy, and return a unified diff.
-		std::ifstream df(filePath, std::ios::binary | std::ios::ate);
-		if (df.is_open())
+		std::string orig;
+		int openErrno = 0;
+		ReadStatus status = read_regular_file(filePath, orig, openErrno);
+		if (status == ReadStatus::NotRegular)
+			return {false, -32002, std::string("dryRun: \"") + filePath + "\" is not a regular file"};
+		if (status == ReadStatus::ReadFailed)
+			return {false, -32002, std::string("dryRun: failed to read \"") + filePath + "\""};
+		if (status == ReadStatus::Ok)
 		{
-			std::streamoff dfSize = df.tellg();
-			df.seekg(0, std::ios::beg);
-			std::string orig((size_t)dfSize, '\0');
-			if (dfSize > 0 && !df.read(&orig[0], dfSize))
-				return {false, -32002, std::string("dryRun: failed to read \"") + filePath + "\""};
-			df.close();
-
 			std::string modified = orig;
 			for (const auto &edit : edits)
 			{
@@ -678,18 +747,15 @@ EditFileMCPCore(const std::string &filePath, const std::vector<FileEdit> &edits,
 		return {true, 0, std::move(plan)};
 	}
 
-	std::ifstream f(filePath, std::ios::binary | std::ios::ate);
-	if (!f.is_open())
-	{
-		int err = errno;
-		return {false, -32002, std::string("failed to open \"") + filePath + "\": " + strerror(err)};
-	}
-	std::streamoff fileSize = f.tellg();
-	f.seekg(0, std::ios::beg);
-	std::string content((size_t)fileSize, '\0');
-	if (fileSize > 0 && !f.read(&content[0], fileSize))
+	std::string content;
+	int openErrno = 0;
+	ReadStatus status = read_regular_file(filePath, content, openErrno);
+	if (status == ReadStatus::OpenFailed)
+		return {false, -32002, std::string("failed to open \"") + filePath + "\": " + strerror(openErrno)};
+	if (status == ReadStatus::NotRegular)
+		return {false, -32002, std::string("\"") + filePath + "\" is not a regular file"};
+	if (status == ReadStatus::ReadFailed)
 		return {false, -32002, std::string("failed to read \"") + filePath + "\""};
-	f.close();
 
 	for (const auto &edit : edits)
 	{
@@ -698,22 +764,12 @@ EditFileMCPCore(const std::string &filePath, const std::vector<FileEdit> &edits,
 			return {false, -32603, editError};
 	}
 
-	size_t lastSlash = filePath.rfind('/');
-	std::string dir = (lastSlash != std::string::npos) ? filePath.substr(0, lastSlash) : ".";
-	std::string tmpl = dir + "/.replay_edit_XXXXXX";
-	int tmpFd = mkstemp(&tmpl[0]);
-	if (tmpFd < 0)
+	bool tempCreated = false;
+	int err = replace_file_contents(filePath, content, tempCreated);
+	if (err != 0)
 	{
-		int err = errno;
-		return {false, -32603, std::string("failed to create temp file: ") + strerror(err)};
-	}
-	bool write_ok = content.empty() ||
-	                ::write(tmpFd, content.data(), content.size()) == (ssize_t)content.size();
-	::close(tmpFd);
-	if (!write_ok || ::rename(tmpl.c_str(), filePath.c_str()) != 0)
-	{
-		int err = errno;
-		::unlink(tmpl.c_str());
+		if (!tempCreated)
+			return {false, -32603, std::string("failed to create temp file: ") + strerror(err)};
 		return {false, -32603, std::string("failed to write \"") + filePath + "\": " + strerror(err)};
 	}
 
@@ -727,21 +783,24 @@ GrepFileMCPCore(const std::string &filePath, const std::string &pattern,
 {
     MCPGrepResult result;
 
-    std::ifstream f(filePath, std::ios::binary | std::ios::ate);
-    if (!f.is_open())
+    std::string content;
+    int openErrno = 0;
+    ReadStatus status = read_regular_file(filePath, content, openErrno);
+    if (status == ReadStatus::OpenFailed)
     {
-        result.error = std::string("cannot open: ") + strerror(errno);
+        result.error = std::string("cannot open: ") + strerror(openErrno);
         return result;
     }
-    std::streamoff file_size = f.tellg();
-    f.seekg(0, std::ios::beg);
-    std::string content((size_t)file_size, '\0');
-    if (file_size > 0 && !f.read(&content[0], file_size))
+    if (status == ReadStatus::NotRegular)
+    {
+        result.error = "not a regular file";
+        return result;
+    }
+    if (status == ReadStatus::ReadFailed)
     {
         result.error = "read failed";
         return result;
     }
-    f.close();
 
     // Binary check: null bytes in first 4 KB → skip
     {
@@ -932,29 +991,27 @@ EditFile(const std::string &filePath, const std::vector<FileEdit> &edits, bool a
 	}
 
 	// Read file content
-	std::ifstream f(filePath, std::ios::binary | std::ios::ate);
-	if (!f.is_open())
+	std::string content;
+	int openErrno = 0;
+	ReadStatus status = read_regular_file(filePath, content, openErrno);
+	if (status == ReadStatus::OpenFailed)
 	{
-		int err = errno;
-		std::string errStr = std::string("error: edit: failed to open \"") + filePath + "\": " + strerror(err) + "\n";
-		context->lastError.set(errStr, err);
+		std::string errStr = std::string("error: edit: failed to open \"") + filePath + "\": " + strerror(openErrno) + "\n";
+		context->lastError.set(errStr, openErrno);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}
-
-	std::streamoff fileSize = f.tellg();
-	f.seekg(0, std::ios::beg);
-	std::string content((size_t)fileSize, '\0');
-	if (fileSize > 0 && !f.read(&content[0], fileSize))
+	if (status != ReadStatus::Ok)
 	{
-		std::string errStr = std::string("error: edit: failed to read \"") + filePath + "\"\n";
+		std::string errStr = (status == ReadStatus::NotRegular)
+			? std::string("error: edit: \"") + filePath + "\" is not a regular file\n"
+			: std::string("error: edit: failed to read \"") + filePath + "\"\n";
 		context->lastError.set(errStr, EIO);
 		PrintToStdErr(context, std::move(errStr));
 		ActionWithNoOutput(context, actionContext->index);
 		return false;
 	}
-	f.close();
 
 	// Apply each edit in sequence
 	for (const auto &edit : edits)
@@ -971,14 +1028,10 @@ EditFile(const std::string &filePath, const std::vector<FileEdit> &edits, bool a
 	}
 
 	// Write atomically: temp file in same directory, then rename
-	size_t lastSlash = filePath.rfind('/');
-	std::string dir = (lastSlash != std::string::npos) ? filePath.substr(0, lastSlash) : ".";
-	std::string tmpl = dir + "/.replay_edit_XXXXXX";
-
-	int tmpFd = mkstemp(&tmpl[0]);
-	if (tmpFd < 0)
+	bool tempCreated = false;
+	int err = replace_file_contents(filePath, content, tempCreated);
+	if (err != 0 && !tempCreated)
 	{
-		int err = errno;
 		std::string errStr = std::string("error: edit: failed to create temp file: ") + strerror(err) + "\n";
 		context->lastError.set(errStr, err);
 		PrintToStdErr(context, std::move(errStr));
@@ -986,14 +1039,8 @@ EditFile(const std::string &filePath, const std::vector<FileEdit> &edits, bool a
 		return false;
 	}
 
-	bool write_ok = content.empty() ||
-	                ::write(tmpFd, content.data(), content.size()) == (ssize_t)content.size();
-	::close(tmpFd);
-
-	if (!write_ok || ::rename(tmpl.c_str(), filePath.c_str()) != 0)
+	if (err != 0)
 	{
-		int err = errno;
-		::unlink(tmpl.c_str());
 		std::string errStr = std::string("error: edit: failed to write \"") + filePath + "\": " + strerror(err) + "\n";
 		context->lastError.set(errStr, err);
 		PrintToStdErr(context, std::move(errStr));

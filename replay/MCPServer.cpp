@@ -107,7 +107,6 @@ static bool structured_output_negotiated()
 
 static constexpr const char *kServerName      = "replay-mcp";
 static constexpr const char *kServerVersion   = "1.0.0";
-static constexpr size_t kMaxFileSize          = 10u * 1024u * 1024u;
 static constexpr size_t kMaxReadMultiple      = 50;
 static constexpr int    kDefaultCommandTimeout = 30; // seconds; passed via ActionContext settings
 static constexpr int    kMaxCommandTimeout     = 60; // seconds; hard cap enforced here
@@ -579,12 +578,24 @@ static bool is_utf8_text(const uint8_t *data, size_t len)
 
 static ReadFileResult read_file_bytes(const std::string &path)
 {
+    // Only regular files: opening a FIFO would block this worker until a writer comes,
+    // and a device has no size to check against the limit.
+    struct stat info;
+    if (stat(path.c_str(), &info) != 0)
+        return {false, false, {}, std::string("Cannot open file: ") + strerror(errno)};
+    if (!S_ISREG(info.st_mode))
+        return {false, false, {}, "Not a regular file"};
+    if (info.st_size > (off_t)kMCPMaxFileSize)
+        return {false, false, {}, "File exceeds 10 MB limit"};
+
     std::ifstream f(path, std::ios::binary | std::ios::ate);
     if (!f.is_open())
         return {false, false, {}, std::string("Cannot open file: ") + strerror(errno)};
 
     auto size = f.tellg();
-    if (size > (std::streamoff)kMaxFileSize)
+    if (size < 0)
+        return {false, false, {}, "Failed to read file"};
+    if (size > (std::streamoff)kMCPMaxFileSize)
         return {false, false, {}, "File exceeds 10 MB limit"};
 
     f.seekg(0, std::ios::beg);

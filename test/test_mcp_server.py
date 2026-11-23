@@ -9,6 +9,7 @@ Exit:   0 = all tests passed, 1 = one or more failures
 import base64
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -3055,6 +3056,61 @@ def test_inherited_descriptors(tmpdir: str) -> None:
     check("sandboxed MCP: execute_command does not get the caller's descriptor",
           "fd-refused" in text and "SECRET-OUTSIDE" not in text, text)
 
+def test_read_and_edit_file_limits(tmpdir: str) -> None:
+    """read_file refuses what it cannot answer safely (a FIFO would block the server's
+    worker; a file over the documented 10 MB), and edit_file keeps the file's mode."""
+    print("=== MCP: read_file limits and edit_file file mode ===")
+    d = f"{tmpdir}/limits"
+    os.makedirs(d, exist_ok=True)
+    fifo = f"{d}/pipe"
+    if not os.path.exists(fifo):
+        os.mkfifo(fifo)
+    big = f"{d}/big.bin"
+    with open(big, "wb") as f:
+        f.truncate(10 * 1024 * 1024 + 1)
+    script = f"{d}/tool.sh"
+    with open(script, "w") as f:
+        f.write("#!/bin/sh\necho old\n")
+    os.chmod(script, 0o755)
+    by_id = run_mcp([
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": fifo}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "read_file", "arguments": {"path": big}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "read_multiple_files", "arguments": {"paths": [fifo]}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": script,
+                                  "edits": [{"oldText": "old", "newText": "new"}]}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+         "params": {"name": "edit_file",
+                    "arguments": {"path": fifo,
+                                  "edits": [{"oldText": "a", "newText": "b"}]}}},
+        {"jsonrpc": "2.0", "id": 6, "method": "tools/call",
+         "params": {"name": "grep_files",
+                    "arguments": {"regex": "needle", "directory": d, "globs": ["*"]}}},
+    ], [tmpdir])
+    check("read_file: a FIFO is refused, not waited on",
+          1 in by_id and is_error(by_id[1]) and "not a regular file" in json.dumps(by_id[1]),
+          str(by_id.get(1)))
+    check("read_file: a file over 10 MB is refused",
+          2 in by_id and is_error(by_id[2]) and "10 MB" in json.dumps(by_id[2]),
+          str(by_id.get(2))[:300])
+    check("read_multiple_files: a FIFO is reported, not waited on",
+          3 in by_id and "Not a regular file" in json.dumps(by_id[3]),
+          str(by_id.get(3)))
+    mode = os.stat(script).st_mode & 0o7777
+    with open(script) as f:
+        edited = f.read()
+    check("edit_file: the file keeps its mode", mode == 0o755 and "echo new" in edited,
+          f"mode {oct(mode)}, content {edited!r}")
+    check("edit_file: a FIFO is refused and stays a FIFO",
+          5 in by_id and is_error(by_id[5]) and "not a regular file" in json.dumps(by_id[5])
+          and stat.S_ISFIFO(os.stat(fifo).st_mode), str(by_id.get(5)))
+    check("grep_files: a FIFO in the searched folder does not block the search",
+          6 in by_id and not is_error(by_id[6]), str(by_id.get(6))[:300])
+
 def test_invalid_utf8_replies(tmpdir: str) -> None:
     """Command output or a file name that is not valid UTF-8 used to make the reply
     impossible to write: the server sent an empty line and the client waited for an
@@ -3242,6 +3298,7 @@ def main() -> int:
         test_inherited_descriptors(tmpdir)
         test_path_check_missing_tail(tmpdir)
         test_invalid_utf8_replies(tmpdir)
+        test_read_and_edit_file_limits(tmpdir)
         test_path_validation(tmpdir)
         test_missing_required_params(tmpdir)
         test_readonly_dir(tmpdir)

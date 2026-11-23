@@ -4,6 +4,7 @@
 #include "ABase64.h"
 #include <cerrno>
 #include <fstream>
+#include <sys/stat.h>
 #include <vector>
 #include <string>
 
@@ -44,6 +45,27 @@ ReadFile(const std::string &filePath, ReplayContext *context, ActionContext *act
 
 	if (context->mcpServer)
 	{
+		// Only regular files: opening a FIFO would block this worker until a writer comes,
+		// and a device has no size to check against the limit.
+		struct stat info;
+		if (stat(filePath.c_str(), &info) != 0)
+		{
+			int err = errno;
+			std::string errStr = std::string("failed to open \"") + filePath + "\" for reading: " + strerror(err);
+			PrintMCPError(context, actionContext, -32002, std::move(errStr));
+			return false;
+		}
+		if (!S_ISREG(info.st_mode))
+		{
+			PrintMCPError(context, actionContext, -32002, std::string("\"") + filePath + "\" is not a regular file");
+			return false;
+		}
+		if (info.st_size > (off_t)kMCPMaxFileSize)
+		{
+			PrintMCPError(context, actionContext, -32002, std::string("\"") + filePath + "\" exceeds the 10 MB limit of read_file");
+			return false;
+		}
+
 		std::ifstream f(filePath, std::ios::binary | std::ios::ate);
 		if (!f.is_open())
 		{
@@ -52,7 +74,15 @@ ReadFile(const std::string &filePath, ReplayContext *context, ActionContext *act
 			PrintMCPError(context, actionContext, -32002, std::move(errStr));
 			return false;
 		}
+		// Checked again: the file may have grown since the stat.
 		std::streamoff fileSize = f.tellg();
+		if (fileSize < 0 || fileSize > (std::streamoff)kMCPMaxFileSize)
+		{
+			std::string errStr = (fileSize < 0) ? std::string("failed to read \"") + filePath + "\""
+			                                    : std::string("\"") + filePath + "\" exceeds the 10 MB limit of read_file";
+			PrintMCPError(context, actionContext, -32002, std::move(errStr));
+			return false;
+		}
 		f.seekg(0, std::ios::beg);
 		std::vector<uint8_t> data(static_cast<size_t>(fileSize));
 		if (fileSize > 0 && !f.read(reinterpret_cast<char *>(data.data()), fileSize))
