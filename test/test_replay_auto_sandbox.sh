@@ -460,6 +460,36 @@ verify_succeeded "$?" "sandbox PATH tool: the tool from PATH ran"
 test ! -e "$WORK_DIR/planted_ran"
 verify_succeeded "$?" "sandbox PATH tool: the tool planted in the current folder did not run"
 
+# ===========================================================================
+echo "------------------------------"
+echo "--sandbox: a derived grant of the whole home folder is reported"
+echo ""
+
+FAKE_HOME="$WORK_DIR/fake_home"
+/bin/mkdir -p "$FAKE_HOME/sub"
+cat > "$WORK_DIR/broad_home.json" << EOF2
+[{ "action": "execute", "tool": "/bin/echo", "arguments": ["broad"], "outputs": ["$FAKE_HOME/out.txt"] }]
+EOF2
+cat > "$WORK_DIR/narrow_home.json" << EOF2
+[{ "action": "execute", "tool": "/bin/echo", "arguments": ["narrow"], "outputs": ["$FAKE_HOME/sub/out.txt"] }]
+EOF2
+
+output=$(HOME="$FAKE_HOME" "$REPLAY_TOOL" --sandbox "$WORK_DIR/broad_home.json" 2>&1)
+verify_succeeded "$?" "sandbox broad grant: replay exited successfully"
+echo "$output" | /usr/bin/grep -qF "grants write access to all of"
+verify_succeeded "$?" "sandbox broad grant: a write grant of the home folder is reported"
+
+output=$(HOME="$FAKE_HOME" "$REPLAY_TOOL" --sandbox "$WORK_DIR/narrow_home.json" 2>&1)
+verify_succeeded "$?" "sandbox narrow grant: replay exited successfully"
+echo "$output" | /usr/bin/grep -qF "grants write access to all of"
+verify_failed "$?" "sandbox narrow grant: a folder below the home folder is not reported"
+
+/bin/cp "$WORK_DIR/narrow_home.json" "$FAKE_HOME/in_home.json"
+output=$(HOME="$FAKE_HOME" "$REPLAY_TOOL" --sandbox "$FAKE_HOME/in_home.json" 2>&1)
+verify_succeeded "$?" "sandbox playlist in the home folder: replay exited successfully"
+echo "$output" | /usr/bin/grep -qF "grants read access to all of"
+verify_succeeded "$?" "sandbox playlist in the home folder: the read grant of its folder, the home folder, is reported"
+
 report_test_stats
 
 [ "$failure_counter" -eq 0 ]

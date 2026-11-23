@@ -1095,6 +1095,8 @@ int main(int argc, const char * argv[])
 	if (playlistPath != nullptr)
 	{
 		std::string absPath = EnsureAbsolutePath(playlistPath);
+		size_t derivedReadsFrom = sandboxAllowRead.size();
+		size_t derivedWritesFrom = sandboxAllowWrite.size();
 
 		// Sandbox: allow reads from the playlist's own directory.
 		if (sandboxRequested && !absPath.empty())
@@ -1124,6 +1126,14 @@ int main(int argc, const char * argv[])
 				ExtractPlaylistSandboxPaths(steps, context.environment,
 				                             sandboxAllowRead, sandboxAllowWrite);
 			}
+		}
+		// The grants above come from the playlist's folder and the paths the playlist names,
+		// a parent folder per written file; one of them can be the whole home folder (a
+		// playlist kept in it, say) without anyone asking.
+		if (sandboxRequested)
+		{
+			sandbox::WarnAboutBroadDerivedGrants("replay", "the playlist and its folder", sandboxAllowRead, derivedReadsFrom, false);
+			sandbox::WarnAboutBroadDerivedGrants("replay", "the playlist and its folder", sandboxAllowWrite, derivedWritesFrom, true);
 		}
 	}
 

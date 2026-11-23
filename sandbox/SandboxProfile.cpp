@@ -536,4 +536,48 @@ bool InitializeSandbox(const std::string& profile_path,
     return ApplyConfig(cfg, verbose, allowed_threads);
 }
 
+bool IsBroadGrant(const std::string& path)
+{
+    std::string resolved = file_helpers::resolve_literal_path(path);
+    if (resolved.empty())
+        resolved = path;
+    while (resolved.size() > 1 && resolved.back() == '/')
+        resolved.pop_back();
+    if (resolved == "/")
+        return false; // never granted: the profile refuses it with a warning of its own
+    const char* home = getenv("HOME");
+    if (home == nullptr || home[0] == '\0')
+        return false;
+    std::string homeResolved = file_helpers::resolve_literal_path(home);
+    while (homeResolved.size() > 1 && homeResolved.back() == '/')
+        homeResolved.pop_back();
+    if (homeResolved.empty() || homeResolved == "/")
+        return false;
+    if (resolved == homeResolved)
+        return true;
+    // Any folder above the home folder holds all of it (/Users, /home, or /var for a home
+    // in /var/home).
+    return homeResolved.size() > resolved.size()
+        && homeResolved.compare(0, resolved.size(), resolved) == 0
+        && homeResolved[resolved.size()] == '/';
+}
+
+void WarnAboutBroadDerivedGrants(const char* tool, const char* source,
+                                 const std::vector<std::string>& paths, size_t from, bool write)
+{
+    std::vector<std::string> reported; // gate run from the home folder with -i . names it twice
+    for (size_t i = from; i < paths.size(); i++)
+    {
+        if (!IsBroadGrant(paths[i]))
+            continue;
+        std::string resolved = file_helpers::resolve_literal_path(paths[i]);
+        if (std::find(reported.begin(), reported.end(), resolved) != reported.end())
+            continue;
+        reported.push_back(resolved);
+        fprintf(stderr, "%s: warning: the sandbox grants %s access to all of %s, derived from %s; "
+                        "nothing in that folder is protected from the command\n",
+                tool, write ? "write" : "read", paths[i].c_str(), source);
+    }
+}
+
 }  // namespace sandbox

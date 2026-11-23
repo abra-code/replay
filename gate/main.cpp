@@ -474,6 +474,9 @@ int main(int argc, char* argv[])
     // kernel-enforced on this process and inherited by the spawned command.
     if (sandbox_requested)
     {
+        size_t derived_reads_from = sandbox_allow_read.size();
+        size_t derived_writes_from = sandbox_allow_write.size();
+
         // Add current working directory for getcwd() and path resolution
         char cwd[PATH_MAX];
         if (getcwd(cwd, sizeof(cwd)) != nullptr)
@@ -509,6 +512,12 @@ int main(int argc, char* argv[])
             if (!sp.empty())
                 sandbox_allow_write.push_back(sp);
         }
+
+        // The grants above come from the current folder and the paths on the command line;
+        // one of them can be the whole home folder (gate run from it, or -i .) without
+        // anyone asking for that.
+        sandbox::WarnAboutBroadDerivedGrants("gate", "the current folder and the paths given", sandbox_allow_read, derived_reads_from, false);
+        sandbox::WarnAboutBroadDerivedGrants("gate", "the current folder and the paths given", sandbox_allow_write, derived_writes_from, true);
 
         // Allow read access to the child tool being executed. A name without a slash
         // is looked up in PATH the way the spawn will look it up, so the tool found

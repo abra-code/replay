@@ -421,6 +421,31 @@ verify_succeeded "$?" "sandbox PATH tool: gate exited successfully"
 echo "$output" | /usr/bin/grep -qF "path tool ran"
 verify_succeeded "$?" "sandbox PATH tool: the tool ran"
 
+# ===========================================================================
+echo "------------------------------"
+echo "--sandbox: a derived grant of the whole home folder is reported"
+echo ""
+
+FAKE_HOME="$WORK_DIR/fake_home"
+/bin/mkdir -p "$FAKE_HOME/sub"
+printf 'home input' > "$FAKE_HOME/sub/in.txt"
+
+output=$(cd "$FAKE_HOME" && HOME="$FAKE_HOME" "$GATE_TOOL" --sandbox -f -i "$FAKE_HOME/sub/in.txt" -c "$CACHE_DIR" -- /usr/bin/true 2>&1)
+verify_succeeded "$?" "sandbox broad grant: gate run from the home folder exited successfully"
+echo "$output" | /usr/bin/grep -qF "grants read access to all of"
+verify_succeeded "$?" "sandbox broad grant: the read grant of the current folder, the home folder, is reported"
+
+output=$(cd "$FAKE_HOME" && HOME="$FAKE_HOME" "$GATE_TOOL" --sandbox -f -i . -c "$CACHE_DIR" -- /usr/bin/true 2>&1)
+verify_succeeded "$?" "sandbox broad grant twice: gate run from the home folder with -i . exited successfully"
+count=$(echo "$output" | /usr/bin/grep -cF "grants read access to all of")
+[ "$count" = "1" ]
+verify_succeeded "$?" "sandbox broad grant twice: the home folder is reported once, not once per grant"
+
+output=$(cd "$FAKE_HOME/sub" && HOME="$FAKE_HOME" "$GATE_TOOL" --sandbox -f -i "$FAKE_HOME/sub/in.txt" -c "$CACHE_DIR" -- /usr/bin/true 2>&1)
+verify_succeeded "$?" "sandbox narrow grant: gate run from a folder below the home folder exited successfully"
+echo "$output" | /usr/bin/grep -qF "access to all of"
+verify_failed "$?" "sandbox narrow grant: nothing is reported"
+
 report_test_stats
 
 [ "$failure_counter" -eq 0 ]

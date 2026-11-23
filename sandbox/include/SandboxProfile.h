@@ -125,4 +125,14 @@ bool InitializeSandbox(const std::string& profile_path,
                   const std::vector<pid_t>& allowed_threads = {},
                   bool deny_unix_sockets = false);
 
+// True for a folder that hands over nearly everything of the user when granted whole:
+// the home folder and any folder above it. Compared after resolving links. Not the
+// root, which the profile refuses with a warning of its own.
+bool IsBroadGrant(const std::string& path);
+
+// Print a warning on stderr for each of paths[from...] that IsBroadGrant names. tool is
+// "replay" or "gate"; source says where the paths were derived from ("the playlist").
+void WarnAboutBroadDerivedGrants(const char* tool, const char* source,
+                                 const std::vector<std::string>& paths, size_t from, bool write);
+
 }  // namespace sandbox
