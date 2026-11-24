@@ -304,8 +304,8 @@ Options:
                      an action starts "replay" in server mode. Therefore starting the server manually is not required
                      but it is possible if needed.
                      The server cannot run sandboxed: the sandbox options are refused with it.
-  -l, --stdout PATH  log standard output to provided file path.
-  -m, --stderr PATH  log standard error to provided file path.
+  -l, --stdout PATH  log standard output to provided file path (not through a symbolic link).
+  -m, --stderr PATH  log standard error to provided file path (not through a symbolic link).
   --cache            Enable the incremental execution cache: skip actions whose declared inputs,
                      owned paths and declared environment are unchanged since the last run.
                      Off by default. Requires a playlist file; works in the default concurrent

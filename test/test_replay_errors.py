@@ -9,6 +9,7 @@ Scenarios:
   4. create file blob (streaming format, blob=true) — same via pipe
   5. edit regex back-references \\1/\\2 in replacement string
   6. edit regex back-reference word swap
+  7. --stdout and --stderr log files, not written through a symbolic link
 
 Usage: python3 test_replay_errors.py [/path/to/replay]
 Exit:  0 = all checks passed, 1 = one or more failures
@@ -237,6 +238,46 @@ def test_edit_regex_group_swap() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Scenario 7: --stdout and --stderr do not write through a symbolic link
+# ---------------------------------------------------------------------------
+
+def test_log_files_not_through_links() -> None:
+    print("\n--- Scenario 7: --stdout / --stderr log files ---")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        out_log = work / "out.log"
+        err_log = work / "err.log"
+        result = run_replay_stdin(["[echo]\tlogged-line\n"],
+                                  extra_args=["--stdout", str(out_log), "--stderr", str(err_log)])
+        check("exit 0 with --stdout and --stderr", result.returncode == 0, result.stderr[:200])
+        check("--stdout writes the output into the log file",
+              out_log.exists() and "logged-line" in out_log.read_text(),
+              out_log.read_text() if out_log.exists() else "no log file")
+
+        # A link at the log path, as someone who can write the folder could plant one:
+        # the file it names must keep its contents.
+        target = work / "precious.txt"
+        target.write_text("keep me\n")
+        for option, name in (("--stdout", "out-link.log"), ("--stderr", "err-link.log")):
+            link = work / name
+            os.symlink(target, link)
+            result = run_replay_stdin(["[echo]\tlink-line\n"], extra_args=[option, str(link)])
+            check(f"{option} through a link: refused (exit not 0)", result.returncode != 0,
+                  f"exit {result.returncode}")
+            check(f"{option} through a link: the message says why",
+                  "symbolic link" in result.stderr, result.stderr[:300])
+            check(f"{option} through a link: the linked file is unchanged",
+                  target.read_text() == "keep me\n", target.read_text()[:100])
+
+        # /dev/stdout and /dev/stderr are links the system made: they keep working.
+        result = run_replay_stdin(["[echo]\tdev-stderr-line\n"], extra_args=["--stdout", "/dev/stderr"])
+        check("--stdout /dev/stderr: the output goes to standard error",
+              result.returncode == 0 and "dev-stderr-line" in result.stderr,
+              f"exit {result.returncode}, stderr: {result.stderr[:200]}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -252,6 +293,7 @@ test_blob_valid_json()
 test_blob_valid_streaming()
 test_edit_regex_backreferences()
 test_edit_regex_group_swap()
+test_log_files_not_through_links()
 
 print(f"\n{'='*40}")
 print(f"  Passed: {_pass}  Failed: {_fail}")
