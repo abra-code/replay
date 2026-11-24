@@ -21,6 +21,8 @@
 #include <dirent.h>
 #include <mutex>
 #include <set>
+#include <system_error>
+#include <thread>
 #include <sys/prctl.h>
 #endif
 
@@ -251,6 +253,12 @@ std::atomic<bool> gSubreaper(false);
 std::mutex gChildrenMutex;
 std::set<pid_t> gRunChildren;
 
+// Whether this process has started ending its descendants, at exit or for a signal.
+// Changed under gChildrenMutex, so once it is set no Run call starts another child,
+// which would be missed by the last look for children and outlive this process.
+enum { kRunning, kExiting, kSignaled };
+std::atomic<int> gEnding(kRunning);
+
 // A subreaper adopts every orphaned descendant, and an adopted one that exits stays a
 // zombie until this process reaps it (before, the system did). Called after each Run:
 // reaps exited children that no Run waits for. Stops at one that a Run waits for,
@@ -318,6 +326,114 @@ void EndRemainingDescendants()
     }
 }
 
+// The exit handler. When a signal is already being handled, the signal thread ends the
+// descendants and then this process with the signal's status, so it waits for that.
+void EndRemainingDescendantsAtExit()
+{
+    int expected = kRunning;
+    {
+        std::lock_guard<std::mutex> lock(gChildrenMutex);
+        gEnding.compare_exchange_strong(expected, kExiting);
+    }
+    if(expected == kSignaled)
+    {
+        for(;;)
+            pause();
+    }
+    EndRemainingDescendants();
+}
+
+// Ending by a signal runs no exit handlers, so for SIGTERM (how an MCP client or a
+// service manager stops a process), SIGINT and SIGHUP a handler wakes a thread that
+// ends the descendants and then lets the signal end this process as it would have.
+// The handler itself only writes the signal number into a pipe: it is the one thing
+// it can safely do.
+int gTerminationPipe[2] = {-1, -1};
+
+volatile sig_atomic_t gTerminationSeen = 0;
+
+void OnTerminationSignal(int sig)
+{
+    // A second signal while the descendants are being ended (a second Ctrl-C) ends this
+    // process at once, with the default action: it is delivered when this handler
+    // returns, since the signal is blocked while its handler runs.
+    if(gTerminationSeen)
+    {
+        struct sigaction fallback;
+        memset(&fallback, 0, sizeof(fallback));
+        fallback.sa_handler = SIG_DFL;
+        sigemptyset(&fallback.sa_mask);
+        sigaction(sig, &fallback, nullptr);
+        raise(sig);
+        return;
+    }
+    gTerminationSeen = 1;
+    int saved = errno;
+    unsigned char byte = (unsigned char)sig;
+    ssize_t written = write(gTerminationPipe[1], &byte, 1);
+    (void)written; // a full pipe means a signal is being handled already
+    errno = saved;
+}
+
+void WatchTermination()
+{
+    unsigned char byte = 0;
+    ssize_t got;
+    do
+    {
+        got = read(gTerminationPipe[0], &byte, 1);
+    } while((got < 0) && (errno == EINTR));
+    if(got != 1)
+        return;
+    int sig = byte;
+    {
+        std::lock_guard<std::mutex> lock(gChildrenMutex);
+        gEnding.store(kSignaled);
+    }
+    EndRemainingDescendants();
+    signal(sig, SIG_DFL);
+    sigset_t only;
+    sigemptyset(&only);
+    sigaddset(&only, sig);
+    pthread_sigmask(SIG_UNBLOCK, &only, nullptr);
+    raise(sig);
+    _exit(128 + sig); // not reached
+}
+
+void EndDescendantsOnTermination()
+{
+    if(pipe2(gTerminationPipe, O_CLOEXEC) != 0)
+    {
+        fprintf(stderr, "warning: cannot watch for SIGTERM (%s): a process that leaves its session with "
+                        "setsid can outlive this run when it is stopped by a signal\n", strerror(errno));
+        return;
+    }
+    fcntl(gTerminationPipe[1], F_SETFL, O_NONBLOCK);
+    try
+    {
+        std::thread(WatchTermination).detach();
+    }
+    catch(const std::system_error &error)
+    {
+        fprintf(stderr, "warning: cannot watch for SIGTERM (%s): a process that leaves its session with "
+                        "setsid can outlive this run when it is stopped by a signal\n", error.what());
+        return;
+    }
+    for(int sig : {SIGTERM, SIGINT, SIGHUP})
+    {
+        // A signal the caller set to be ignored (nohup) stays ignored.
+        struct sigaction previous;
+        if((sigaction(sig, nullptr, &previous) == 0) && (previous.sa_handler == SIG_IGN))
+            continue;
+        struct sigaction action;
+        memset(&action, 0, sizeof(action));
+        action.sa_handler = OnTerminationSignal;
+        sigemptyset(&action.sa_mask);
+        action.sa_flags = SA_RESTART;
+        sigaction(sig, &action, nullptr);
+    }
+}
+
 } // namespace
 #endif
 
@@ -334,7 +450,8 @@ void EndDescendantsAtExit()
         return;
     }
     gSubreaper.store(true);
-    std::atexit(EndRemainingDescendants);
+    std::atexit(EndRemainingDescendantsAtExit);
+    EndDescendantsOnTermination();
 #endif
 }
 
@@ -493,8 +610,11 @@ Result Run(const Options &opts)
     if(gSubreaper.load())
     {
         std::lock_guard<std::mutex> lock(gChildrenMutex);
-        rc = posix_spawn(&pid, path, &fa, &spawnattr,
-                         const_cast<char* const*>(argv.data()), envp);
+        if(gEnding.load() != kRunning)
+            rc = ECANCELED; // this process is ending its descendants
+        else
+            rc = posix_spawn(&pid, path, &fa, &spawnattr,
+                             const_cast<char* const*>(argv.data()), envp);
         if((rc == 0) && !opts.detach)
             gRunChildren.insert(pid);
     }

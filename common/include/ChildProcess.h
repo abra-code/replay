@@ -88,10 +88,10 @@ void CloseOtherDescriptorsInChildren();
 // Linux: makes this process the subreaper of everything it starts, so a descendant that
 // leaves its process group and session (setsid) is re-parented to this process rather
 // than to the system, and ends every remaining descendant when this process exits
-// normally (SIGTERM, then SIGKILL after a second). replay and gate call it once their
-// kernel sandbox is on, so that nothing sandboxed outlives the run. Not when killed
-// by a signal, which runs no exit handlers. macOS has no subreaper; there it does
-// nothing.
+// normally (SIGTERM, then SIGKILL after a second), or is stopped by SIGTERM, SIGINT or
+// SIGHUP (the descendants are ended first, then the signal ends this process). replay
+// and gate call it once their kernel sandbox is on, so that nothing sandboxed outlives
+// the run. Not on SIGKILL. macOS has no subreaper; there it does nothing.
 void EndDescendantsAtExit();
 
 } // namespace ChildProcess

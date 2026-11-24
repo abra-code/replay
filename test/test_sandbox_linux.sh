@@ -614,8 +614,60 @@ else
     echo "  skipped: no gate next to replay"
 fi
 
+# Gives the process in $1 five seconds to end, then kills it, so that a regression that
+# swallows SIGTERM fails the check below (status 137) instead of hanging the suite.
+end_within_5s() {
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
+        kill -0 "$1" 2>/dev/null || return 0
+        /bin/sleep 0.2
+    done
+    kill -KILL "$1" 2>/dev/null
+}
+
+# Stopped by SIGTERM, as an MCP client stops its server: the descendants are ended
+# first, then SIGTERM ends the server (exit status 143). The server reads its requests
+# from a FIFO kept open here, so it is still running when the signal comes.
+/usr/bin/mkfifo "$WORK_DIR/mcp-term.in"
+mcp_command="${SURVIVOR//PIDFILE/$ALLOWED/mcpterm.pid}"
+mcp_command="${mcp_command//\\/\\\\}"
+mcp_command="${mcp_command//\"/\\\"}"
+"$REPLAY" --allow-write "$ALLOWED" --mcp-server < "$WORK_DIR/mcp-term.in" > "$WORK_DIR/mcp-term.out" 2>&1 &
+mcp_server=$!
+exec 4> "$WORK_DIR/mcp-term.in"
+printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"execute_command\",\"arguments\":{\"command\":\"$mcp_command\"}}}" >&4
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+    [ -s "$ALLOWED/mcpterm.pid" ] && break
+    /bin/sleep 0.1
+done
+kill -TERM "$mcp_server"
+end_within_5s "$mcp_server"
+wait "$mcp_server"
+mcp_status=$?
+exec 4>&-
+test -s "$ALLOWED/mcpterm.pid" && gone_within_3s "$ALLOWED/mcpterm.pid" && [ "$mcp_status" -eq 143 ]
+check $? "sandboxed MCP server stopped by SIGTERM: the setsid process ends, then the server (status 143)" \
+    "status $mcp_status; $(/bin/cat "$WORK_DIR/mcp-term.out")"
+
+if [ -x "$GATE" ]; then
+    "$GATE" --allow-write "$ALLOWED" -c "$ALLOWED/gate-cache-term" -f -- \
+        /bin/sh -c "${SURVIVOR//PIDFILE/$ALLOWED/gateterm.pid}; exec /bin/sleep 30" > "$WORK_DIR/gate-term.out" 2>&1 &
+    gate_pid=$!
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+        [ -s "$ALLOWED/gateterm.pid" ] && break
+        /bin/sleep 0.1
+    done
+    kill -TERM "$gate_pid"
+    end_within_5s "$gate_pid"
+    wait "$gate_pid"
+    gate_status=$?
+    test -s "$ALLOWED/gateterm.pid" && gone_within_3s "$ALLOWED/gateterm.pid" && [ "$gate_status" -eq 143 ]
+    check $? "sandboxed gate stopped by SIGTERM: the setsid process ends, then gate (status 143)" \
+        "status $gate_status; $(/bin/cat "$WORK_DIR/gate-term.out")"
+fi
+
 # End the control's process, and any that a failed check above left running.
-for name in plain boxed mcp gate; do
+for name in plain boxed mcp gate mcpterm gateterm; do
     pid="$(/bin/cat "$ALLOWED/$name.pid" 2>/dev/null)"
     case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null ;; esac
 done
