@@ -87,6 +87,7 @@ constexpr uint64_t kReadOnlyDir  = kReadFile | kReadDir;
 constexpr uint64_t kReadWriteDir = kReadFile | kReadDir | kWriteFile | kRemoveDir | kRemoveFile
                                  | kMakeDir | kMakeReg | kMakeSock | kMakeFifo | kMakeSym
                                  | kRefer | kTruncate | kResolveUnix;
+constexpr uint64_t kSharedMemoryDir = kReadFile | kReadDir | kWriteFile | kRemoveFile | kMakeReg | kTruncate;
 constexpr uint64_t kReadOnlyFile  = kReadFile;
 constexpr uint64_t kReadWriteFile = kReadFile | kWriteFile | kTruncate;
 
@@ -287,6 +288,12 @@ bool BuildRules(const Config& config, int abi, RuleSet& out, std::string& error)
     RuleSet result;
     result.abi = abi;
     result.handledAccess = HandledFor(abi);
+    // From ABI 9 the kernel can limit connecting to Unix sockets by path to the write
+    // grants. Only when Unix sockets are limited (the MCP server, --deny-unix-sockets):
+    // playlists and gate keep them by default (ssh-agent, the docker command), and on
+    // older kernels they keep them as well.
+    if (!config.deny_unix_sockets)
+        result.handledAccess &= ~kResolveUnix;
     result.scoped = (abi >= 6) ? kScopeSignal : 0;
     // Abstract Unix sockets have no path, so the path right of ABI 9 does not cover
     // them; the scope limits connecting to sockets made inside the sandbox. Only when
@@ -388,6 +395,21 @@ bool BuildRules(const Config& config, int abi, RuleSet& out, std::string& error)
         }
         AddDeduplicated(devices, kReadWriteFile, kReadWriteFile, "baseline", result.rules);
 
+        // POSIX shared memory and named semaphores (shm_open, sem_open) are files in
+        // /dev/shm: without it every Python multiprocessing lock and pool fails. Files
+        // only (sem_open makes a hard link in the same folder), no folders, sockets,
+        // FIFOs or symbolic links. Other programs' shared memory of the same user there
+        // becomes readable and writable too.
+        {
+            char resolved[PATH_MAX];
+            struct stat st;
+            if (realpath("/dev/shm", resolved) != nullptr && stat(resolved, &st) == 0 && S_ISDIR(st.st_mode))
+            {
+                AddDeduplicated({resolved}, kSharedMemoryDir, kReadWriteFile,
+                                "baseline: POSIX shared memory and semaphores", result.rules);
+            }
+        }
+
         // The terminals on descriptors 0 to 2, so that opening /dev/stdin or /dev/stderr
         // works when they are one. Only those: all of /dev/pts would let a command read
         // what the user types into another terminal and write into it; this process
@@ -443,7 +465,7 @@ std::string Describe(const RuleSet& ruleset)
     text += "Not covered by the sandbox: file metadata (stat, chmod, chown, timestamps) and device ioctls";
     if (ruleset.abi < 6)
         text += ", signals to other processes";
-    if (ruleset.abi < 9)
+    if ((ruleset.handledAccess & kResolveUnix) == 0)
         text += ", connecting to Unix sockets by path";
     text += ".\n";
     return text;

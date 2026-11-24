@@ -95,6 +95,7 @@ static void print_usage(std::ostream& stream)
     stream << "                         the write grants can be connected to (DNS keeps working). Linux below\n";
     stream << "                         Landlock ABI 9 (Linux 7.1): no Unix socket can be created (socketpair\n";
     stream << "                         works), which also stops Python's default process pool on Linux.\n";
+    stream << "                         From ABI 9 as on macOS.\n";
     stream << "                         Implicitly enables --sandbox.\n";
     stream << "  -v, --verbose          Verbose output\n";
     stream << "  -h, --help             Print this help message\n";

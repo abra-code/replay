@@ -3,7 +3,7 @@
 # beyond what the shared
 # sandbox suites check on both platforms: denials outside the grants, paths that do not
 # exist yet, hard links, refused options, the --verbose listing, the system call filter,
-# the denied network and process creation, the i386 compat entry on x86_64, the documented gaps, and terminals. Linux only; it reports itself skipped elsewhere.
+# the denied network and process creation, the i386 compat entry on x86_64, the documented gaps, terminals, and shared memory. Linux only; it reports itself skipped elsewhere.
 #
 # Usage: test_sandbox_linux.sh [/path/to/replay]
 # Exit:  0 = all checks passed (or skipped), 1 = a failure, 2 = setup failed
@@ -243,8 +243,8 @@ else
     check $r "TIOCSTI is denied (EACCES, not the kernel's ENOTTY)" "sandboxed: $out; unsandboxed: $plain"
     case "$out" in *"TIOCGWINSZ ENOTTY"*) r=0 ;; *) r=1 ;; esac
     check $r "other ioctls reach the kernel (TIOCGWINSZ gives ENOTTY)" "$out"
-    # Option c of the design's question 6: playlists, whose commands the user wrote,
-    # keep Unix sockets (pinned, as a gap below ABI 9).
+    # Playlists, whose commands the user wrote, keep Unix sockets on every ABI unless
+    # --deny-unix-sockets is given.
     case "$NL$out$NL" in *"${NL}socket-unix ok$NL"*) r=0 ;; *) r=1 ;; esac
     check $r "a playlist command can create a Unix socket" "$out"
 fi
@@ -619,6 +619,21 @@ for name in plain boxed mcp gate; do
     pid="$(/bin/cat "$ALLOWED/$name.pid" 2>/dev/null)"
     case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null ;; esac
 done
+
+echo "=== 15. shared memory in /dev/shm ==="
+# POSIX shared memory and named semaphores are files in /dev/shm; Python's
+# multiprocessing locks need them. The baseline grants files there, not folders.
+if [ -d /dev/shm ] && [ -x /usr/bin/python3 ]; then
+    run_stdin "[execute]	/usr/bin/python3	$SCRIPT_DIR/sandbox_shm_probe.py" --allow-read "$SCRIPT_DIR" --allow-write "$ALLOWED"
+    case "$out" in *LOCK-OK*) r=0 ;; *) r=1 ;; esac
+    check $r "a multiprocessing lock works under the sandbox" "$out"
+    case "$out" in *SHM-OK*) r=0 ;; *) r=1 ;; esac
+    check $r "POSIX shared memory can be made, read and removed under the sandbox" "$out"
+    case "$out" in *DIR-REFUSED*) r=0 ;; *) r=1 ;; esac
+    check $r "a folder cannot be made in /dev/shm" "$out"
+else
+    echo "  skipped: no /dev/shm or no /usr/bin/python3"
+fi
 
 echo ""
 echo "Passed: $pass  Failed: $fail"

@@ -348,7 +348,8 @@ Options:
                      inside the write grants can be connected to (DNS keeps working).
                      Linux below Landlock ABI 9 (Linux 7.1): no Unix socket can be
                      created (socketpair works), which also stops Python's default
-                     process pool on Linux. Always on for --mcp-server.
+                     process pool on Linux. From ABI 9 as on macOS.
+                     Always on for --mcp-server.
                      Implicitly enables --sandbox.
   --mcp-server       Start an MCP (Model Context Protocol) stdio server.
                      Use --allow-read PATH for read-only dirs and --allow-write PATH for
@@ -1028,6 +1029,7 @@ OPTIONS:
                          the write grants can be connected to (DNS keeps working). Linux below
                          Landlock ABI 9 (Linux 7.1): no Unix socket can be created (socketpair
                          works), which also stops Python's default process pool on Linux.
+                         From ABI 9 as on macOS.
                          Implicitly enables --sandbox.
   -v, --verbose          Verbose output
   -h, --help             Print this help message

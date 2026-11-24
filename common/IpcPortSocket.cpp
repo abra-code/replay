@@ -16,8 +16,8 @@
 //  Token: before its request frame a client sends the 32 bytes of <socket>.token, a file
 //  of random bytes the server writes (mode 0600) before it listens. The server drops a
 //  connection whose first 32 bytes differ. Connecting needs only the socket, which a
-//  sandboxed command can reach on Linux below Landlock ABI 9 and on macOS whenever Unix
-//  sockets are allowed; reading the token needs read access to the socket folder, which
+//  sandboxed command can reach whenever Unix sockets are not limited (playlists and gate
+//  by default); reading the token needs read access to the socket folder, which
 //  the sandbox does not give. So a sandboxed step cannot have a server, which runs
 //  unsandboxed, run actions for it.
 //

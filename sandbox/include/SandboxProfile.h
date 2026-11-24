@@ -64,8 +64,9 @@ struct Config
     // DNS and system log sockets). Linux below ABI 9, whose Landlock cannot limit
     // connecting by path: creating Unix sockets is denied at all (socketpair stays
     // allowed). Linux from ABI 6: connecting to abstract Unix sockets (which have no
-    // path) is limited to those made inside the sandbox. On ABI 9 and newer, Unix sockets
-    // inside the write grants stay reachable either way.
+    // path) is limited to those made inside the sandbox. Linux from ABI 9: connecting by path
+    // is allowed only to sockets inside the write grants, as on macOS; without this
+    // flag Landlock leaves connecting to Unix sockets alone.
     bool deny_unix_sockets = false;
 
     bool empty() const
