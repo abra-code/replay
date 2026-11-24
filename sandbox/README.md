@@ -180,6 +180,12 @@ gate --sandbox -i src.c -o out.o -- /usr/bin/clang -c src.c -o out.o     # a pat
 
 The grant covers the tool itself, not what it loads or reads: a tool that runs other programs, reads its own support files outside the system folders, or is a script whose interpreter lives elsewhere still needs `--allow-read` for those.
 
+### Descriptors
+
+The sandbox checks files when they are opened, not a descriptor that is already open, so under the sandbox a command gets only descriptors 0 to 2 (standard input, output and error): a descriptor that `replay` or `gate` got from its caller, on a file outside the grants for example, does not reach it. Without the sandbox, commands get every descriptor that is not close-on-exec, as before.
+
+The one exception is make's job slots. A `make -j` that runs a recursive make passes it two pipe descriptors, named in `MAKEFLAGS` (`--jobserver-auth=R,W`, or `--jobserver-fds=R,W` before make 4.2), so that the sub-make shares the parallel jobs; a sub-make without them runs one job at a time. When `replay` or `gate` starts with such a pair of open pipes, its commands get them too. make 4.4 and newer use a named pipe instead (`--jobserver-auth=fifo:/tmp/GMfifo...`), made in `$MAKE_TMPDIR`, `$TMPDIR` or else `/tmp`, which are outside the grants, so a sandboxed sub-make there runs one job at a time (`make[1]: cannot open jobserver ...`, then `jobserver unavailable: using -j1`) unless the top make is run with `--jobserver-style=pipe`.
+
 ---
 
 ## Network

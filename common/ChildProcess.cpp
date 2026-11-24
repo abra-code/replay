@@ -1,6 +1,7 @@
 #include "ChildProcess.h"
 
 #include <algorithm>
+#include <climits>
 #include <atomic>
 #include <cerrno>
 #include <cstdlib>
@@ -199,10 +200,65 @@ bool WaitForExit(pid_t pid, int *statusOut, long long deadlineMillis)
     }
 }
 
+// make's job slots. A make that runs a recursive make passes it two pipe descriptors,
+// named in MAKEFLAGS as --jobserver-auth=R,W (--jobserver-fds=R,W before make 4.2), so
+// that the sub-make shares the parallel job slots; without them it runs one job at a
+// time. Found once, when the switch is turned on, from this process's own MAKEFLAGS,
+// and kept only when both are open pipes that are not close-on-exec, which is how make
+// leaves them for a command it means to share them with. make 4.4's named-pipe style
+// (--jobserver-auth=fifo:PATH) needs no descriptor.
+std::vector<int> gJobserverFds;
+
+bool IsInheritablePipe(long fd)
+{
+    if((fd <= STDERR_FILENO) || (fd > INT_MAX))
+        return false;
+    int flags = fcntl((int)fd, F_GETFD);
+    if((flags == -1) || ((flags & FD_CLOEXEC) != 0))
+        return false;
+    struct stat info;
+    return (fstat((int)fd, &info) == 0) && S_ISFIFO(info.st_mode);
+}
+
+std::vector<int> FindJobserverFds()
+{
+    const char *makeflags = getenv("MAKEFLAGS");
+    if(makeflags == nullptr)
+        return {};
+    const std::string text(makeflags);
+    for(const char *option : {"--jobserver-auth=", "--jobserver-fds="})
+    {
+        // The last one counts, as in make.
+        size_t at = text.rfind(option);
+        if(at == std::string::npos)
+            continue;
+        const char *first = text.c_str() + at + strlen(option);
+        char *end = nullptr;
+        long readFd = strtol(first, &end, 10);
+        if((end == first) || (*end != ','))
+            return {}; // the named-pipe style, or something else
+        const char *second = end + 1;
+        long writeFd = strtol(second, &end, 10);
+        if(end == second)
+            return {};
+        if(IsInheritablePipe(readFd) && IsInheritablePipe(writeFd))
+            return {(int)readFd, (int)writeFd};
+        return {};
+    }
+    return {};
+}
+
+bool IsJobserverFd(int fd)
+{
+    return std::find(gJobserverFds.begin(), gJobserverFds.end(), fd) != gJobserverFds.end();
+}
+
 } // namespace
 
 void CloseOtherDescriptorsInChildren()
 {
+    if(!gCloseOtherDescriptors.load())
+        gJobserverFds = FindJobserverFds();
     gCloseOtherDescriptors.store(true);
 }
 
@@ -586,8 +642,9 @@ Result Run(const Options &opts)
     sigemptyset(&emptyMask);
     posix_spawnattr_setsigmask(&spawnattr, &emptyMask);
 
-    // Under the sandbox, only descriptors 0 to 2 reach the child (see the header).
-    // After the dup2 actions above, so the standard descriptors they set stay open.
+    // Under the sandbox, only descriptors 0 to 2 reach the child (see the header), and
+    // make's job slots when this process got them. After the dup2 actions above, so the
+    // standard descriptors they set stay open.
     if(gCloseOtherDescriptors.load())
     {
 #if defined(__APPLE__)
@@ -597,10 +654,23 @@ Result Run(const Options &opts)
             InheritIfOpen(&fa, STDOUT_FILENO);
         if(!wantErr)
             InheritIfOpen(&fa, STDERR_FILENO);
+        for(int fd : gJobserverFds)
+            InheritIfOpen(&fa, fd);
         spawnFlags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
         posix_spawnattr_setflags(&spawnattr, spawnFlags);
 #elif REPLAY_HAS_ADDCLOSEFROM
-        posix_spawn_file_actions_addclosefrom_np(&fa, STDERR_FILENO + 1);
+        // Every descriptor from 3 up is closed except the job slots: the ones below the
+        // highest job slot one by one (glibc ignores closing one that is not open), the
+        // rest at once.
+        int highest = STDERR_FILENO;
+        for(int fd : gJobserverFds)
+            highest = std::max(highest, fd);
+        for(int fd = STDERR_FILENO + 1; fd < highest; fd++)
+        {
+            if(!IsJobserverFd(fd))
+                posix_spawn_file_actions_addclose(&fa, fd);
+        }
+        posix_spawn_file_actions_addclosefrom_np(&fa, highest + 1);
 #endif
     }
 

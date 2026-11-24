@@ -446,6 +446,33 @@ verify_succeeded "$?" "sandbox narrow grant: gate run from a folder below the ho
 echo "$output" | /usr/bin/grep -qF "access to all of"
 verify_failed "$?" "sandbox narrow grant: nothing is reported"
 
+# ===========================================================================
+echo "------------------------------"
+echo "--sandbox: a sub-make gets the job slots of the make above it"
+echo ""
+
+# make passes a recursive make two pipe descriptors for its parallel job slots, named in
+# MAKEFLAGS. Under the sandbox the commands get only descriptors 0 to 2 otherwise, and a
+# sub-make without its job slots runs one job at a time. make 4.4 and newer
+# default to a named pipe instead, so the test asks them for the pipe style.
+MAKE_TOOL=/usr/bin/make
+if [ -x "$MAKE_TOOL" ]; then
+	JS_DIR="$WORK_DIR/jobserver"
+	/bin/mkdir -p "$JS_DIR"
+	# Each of the two jobs waits up to 3 s for the other to start, and fails without it:
+	# when they run one at a time, the first one fails.
+	printf 'all:\n\t+"$(GATE)" --allow-write "$(JS_DIR)" -f -c "$(JS_DIR)/cache" -- "$(MAKE)" -C "$(JS_DIR)" -f "$(JS_DIR)/Makefile" inner\ninner: a b\na:\n\t@/usr/bin/touch "$(JS_DIR)/a.on"; i=0; while [ ! -e "$(JS_DIR)/b.on" ] && [ $$i -lt 30 ]; do /bin/sleep 0.1; i=$$((i+1)); done; [ -e "$(JS_DIR)/b.on" ]\nb:\n\t@/usr/bin/touch "$(JS_DIR)/b.on"; i=0; while [ ! -e "$(JS_DIR)/a.on" ] && [ $$i -lt 30 ]; do /bin/sleep 0.1; i=$$((i+1)); done; [ -e "$(JS_DIR)/a.on" ]\n' > "$JS_DIR/Makefile"
+	make_version=$("$MAKE_TOOL" --version 2>/dev/null | /usr/bin/head -n 1 | /usr/bin/sed -n 's/^GNU Make \([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
+	make_style=""
+	case "$make_version" in
+		[5-9]*|"4 "[4-9]*) make_style="--jobserver-style=pipe" ;;
+	esac
+	output=$("$MAKE_TOOL" -j2 $make_style -f "$JS_DIR/Makefile" GATE="$GATE_TOOL" JS_DIR="$JS_DIR" 2>&1)
+	verify_succeeded "$?" "sandbox job slots: the sub-make under the sandbox ran its two jobs at the same time"
+else
+	echo "  skipped: no /usr/bin/make"
+fi
+
 report_test_stats
 
 [ "$failure_counter" -eq 0 ]

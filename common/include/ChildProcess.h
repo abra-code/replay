@@ -81,8 +81,10 @@ Result Run(const Options &opts);
 // up); the parent's other descriptors stay behind, close-on-exec or not. replay and gate
 // call it once their kernel sandbox is on: a descriptor their own caller left open
 // (on a file outside the grants, say) would otherwise let a sandboxed command read or
-// write through it, which the sandbox does not check. Unsandboxed runs keep passing
-// descriptors on, as a classic make jobserver needs.
+// write through it, which the sandbox does not check. The exception is make's job slots:
+// the two pipe descriptors that this process's MAKEFLAGS names (--jobserver-auth=R,W),
+// when it got them open, so that a sandboxed sub-make still runs its jobs in parallel.
+// Unsandboxed runs keep passing every descriptor on, as before.
 void CloseOtherDescriptorsInChildren();
 
 // Linux: makes this process the subreaper of everything it starts, so a descendant that
