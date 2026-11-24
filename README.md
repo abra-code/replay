@@ -482,7 +482,8 @@ Incremental execution cache:
              filesystem permissions.
 
     xattr    The public.fingerprint.* attribute on each file, the format shared with the gate and
-             fingerprint tools. Needs the files to be writable and briefly chmods read-only ones. It
+             fingerprint tools. Written only on the files of the user running replay, briefly
+             making a read-only one writable; another user's files are hashed every time. It
              trusts a file's inode, size and mtime only: a rewrite that restores all three (a tool
              preserving timestamps, touch -r) is invisible to it, so the file can look unchanged and
              cause a wrong skip. Use --cache-memo-refresh (or off) when inputs are rewritten with

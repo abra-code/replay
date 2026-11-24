@@ -222,6 +222,7 @@ test_symlinks
 test_xattr_caching
 test_xattr_refresh
 test_xattr_clear
+test_xattr_not_owned
 test_hash_algorithms
 test_fingerprint_stability
 test_fingerprint_content_change

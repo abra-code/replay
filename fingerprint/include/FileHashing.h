@@ -195,9 +195,23 @@ bool read_xattr_fileinfo(const std::string& path, FileInfoCore& current_file_inf
 }
 
 
+// The fingerprint xattr is written or removed, and its file's mode briefly changed for
+// that, only on files of the user running the tool. Another user's file (reached through
+// a shared folder, or every file when running as root) keeps its attributes and its
+// mode; its hash is still read
+// from an existing xattr and otherwise computed every time.
+inline __attribute__((always_inline))
+bool may_change_file_xattr(const FileInfo& info) noexcept
+{
+    return info.uid == geteuid();
+}
+
 inline __attribute__((always_inline))
 void write_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcept
 {
+    if (!may_change_file_xattr(info))
+        return;
+
     bool forced_writable = false;
     if ((info.mode & S_IWUSR) == 0) // if the file is not user-writable
     {
@@ -236,6 +250,9 @@ void write_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcep
 inline __attribute__((always_inline))
 void clear_xattr_fileinfo(const std::string& path, const FileInfo& info) noexcept
 {
+    if (!may_change_file_xattr(info))
+        return;
+
     bool forced_writable = false;
     if ((info.mode & S_IWUSR) == 0) // if the file is not user-writable
     {

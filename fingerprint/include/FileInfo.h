@@ -37,6 +37,9 @@ struct FileInfo : public FileInfoCore
 {
     // NOTE: ADDITIONAL INFO NOT PERSISTED
     mode_t   mode;       // Runtime only - not persisted to xattr, needed to determine file type
+    // Runtime only: the fingerprint xattr is written only on files of the user running
+    // the tool (FileHashing.h). One not built from stat has no owner (-1): no xattr for it.
+    uid_t    uid = (uid_t)-1;
 
     // Runtime only, and used by replay's sidecar fingerprint store (FingerprintStore.h)
     // rather than by the xattr format:
@@ -58,6 +61,7 @@ struct FileInfo : public FileInfoCore
                          .mtime_ns = platform_timespec_ns(platform_stat_mtime(st)),
                          .hash = {0} },
           mode(st.st_mode),
+          uid(st.st_uid),
           dev(st.st_dev),
           ctime_ns(platform_timespec_ns(platform_stat_ctime(st)))
     {
@@ -97,5 +101,6 @@ struct FileInfo : public FileInfoCore
         mode = 0;
         dev = 0;
         ctime_ns = 0;
+        uid = (uid_t)-1;
     }
 };

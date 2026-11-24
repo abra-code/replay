@@ -90,3 +90,42 @@ test_xattr_clear() {
     fi
 }
 
+
+# The fingerprint xattr is written only on files of the user running fingerprint: another user's
+# file keeps its attributes and its mode. Needs root to give a file away; skipped
+# otherwise.
+test_xattr_not_owned() {
+    log_test "Xattr written only on own files"
+    local own_uid
+    own_uid=$(/usr/bin/id -u)
+    if [ "$own_uid" != "0" ]; then
+        log_info "SKIP: needs root to give a file to another user"
+        return
+    fi
+    echo "not owned" > "$TEST_DIR/not_owned.txt"
+    /bin/chmod 444 "$TEST_DIR/not_owned.txt"
+    local chown_bin=/bin/chown
+    if [ -x /usr/sbin/chown ]; then
+        chown_bin=/usr/sbin/chown
+    fi
+    "$chown_bin" 12345 "$TEST_DIR/not_owned.txt"
+    local chown_status=$?
+    if [ "$chown_status" -ne 0 ]; then
+        log_fail "Could not give $TEST_DIR/not_owned.txt to uid 12345 with $chown_bin (status $chown_status)"
+        return
+    fi
+    local mode_before
+    mode_before=$(/bin/ls -l "$TEST_DIR/not_owned.txt" | /usr/bin/cut -c1-10)
+    local output
+    output=$(${FINGERPRINT_BIN} --xattr=on "$TEST_DIR/not_owned.txt" 2>&1)
+    local status=$?
+    local names
+    names=$(list_xattr_names "$TEST_DIR/not_owned.txt" | /usr/bin/grep "public.fingerprint")
+    local mode_after
+    mode_after=$(/bin/ls -l "$TEST_DIR/not_owned.txt" | /usr/bin/cut -c1-10)
+    if [ "$status" -eq 0 ] && [ -z "$names" ] && [ "$mode_before" = "$mode_after" ]; then
+        log_pass "Another user's file gets no fingerprint xattr and keeps its mode ($mode_after)"
+    else
+        log_fail "Another user's file gets no fingerprint xattr and keeps its mode (status $status, attributes \"$names\", mode $mode_before -> $mode_after): $output"
+    fi
+}

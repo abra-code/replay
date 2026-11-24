@@ -102,3 +102,5 @@ When `--xattr=on` (default), fingerprints are stored in extended attributes:
 On Linux the names are in the `user.` namespace: `user.public.fingerprint.crc32c` and `user.public.fingerprint.blake3`.
 
 On subsequent runs, cached values are used if file inode, size, and mtime are unchanged. This significantly speeds up repeated fingerprinting.
+
+The fingerprint xattr is written (and removed with `--xattr=clear`) only on files that belong to the user running the tool; a read-only file of that user is made writable for the moment of the write and then restored. Another user's file keeps its attributes and its mode: a fingerprint xattr already on it is still read, and otherwise its hash is computed on every run. Running as root therefore writes the xattr only on root's own files. gate and replay's `--cache-memo xattr` follow the same rule.
