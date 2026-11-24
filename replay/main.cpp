@@ -367,6 +367,8 @@ DisplayHelp(void)
 		"  --hash-store xattr under a sandbox means every hash written to an input is denied and logged\n"
 		"  as a kernel sandbox violation; the run stays correct, just noisier and slower. On Linux that\n"
 		"  combination is refused: the sandbox denies every xattr write.\n"
+		"  A sandboxed step can write the cache directory too, so it can make a later run skip actions and\n"
+		"  report them as cached: the cache records what the steps did, and it is not protected against them.\n"
 		"\n"
 		"  --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action on stdout\n"
 		"  without executing or writing anything - a \"what would rebuild\" query (no summary line, since\n"
@@ -1216,6 +1218,10 @@ int main(int argc, const char * argv[])
 			add_allowed_dir(profile_dir, false);
 
 		mcpOpts.kernelSandbox = sandboxRequested;
+		// The same rule the sandbox applies: --deny-network, or "allow_network": false in the
+		// profile, takes the network away.
+		mcpOpts.networkAllowed = !sandboxRequested
+		                         || (!sandboxDenyNetwork && (sandboxProfilePath.empty() || mcpProfileConfig.allow_network));
 		context.mcpServer = true;
 		int ret = RunMCPServer(&context, mcpOpts);
 		safe_exit(ret);

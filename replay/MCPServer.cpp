@@ -44,6 +44,8 @@
 #include <limits.h>
 #include <regex>
 
+extern char **environ; // what commands get, counted in the start lines
+
 // Revisions replay speaks, newest first. Element 0 is both the default - answered
 // when a client asks for nothing, asks with a non-string, or asks for a revision we
 // do not speak - and what the startup banner announces. The lifecycle spec requires
@@ -2569,8 +2571,15 @@ int RunMCPServer(ReplayContext *context, const MCPServerOptions &opts)
             kProtocolVersion, supportedList.c_str());
     if (!opts.kernelSandbox)
         fprintf(stderr, "replay-mcp: no kernel sandbox; the allowed directories bound the file tools only\n");
+    // What a command can send out, whatever the sandbox: the network and every variable
+    // of this server's environment, tokens included, unless the sandbox denies the network.
+    size_t environmentCount = 0;
+    for (char **variable = environ; (variable != nullptr) && (*variable != nullptr); variable++)
+        environmentCount++;
+    fprintf(stderr, "replay-mcp: commands get %s and all %zu environment variables of this server\n",
+            opts.networkAllowed ? "the network" : "no network", environmentCount);
     if (opts.allowedDirs.empty())
-        fprintf(stderr, "replay-mcp: WARNING — no allowed directories configured\n");
+        fprintf(stderr, "replay-mcp: WARNING - no allowed directories configured\n");
     else
         for (const auto &dir : opts.allowedDirs)
             fprintf(stderr, "replay-mcp: allowed %s %s\n",

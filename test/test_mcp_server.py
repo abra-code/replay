@@ -401,6 +401,43 @@ def test_protocol_batch_rejected(tmpdir: str) -> None:
           "2025-03-26" not in banner, banner.splitlines()[:2])
 
 
+def test_startup_lines_say_what_commands_get(tmpdir: str) -> None:
+    print("=== MCP: the start lines say what commands get ===")
+
+    env = dict(os.environ)
+    env["REPLAY_TEST_MARKER"] = "1"
+    expected_count = len(env)
+
+    def start_lines(extra: list) -> str:
+        proc = subprocess.run([str(REPLAY), "--allow-write", tmpdir] + extra + ["--mcp-server"],
+                              input="", capture_output=True, text=True, timeout=30, env=env)
+        return proc.stderr
+
+    lines = start_lines([])
+    check("start lines: commands get the network and every environment variable",
+          f"commands get the network and all {expected_count} environment variables" in lines,
+          lines.splitlines()[:4])
+    lines = start_lines(["--deny-network"])
+    check("start lines: with --deny-network, commands get no network",
+          f"commands get no network and all {expected_count} environment variables" in lines,
+          lines.splitlines()[:4])
+    profile = os.path.join(tmpdir, "no_network_profile.json")
+    with open(profile, "w") as f:
+        f.write('{"allow_network": false}\n')
+    lines = start_lines(["--sandbox-profile", profile])
+    check("start lines: with a profile that denies the network, commands get no network",
+          "commands get no network" in lines, lines.splitlines()[:4])
+    lines = start_lines(["--sandbox-profile", profile, "--no-sandbox"])
+    check("start lines: without the sandbox, commands get the network whatever the profile says",
+          "commands get the network" in lines, lines.splitlines()[:4])
+    allowing = os.path.join(tmpdir, "network_profile.json")
+    with open(allowing, "w") as f:
+        f.write('{"allow_network": true}\n')
+    lines = start_lines(["--sandbox-profile", allowing, "--deny-network"])
+    check("start lines: --deny-network wins over a profile that allows the network",
+          "commands get no network" in lines, lines.splitlines()[:4])
+
+
 # Tools that declare an outputSchema, and therefore MUST return conforming
 # structuredContent. Compared with set-equality in both directions below, so adding a
 # schema without a handler (or a handler without a schema) fails rather than passing
@@ -3325,6 +3362,7 @@ def main() -> int:
         test_handshake(tmpdir)
         test_protocol_negotiation(tmpdir)
         test_protocol_batch_rejected(tmpdir)
+        test_startup_lines_say_what_commands_get(tmpdir)
         test_tools_list(tmpdir)
         test_tools_list_output_schemas(tmpdir)
         test_structured_content_conforms(tmpdir)

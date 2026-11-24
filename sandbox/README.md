@@ -4,6 +4,16 @@
 
 The flags and the JSON profile are the same on both systems. Most of this document describes macOS; the [Linux](#linux) section at the end says what is different there.
 
+## What the sandbox is for
+
+The sandbox keeps the mistakes of a command, or of an AI agent, that means well inside the granted folders: a wrong path, an `rm` that goes too far, a build step that writes outside its tree. It is not built to hold a command or an agent that works against the user, such as an agent following instructions planted in a file it read. With the default settings such a command can still:
+- send out what it can read over the network, the environment included, with any token in it: commands get the network (`--deny-network` takes it away) and every variable of the environment of `replay` or `gate`; the MCP server prints both when it starts;
+- reach the user's Unix sockets from playlists and gate (ssh-agent, Docker; `--deny-unix-sockets` limits them, and the MCP server always does);
+- read file metadata anywhere, and on macOS every preference domain; on Linux all of `/proc`, and change the mode, owner and times of files, which Landlock does not cover (see [Linux](#linux));
+- leave something behind that runs or is trusted later, outside the sandbox: inside a write grant it can rewrite a git hook, a build file or a client's configuration, and it can write the cache directory, so a later run may skip steps.
+
+For an agent you do not trust, run `replay --mcp-server` inside an isolated machine (an agent-vm box, for example) and treat the machine as the boundary; the server's own path checks and the kernel sandbox are then a second line.
+
 ---
 
 ## Quick start

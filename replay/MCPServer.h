@@ -14,6 +14,7 @@ struct MCPAllowedDir {
 struct MCPServerOptions {
     std::vector<MCPAllowedDir> allowedDirs;
     bool kernelSandbox = true;  // false: no Seatbelt sandbox (--no-sandbox, or no allow flags)
+    bool networkAllowed = true; // what the sandbox lets commands do; always true without it
 };
 
 namespace Json { class MutableDoc; }

@@ -222,7 +222,12 @@ The help texts below say where Linux behaves differently; in short:
   limit macOS has for blocking actions.
 - **`dispatch`** reaches `replay --start-server` through a Unix socket in
   `$XDG_RUNTIME_DIR/replay` (or `/tmp/replay-<uid>`), so both must run as the
-  same user with the same `XDG_RUNTIME_DIR`.
+  same user with the same `XDG_RUNTIME_DIR`; the server checks that the client
+  is that user and asks for the server's token. On macOS they use a Mach message
+  port by default, which does not check who sends a request, and a process of
+  another user that shares the login session (root, or one started with `sudo`)
+  could take a batch name first: `dispatch` and the server assume one user per
+  Mac.
 
 For contributors: a `CFSTR` constant with non-ASCII text has the wrong length
 on Linux (it counts UTF-8 bytes), so non-ASCII strings must be created at run
@@ -524,6 +529,8 @@ Incremental execution cache:
   --hash-store xattr under a sandbox means every hash written to an input is denied and logged
   as a kernel sandbox violation; the run stays correct, just noisier and slower. On Linux that
   combination is refused: the sandbox denies every xattr write.
+  A sandboxed step can write the cache directory too, so it can make a later run skip actions and
+  report them as cached: the cache records what the steps did, and it is not protected against them.
 
   --dry-run --cache reports [cache] HIT or [cache] MISS (<reason>) per cacheable action on stdout
   without executing or writing anything - a "what would rebuild" query (no summary line, since
