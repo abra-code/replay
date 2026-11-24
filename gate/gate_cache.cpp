@@ -292,14 +292,34 @@ bool cache_lookup(const std::string& cache_dir,
                   const std::string& signature,
                   CacheEntry& out_entry)
 {
+    // A cache folder that belongs to another user could hold entries that user wrote,
+    // and an entry decides whether the command runs: it is not used. A missing folder
+    // is the common first run and not worth a message.
+    struct stat dir_info;
+    if (stat(cache_dir.c_str(), &dir_info) != 0)
+        return false;
+    if (dir_info.st_uid != geteuid())
+    {
+        std::cerr << "warning: cache folder " << cache_dir
+                  << " belongs to another user; its entries are not used\n";
+        return false;
+    }
+
     std::string path = cache_file_path(cache_dir, signature, format);
 
     // No entry yet is the common case and not worth a message. No lock is needed:
     // cache_store replaces an entry by renaming a complete file over it, so a reader
-    // sees the old entry or the new one, never part of one.
+    // sees the old entry or the new one, never part of one. Only a regular file of this
+    // user counts: a link, or a file another user put in a folder they can write, does not.
     struct stat entry_info;
-    if (stat(path.c_str(), &entry_info) != 0)
+    if (lstat(path.c_str(), &entry_info) != 0)
         return false;
+    if (!S_ISREG(entry_info.st_mode) || entry_info.st_uid != geteuid())
+    {
+        if (g_verbose)
+            std::cerr << "gate: cache entry " << path << " is not a regular file of this user; not used\n";
+        return false;
+    }
 
     CFMutableDict dict = (format == CacheFormat::Json)
         ? load_json_file_as_cfdict(path.c_str())
@@ -364,6 +384,11 @@ bool cache_store(const std::string& cache_dir,
         std::cerr << "error: cache folder is not a folder: " << cache_dir << '\n';
         return false;
     }
+    if (dir_info.st_uid != geteuid())
+    {
+        std::cerr << "error: cache folder " << cache_dir << " belongs to another user; the entry is not written\n";
+        return false;
+    }
 
     // Serialize first, so a failure here leaves nothing behind in the cache folder.
     // JSON path bypasses CFDictionary entirely (parallel yyjson builder).
@@ -390,13 +415,14 @@ bool cache_store(const std::string& cache_dir,
     // Atomic write: a temp file of this process's own, then rename over the entry.
     // The process id in the name keeps two runs of the same task from writing one temp
     // file; the last rename wins, and either entry is complete. O_EXCL|O_NOFOLLOW
-    // refuses anything already at that name, a link planted by another user of a shared
-    // cache folder included; the unlink first clears a temp left by a crashed run that
-    // had the same process id.
+    // refuses anything already at that name, a link planted by anyone else who can
+    // write the cache folder included; the unlink first clears a temp left by a crashed run that
+    // had the same process id. Entries are readable by this user only: they hold the
+    // full command line, which can carry a token or a password.
     std::string path = cache_file_path(cache_dir, signature, format);
     std::string tmp_path = path + "." + std::to_string((long)getpid()) + ".tmp";
     unlink(tmp_path.c_str());
-    int fd = open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+    int fd = open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
     if (fd < 0)
     {
         std::cerr << "error: cannot create cache file " << tmp_path << ": " << strerror(errno) << '\n';

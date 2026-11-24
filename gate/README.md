@@ -251,4 +251,8 @@ Failed commands (non-zero exit) are never cached. Missing outputs after a succes
 
 ## Concurrency
 
-Multiple gate instances can safely share the same cache directory. Each task has its own cache file, so different tasks never contend. A write goes to a temp file of the writing process's own and is renamed over the entry, so a reader sees the old entry or the new one, never part of one; when two runs of the same task finish together, the last one to finish wins, and either entry is complete.
+Multiple gate instances of one user can safely share the same cache directory. Each task has its own cache file, so different tasks never contend. A write goes to a temp file of the writing process's own and is renamed over the entry, so a reader sees the old entry or the new one, never part of one; when two runs of the same task finish together, the last one to finish wins, and either entry is complete.
+
+## One user per cache directory
+
+A cache directory belongs to one user. An entry decides whether the command runs, so gate uses an entry only when the folder belongs to the user running gate and the entry is a regular file of that user, and it does not write into a folder of another user (it prints a warning and runs the command). Entries are created readable and writable by their owner only (mode 0600), since they hold the full command line. Running gate as root over a cache folder of a normal user therefore runs the command every time.

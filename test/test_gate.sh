@@ -1152,6 +1152,72 @@ else
 fi
 
 # ============================================================
+echo "=== Cache entries belong to one user ==="
+
+# Entries are readable by their owner only: they hold the full command line.
+# One command throughout, so every run below has the same task signature.
+OWN_DIR="$TEST_DIR/own_cache"
+/bin/mkdir -p "$OWN_DIR"
+echo "own" > "$OWN_DIR/in.txt"
+output=$("$GATE" -v -c "$OWN_DIR/cache" -i "$OWN_DIR/in.txt" -- /bin/echo "own ran" 2>&1)
+own_sig=$(echo "$output" | /usr/bin/sed -n 's/^gate: task signature: \([0-9a-f]*\)$/\1/p')
+own_mode=$(/bin/ls -l "$OWN_DIR/cache/$own_sig.plist" 2>/dev/null | /usr/bin/cut -c1-10)
+if [ "$own_mode" = "-rw-------" ]; then
+    pass "Cache owner: an entry is created readable by its owner only"
+else
+    fail "Cache owner: an entry is created readable by its owner only (got \"$own_mode\")"
+fi
+
+# Control: the plain entry is used, so the command does not run.
+output=$("$GATE" -c "$OWN_DIR/cache" -i "$OWN_DIR/in.txt" -- /bin/echo "own ran" 2>&1)
+rc=$?
+matched=$(echo "$output" | /usr/bin/grep "own ran")
+if [ "$rc" -eq 0 ] && [ -z "$matched" ]; then
+    pass "Cache owner: control: the entry as stored is used"
+else
+    fail "Cache owner: control: the entry as stored is used (exit $rc)"
+    echo "$output"
+fi
+
+# An entry that is a link is not used, even when it leads to a valid entry.
+/bin/cp "$OWN_DIR/cache/$own_sig.plist" "$OWN_DIR/real_entry.plist"
+/bin/rm -f "$OWN_DIR/cache/$own_sig.plist"
+/bin/ln -s "$OWN_DIR/real_entry.plist" "$OWN_DIR/cache/$own_sig.plist"
+output=$("$GATE" -c "$OWN_DIR/cache" -i "$OWN_DIR/in.txt" -- /bin/echo "own ran" 2>&1)
+rc=$?
+matched=$(echo "$output" | /usr/bin/grep "own ran")
+if [ "$rc" -eq 0 ] && [ -n "$matched" ]; then
+    pass "Cache owner: an entry that is a link is not used"
+else
+    fail "Cache owner: an entry that is a link is not used (exit $rc)"
+    echo "$output"
+fi
+
+# A folder of another user: its entries are not used and nothing is written into it.
+# Needs root to give the folder away; skipped otherwise.
+own_uid=$(/usr/bin/id -u)
+if [ "$own_uid" = "0" ]; then
+    OTHER_DIR="$TEST_DIR/other_cache"
+    /bin/mkdir -p "$OTHER_DIR"
+    echo "other" > "$OTHER_DIR/in.txt"
+    "$GATE" -c "$OTHER_DIR/cache" -i "$OTHER_DIR/in.txt" -- /bin/echo "other ran" > /dev/null 2>&1
+    /usr/sbin/chown -R 12345 "$OTHER_DIR/cache" 2>/dev/null || /bin/chown -R 12345 "$OTHER_DIR/cache"
+    output=$("$GATE" -c "$OTHER_DIR/cache" -i "$OTHER_DIR/in.txt" -- /bin/echo "other ran" 2>&1)
+    rc=$?
+    matched=$(echo "$output" | /usr/bin/grep "other ran")
+    warned=$(echo "$output" | /usr/bin/grep "belongs to another user; its entries are not used")
+    refused=$(echo "$output" | /usr/bin/grep "belongs to another user; the entry is not written")
+    if [ "$rc" -eq 0 ] && [ -n "$matched" ] && [ -n "$warned" ] && [ -n "$refused" ]; then
+        pass "Cache owner: a folder of another user is neither used nor written"
+    else
+        fail "Cache owner: a folder of another user is neither used nor written (exit $rc)"
+        echo "$output"
+    fi
+else
+    echo "  SKIP: Cache owner: a folder of another user (needs root)"
+fi
+
+# ============================================================
 echo "=== Tool names and PATH ==="
 
 # A name without a slash comes from the absolute folders of PATH, never from the current
