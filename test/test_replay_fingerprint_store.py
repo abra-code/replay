@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-test_replay_fingerprint_store.py - the sidecar per-file hash memoization
-(--cache-memo sidecar, replay/FingerprintStore.{h,cpp}).
+test_replay_fingerprint_store.py - the sidecar per-file hash store
+(--hash-store sidecar, replay/FingerprintStore.{h,cpp}).
 
-The memo is invisible by design: it only decides whether a file's bytes are read
+The hash store is invisible by design: it only decides whether a file's bytes are read
 again, never what the cache concludes. What makes it testable is the verbose
 summary line
 
-    memo: <hits> hits, <computed> computed, store <path>
+    hash store: <hits> hits, <computed> computed, <path>
 
 plus the store's two files, which this suite parses independently - header,
 capacity, entry count, the crc32c trailer and every journal batch checksum are
@@ -15,7 +15,7 @@ re-derived here rather than taken on trust, so a format change that breaks a
 reader shows up as a failure.
 
 Scenarios:
-  1.  a cached run creates the store; the next run hits the memo for every file
+  1.  a cached run creates the store; the next run hits the hash store for every file
   2.  the entry count tracks the number of distinct files across runs, with new
       files landing in the journal rather than rewriting the table
   3.  a flipped byte inside the slots is caught: 0 hits, correct output, rebuilt
@@ -23,11 +23,11 @@ Scenarios:
   5.  a store from another machine is ignored
   6.  --cache-hash crc32c and blake3 keep separate stores, neither invalidating
       the other
-  7.  --cache-memo off writes no store and no xattrs
-  8.  --cache-memo xattr writes xattrs and no store
-  9.  --cache-memo-refresh ignores the memo and rewrites it correctly
+  7.  --hash-store off writes no store and no xattrs
+  8.  --hash-store xattr writes xattrs and no store
+  9.  --hash-store-refresh ignores the hash store and rewrites it correctly
   10. --dry-run reads the store and leaves it byte-identical; a cold dry run
-      creates nothing; and --dry-run --cache-memo xattr writes no xattr and does
+      creates nothing; and --dry-run --hash-store xattr writes no xattr and does
       not disturb a read-only input's mode
   11. touch -r: a same-size rewrite with a restored mtime still re-runs the task
       under "sidecar", and is a wrong skip under "xattr" - the headline
@@ -151,21 +151,21 @@ def summary(proc: subprocess.CompletedProcess) -> tuple:
     return (-1, -1, -1)
 
 
-def memo(proc: subprocess.CompletedProcess) -> tuple:
-    """'memo: N hits, M computed, store PATH (T table, J journalled)', printed only
+def hash_store(proc: subprocess.CompletedProcess) -> tuple:
+    """'hash store: N hits, M computed, PATH (T table, J journalled)', printed only
     under --verbose. (-1, -1, '') if absent."""
     for line in proc.stderr.splitlines():
-        if line.startswith("memo: ") and " hits, " in line:
+        if line.startswith("hash store: ") and " hits, " in line:
             parts = line.split()
-            return (int(parts[1]), int(parts[3]), parts[6])
+            return (int(parts[2]), int(parts[4]), parts[6])
     return (-1, -1, "")
 
 
-def memo_sources(proc: subprocess.CompletedProcess) -> tuple:
-    """The '(T table, J journalled)' tail of the memo line: where the entries this
+def hash_store_sources(proc: subprocess.CompletedProcess) -> tuple:
+    """The '(T table, J journalled)' tail of the hash store line: where the entries this
     run could see came from. (-1, -1) if absent."""
     for line in proc.stderr.splitlines():
-        if line.startswith("memo: ") and " table, " in line:
+        if line.startswith("hash store: ") and " table, " in line:
             parts = line.split()
             return (int(parts[7].lstrip("(")), int(parts[9]))
     return (-1, -1)
@@ -385,10 +385,10 @@ def test_created_and_hits():
         path = store_path(cache)
         check("exactly one store file was created", path is not None,
               str(store_paths(cache)))
-        check("cold run computed and never hit", memo(r1)[0] == 0 and memo(r1)[1] > 0,
-              f"{memo(r1)} in: {r1.stderr}")
-        check("the memo line names the store that exists",
-              path is not None and memo(r1)[2] == str(path), f"{memo(r1)} vs {path}")
+        check("cold run computed and never hit", hash_store(r1)[0] == 0 and hash_store(r1)[1] > 0,
+              f"{hash_store(r1)} in: {r1.stderr}")
+        check("the hash store line names the store that exists",
+              path is not None and hash_store(r1)[2] == str(path), f"{hash_store(r1)} vs {path}")
 
         store = Store(path)
         check("the store parses as a valid image", store.valid, str(path))
@@ -396,8 +396,8 @@ def test_created_and_hits():
 
         r2 = run(args + [playlist])
         check("warm run hit every task", summary(r2) == (3, 0, 0), r2.stderr)
-        check("warm run hit the memo and computed nothing",
-              memo(r2)[0] > 0 and memo(r2)[1] == 0, f"{memo(r2)} in: {r2.stderr}")
+        check("warm run hit the hash store and computed nothing",
+              hash_store(r2)[0] > 0 and hash_store(r2)[1] == 0, f"{hash_store(r2)} in: {r2.stderr}")
         check("outputs are correct", (out / "out2.txt").read_text() == "payload 2 v1")
 
 
@@ -457,7 +457,7 @@ def test_entry_count():
         # distinct file: the next run hits all of them and computes nothing.
         r2 = run(args + ["-v", playlist])
         check("table plus journal covers every file: nothing is recomputed",
-              memo(r2)[1] == 0, f"{memo(r2)} in: {r2.stderr}")
+              hash_store(r2)[1] == 0, f"{hash_store(r2)} in: {r2.stderr}")
         check("and the count of distinct files is the table's plus the journal's",
               Store(store_path(cache)).count + read_journal(cache).entries
                   == expected + 2,
@@ -487,9 +487,9 @@ def test_corruption():
 
         r = run(args + [playlist])
         check("the run after corruption exits 0", r.returncode == 0, r.stderr)
-        check("a corrupt store yields no memo hits", memo(r)[0] == 0,
-              f"{memo(r)} in: {r.stderr}")
-        check("the cache still hits: the memo never changes the verdict",
+        check("a corrupt store yields no hash store hits", hash_store(r)[0] == 0,
+              f"{hash_store(r)} in: {r.stderr}")
+        check("the cache still hits: the hash store never changes the verdict",
               summary(r) == (3, 0, 0), r.stderr)
         check("outputs are still correct", (out / "out1.txt").read_text() == "payload 1 v1")
 
@@ -500,8 +500,8 @@ def test_corruption():
               f"{rebuilt.count} vs {original.count}")
 
         r2 = run(args + [playlist])
-        check("and the run after that hits the memo again", memo(r2)[0] > 0,
-              f"{memo(r2)} in: {r2.stderr}")
+        check("and the run after that hits the hash store again", hash_store(r2)[0] > 0,
+              f"{hash_store(r2)} in: {r2.stderr}")
 
 
 def test_truncation():
@@ -519,8 +519,8 @@ def test_truncation():
 
         r = run(args + [playlist])
         check("the run over a truncated store exits 0", r.returncode == 0, r.stderr)
-        check("a truncated store yields no memo hits", memo(r)[0] == 0,
-              f"{memo(r)} in: {r.stderr}")
+        check("a truncated store yields no hash store hits", hash_store(r)[0] == 0,
+              f"{hash_store(r)} in: {r.stderr}")
         check("the cache still hits", summary(r) == (2, 0, 0), r.stderr)
         check("the store was rebuilt and verifies", Store(path).crc_ok, str(path))
 
@@ -552,8 +552,8 @@ def test_foreign_host():
               repr(patched.host))
 
         r = run(args + [playlist])
-        check("a foreign host's store yields no memo hits", memo(r)[0] == 0,
-              f"{memo(r)} in: {r.stderr}")
+        check("a foreign host's store yields no hash store hits", hash_store(r)[0] == 0,
+              f"{hash_store(r)} in: {r.stderr}")
         check("the cache still hits", summary(r) == (2, 0, 0), r.stderr)
         rebuilt = Store(path)
         check("the store was rebuilt under this machine's host",
@@ -622,9 +622,9 @@ def test_host_id():
             journal.unlink()
 
         r = run(args + [playlist])
-        check("a legacy store is read: memo hits, nothing computed",
-              memo(r)[0] > 0 and memo(r)[1] == 0 and memo(r)[2] == str(legacy),
-              f"{memo(r)} in: {r.stderr}")
+        check("a legacy store is read: hash store hits, nothing computed",
+              hash_store(r)[0] > 0 and hash_store(r)[1] == 0 and hash_store(r)[2] == str(legacy),
+              f"{hash_store(r)} in: {r.stderr}")
         check("no store under the new name is created beside it",
               store_paths(cache) == [legacy], str(store_paths(cache)))
         check("the legacy store keeps the raw id in its header",
@@ -636,7 +636,7 @@ def test_host_id():
         r = run(args + [playlist])
         legacy_journal = legacy.with_suffix(".jrnl")
         check("a change is recorded in the legacy store",
-              memo(r)[1] > 0 and memo(r)[2] == str(legacy), f"{memo(r)} in: {r.stderr}")
+              hash_store(r)[1] > 0 and hash_store(r)[2] == str(legacy), f"{hash_store(r)} in: {r.stderr}")
         check("its journal has the legacy name and the raw id in its header",
               journal_path(cache) == legacy_journal and Journal(legacy_journal).host.hex() == raw,
               f"{journal_path(cache)} {Journal(legacy_journal).host.hex()}")
@@ -653,8 +653,8 @@ def test_host_id():
         r = run(args + [playlist])
         # Hits come only from the new-name store; it predates the change above, so the
         # changed input and its output are computed again.
-        check("with both present the new name is used: memo hits",
-              memo(r)[0] > 0 and memo(r)[2] == str(path), f"{memo(r)} in: {r.stderr}")
+        check("with both present the new name is used: hash store hits",
+              hash_store(r)[0] > 0 and hash_store(r)[2] == str(path), f"{hash_store(r)} in: {r.stderr}")
         check("the legacy store is not touched",
               legacy.read_bytes() == legacy_before and
               (legacy_journal.read_bytes() if legacy_journal.exists() else b"") == legacy_journal_before)
@@ -676,56 +676,56 @@ def test_algorithm_split():
         check("blake3 run exits 0", r2.returncode == 0, r2.stderr)
         check("two store files now coexist", len(store_paths(cache)) == 2,
               str(store_paths(cache)))
-        check("the blake3 run started with an empty memo", memo(r2)[0] == 0,
-              f"{memo(r2)} in: {r2.stderr}")
+        check("the blake3 run started with an empty hash store", hash_store(r2)[0] == 0,
+              f"{hash_store(r2)} in: {r2.stderr}")
         check("the crc32c store was left untouched", digest(crc_store) == crc_digest,
               str(crc_store))
 
         r3 = run(["--cache", "--cache-dir", cache, "-v", playlist])
-        check("switching back to crc32c hits its own store", memo(r3)[0] > 0,
-              f"{memo(r3)} in: {r3.stderr}")
+        check("switching back to crc32c hits its own store", hash_store(r3)[0] > 0,
+              f"{hash_store(r3)} in: {r3.stderr}")
 
 
-def test_memo_off():
-    print("\n=== Scenario 7: --cache-memo off writes no store and no xattrs ===")
+def test_hash_store_off():
+    print("\n=== Scenario 7: --hash-store off writes no store and no xattrs ===")
     with tempfile.TemporaryDirectory() as td:
         d = Path(td).resolve()
         playlist, src, out, inputs = make_tree(d, 2)
         cache = d / "cache"
-        args = ["--cache-memo", "off", "--cache-dir", cache, "-v"]
+        args = ["--hash-store", "off", "--cache-dir", cache, "-v"]
 
         r1 = run(args + [playlist])
         check("run 1 exits 0", r1.returncode == 0, r1.stderr)
         check("no store file", store_paths(cache) == [], str(store_paths(cache)))
-        check("no memo summary line", memo(r1) == (-1, -1, ""), r1.stderr)
+        check("no hash store summary line", hash_store(r1) == (-1, -1, ""), r1.stderr)
         check("no fingerprint xattr on the input",
               not has_fingerprint_xattr(inputs[0]), str(xattr_names(inputs[0])))
 
         r2 = run(args + [playlist])
-        check("the cache still hits without any memo", summary(r2) == (2, 0, 0), r2.stderr)
+        check("the cache still hits without any hash store", summary(r2) == (2, 0, 0), r2.stderr)
 
 
-def test_memo_xattr():
-    print("\n=== Scenario 8: --cache-memo xattr writes xattrs and no store ===")
+def test_hash_store_xattr():
+    print("\n=== Scenario 8: --hash-store xattr writes xattrs and no store ===")
     with tempfile.TemporaryDirectory() as td:
         d = Path(td).resolve()
         playlist, src, out, inputs = make_tree(d, 2)
         cache = d / "cache"
-        args = ["--cache-memo", "xattr", "--cache-dir", cache, "-v"]
+        args = ["--hash-store", "xattr", "--cache-dir", cache, "-v"]
 
         r1 = run(args + [playlist])
         check("run 1 exits 0", r1.returncode == 0, r1.stderr)
         check("no store file", store_paths(cache) == [], str(store_paths(cache)))
-        check("no memo summary line", memo(r1) == (-1, -1, ""), r1.stderr)
+        check("no hash store summary line", hash_store(r1) == (-1, -1, ""), r1.stderr)
         check("the input gained a fingerprint xattr",
               has_fingerprint_xattr(inputs[0]), str(xattr_names(inputs[0])))
 
         r2 = run(args + [playlist])
-        check("the cache hits with the xattr memo", summary(r2) == (2, 0, 0), r2.stderr)
+        check("the cache hits with the fingerprint xattr", summary(r2) == (2, 0, 0), r2.stderr)
 
 
-def test_memo_refresh():
-    print("\n=== Scenario 9: --cache-memo-refresh ignores and rewrites the memo ===")
+def test_hash_store_refresh():
+    print("\n=== Scenario 9: --hash-store-refresh ignores and rewrites the hash store ===")
     with tempfile.TemporaryDirectory() as td:
         d = Path(td).resolve()
         playlist, src, out, _ = make_tree(d, 3)
@@ -735,13 +735,13 @@ def test_memo_refresh():
         run(args + [playlist])
         before = Store(store_path(cache))
 
-        r = run(args + ["--cache-memo-refresh", playlist])
+        r = run(args + ["--hash-store-refresh", playlist])
         check("the refresh run exits 0", r.returncode == 0, r.stderr)
-        check("the refresh run took no memo hit", memo(r)[0] == 0,
-              f"{memo(r)} in: {r.stderr}")
-        check("the refresh run computed every hash", memo(r)[1] > 0,
-              f"{memo(r)} in: {r.stderr}")
-        check("the cache verdict is unaffected by a memo refresh",
+        check("the refresh run took no hash store hit", hash_store(r)[0] == 0,
+              f"{hash_store(r)} in: {r.stderr}")
+        check("the refresh run computed every hash", hash_store(r)[1] > 0,
+              f"{hash_store(r)} in: {r.stderr}")
+        check("the cache verdict is unaffected by a hash store refresh",
               summary(r) == (3, 0, 0), r.stderr)
 
         after = Store(store_path(cache))
@@ -750,8 +750,8 @@ def test_memo_refresh():
               after.count == before.count, f"{after.count} vs {before.count}")
 
         r2 = run(args + [playlist])
-        check("the next normal run hits the refreshed memo", memo(r2)[0] > 0,
-              f"{memo(r2)} in: {r2.stderr}")
+        check("the next normal run hits the refreshed hash store", hash_store(r2)[0] > 0,
+              f"{hash_store(r2)} in: {r2.stderr}")
 
 
 def test_dry_run():
@@ -772,13 +772,13 @@ def test_dry_run():
         check("the dry run reports HIT", "[cache] HIT" in (r.stdout + r.stderr),
               r.stdout + r.stderr)
         # The whole point of the sidecar's dry-run behavior: the xattr backend has
-        # to turn the memo off for a dry run, because it has no read-only mode and
+        # to turn the hash store off for a dry run, because it has no read-only mode and
         # any file that missed would be written to - so it re-hashes everything to
         # produce its report. This one just reads. Scenario 10c pins that arm.
-        check("the dry run still used the memo", memo(r)[0] > 0,
-              f"{memo(r)} in: {r.stderr}")
-        check("the dry run computed nothing", memo(r)[1] == 0,
-              f"{memo(r)} in: {r.stderr}")
+        check("the dry run still used the hash store", hash_store(r)[0] > 0,
+              f"{hash_store(r)} in: {r.stderr}")
+        check("the dry run computed nothing", hash_store(r)[1] == 0,
+              f"{hash_store(r)} in: {r.stderr}")
         check("the store is byte-identical after the dry run",
               digest(path) == before_digest, str(path))
         check("the store's mtime is untouched",
@@ -800,7 +800,7 @@ def test_cold_dry_run_writes_nothing():
 
 
 def test_dry_run_xattr_purity():
-    print("\n=== Scenario 10c: --dry-run --cache-memo xattr writes nothing to the inputs ===")
+    print("\n=== Scenario 10c: --dry-run --hash-store xattr writes nothing to the inputs ===")
     # The xattr backend has no read-only mode: a MISS writes the record, and on a
     # non-user-writable file it lchmods first. A dry run must therefore turn that
     # backend off wholesale rather than merely avoid saving, which is the one place
@@ -813,7 +813,7 @@ def test_dry_run_xattr_purity():
         readonly = inputs[0]
         readonly.chmod(0o444)
 
-        r = run(["--cache-memo", "xattr", "--cache-dir", cache, "--dry-run", "-v", playlist])
+        r = run(["--hash-store", "xattr", "--cache-dir", cache, "--dry-run", "-v", playlist])
         check("the xattr dry run exits 0", r.returncode == 0, r.stderr)
         check("the xattr dry run reports MISS", "[cache] MISS" in (r.stdout + r.stderr),
               r.stdout + r.stderr)
@@ -827,8 +827,8 @@ def test_dry_run_xattr_purity():
 
         # And the same run without --dry-run does write them, so the check above is
         # pinning the dry-run arm rather than a backend that never writes at all.
-        r2 = run(["--cache-memo", "xattr", "--cache-dir", cache, playlist])
-        check("a real xattr run does write the memo", has_fingerprint_xattr(inputs[1]),
+        r2 = run(["--hash-store", "xattr", "--cache-dir", cache, playlist])
+        check("a real xattr run does write the fingerprint xattr", has_fingerprint_xattr(inputs[1]),
               str(xattr_names(inputs[1])))
 
 
@@ -852,7 +852,7 @@ def test_touch_r_regression():
             d = Path(td).resolve()
             playlist, src, out, _ = make_tree(d, 1)
             cache = d / "cache"
-            args = ["--cache-memo", backend, "--cache-dir", cache]
+            args = ["--hash-store", backend, "--cache-dir", cache]
             source = src / "in0.txt"
 
             r1 = run(args + [playlist])
@@ -904,9 +904,9 @@ def test_concurrent_shared_tree():
 
         r2 = run(args + [playlist])
         check("run 2 hits every task", summary(r2) == (count, 0, 0), r2.stderr)
-        check("run 2 computed nothing", memo(r2)[1] == 0, f"{memo(r2)} in: {r2.stderr}")
-        check("run 2 hit the memo once per fingerprinted file, tasks included",
-              memo(r2)[0] >= expected, f"{memo(r2)} expected at least {expected}")
+        check("run 2 computed nothing", hash_store(r2)[1] == 0, f"{hash_store(r2)} in: {r2.stderr}")
+        check("run 2 hit the hash store once per fingerprinted file, tasks included",
+              hash_store(r2)[0] >= expected, f"{hash_store(r2)} expected at least {expected}")
 
 
 def test_steady_state_writes_nothing():
@@ -954,10 +954,10 @@ def test_steady_state_writes_nothing():
         jrnl_digest = digest(jrnl)
         r5 = run(args + [playlist])
         check("run 5 hits everything again", summary(r5) == (3, 0, 0), r5.stderr)
-        check("run 5 recomputes nothing, so the journal was read", memo(r5)[1] == 0,
-              f"{memo(r5)} in: {r5.stderr}")
+        check("run 5 recomputes nothing, so the journal was read", hash_store(r5)[1] == 0,
+              f"{hash_store(r5)} in: {r5.stderr}")
         check("and it says so: 6 entries from the table, 2 from the journal",
-              memo_sources(r5) == (6, 2), f"{memo_sources(r5)} in: {r5.stderr}")
+              hash_store_sources(r5) == (6, 2), f"{hash_store_sources(r5)} in: {r5.stderr}")
         check("run 5 leaves both files byte-identical",
               digest(path) == first_digest and digest(jrnl) == jrnl_digest, str(jrnl))
 
@@ -1013,8 +1013,8 @@ def test_torn_journal_is_repaired():
 
         # The real proof that nothing was lost: nothing has to be recomputed.
         r2 = run(args + [playlist])
-        check("the repaired journal still answers every lookup", memo(r2)[1] == 0,
-              f"{memo(r2)} in: {r2.stderr}")
+        check("the repaired journal still answers every lookup", hash_store(r2)[1] == 0,
+              f"{hash_store(r2)} in: {r2.stderr}")
 
 
 def test_stale_generation_is_dropped():
@@ -1062,7 +1062,7 @@ def test_stale_generation_is_dropped():
             check(f"[{label}] the cache verdict is unaffected",
                   summary(r) == (3, 0, 0), r.stderr)
             check(f"[{label}] the stale records were not trusted: the file was re-hashed",
-                  memo(r)[1] > 0, f"{memo(r)} in: {r.stderr}")
+                  hash_store(r)[1] > 0, f"{hash_store(r)} in: {r.stderr}")
             rebuilt = read_journal(cache)
             check(f"[{label}] and the journal was reset to this table image",
                   rebuilt.batches == [(table.run_counter, table.nonce, 2)],
@@ -1074,7 +1074,7 @@ def test_planted_fifo_does_not_hang():
     # A shared cache directory is an advertised use case, so another user can create
     # names in it. O_NOFOLLOW covers symlinks; a FIFO is the other way to make an
     # open block forever, and it blocks before any fstat could reject the file. The
-    # run must degrade to "no memo", not to a build that never finishes.
+    # run must degrade to "no hash store", not to a build that never finishes.
     for label, suffix in (("index", ".bin"), ("journal", ".jrnl")):
         with tempfile.TemporaryDirectory() as td:
             d = Path(td).resolve()
@@ -1175,8 +1175,8 @@ def test_pre_nonce_table_upgrades_once():
         # The livelock this guards against: without the fix every later run re-hashes
         # the same files and rewrites a journal no reader will ever accept.
         r2 = run(args + [playlist])
-        check("the next unchanged run recomputes nothing", memo(r2)[1] == 0,
-              f"{memo(r2)} in: {r2.stderr}")
+        check("the next unchanged run recomputes nothing", hash_store(r2)[1] == 0,
+              f"{hash_store(r2)} in: {r2.stderr}")
         table_digest = digest(table)
 
         (src / "in1.txt").write_text("payload 1 v2 longer")
@@ -1185,8 +1185,8 @@ def test_pre_nonce_table_upgrades_once():
               r3.stderr)
         check("leaving the upgraded table alone", digest(table) == table_digest, str(table))
         r4 = run(args + [playlist])
-        check("and that journal is accepted on the next run", memo(r4)[1] == 0,
-              f"{memo(r4)} in: {r4.stderr}")
+        check("and that journal is accepted on the next run", hash_store(r4)[1] == 0,
+              f"{hash_store(r4)} in: {r4.stderr}")
 
 
 def test_changed_existing_files_stay_in_journal():
@@ -1231,7 +1231,7 @@ def test_changed_existing_files_stay_in_journal():
 
         r2 = run(args + [playlist])
         check("everything hits afterwards", summary(r2) == (tasks, 0, 0), r2.stderr)
-        check("and nothing is recomputed", memo(r2)[1] == 0, f"{memo(r2)} in: {r2.stderr}")
+        check("and nothing is recomputed", hash_store(r2)[1] == 0, f"{hash_store(r2)} in: {r2.stderr}")
 
 
 def big_tree(d: Path, count: int, name: str = "pl", first: int = 0):
@@ -1327,7 +1327,7 @@ def test_journal_budget_forces_compaction():
         check("the second playlist still hits every task",
               summary(rb2) == (side, 0, 0), rb2.stderr)
         check("and recomputes nothing: its records survived the fold",
-              memo(rb2)[1] == 0, f"{memo(rb2)} in: {rb2.stderr}")
+              hash_store(rb2)[1] == 0, f"{hash_store(rb2)} in: {rb2.stderr}")
         check("so it writes nothing either",
               digest(table) == folded_digest and journal_path(cache) is None,
               str(sorted(cache.iterdir())))
@@ -1393,7 +1393,7 @@ def test_load_factor_forces_compaction():
 
         r2 = run(args + [playlist])
         check("everything hits afterwards", summary(r2) == (tasks + added, 0, 0), r2.stderr)
-        check("and nothing is recomputed", memo(r2)[1] == 0, f"{memo(r2)} in: {r2.stderr}")
+        check("and nothing is recomputed", hash_store(r2)[1] == 0, f"{hash_store(r2)} in: {r2.stderr}")
 
 
 def test_checksum_xattr_mirror():
@@ -1419,7 +1419,7 @@ def test_checksum_xattr_mirror():
         record = read_store_checksum_xattr(table)
         check("the index carries its own checksum record", record is not None,
               str(xattr_names(table)))
-        check("under replay's name, NOT a memo name the other tools would trust",
+        check("under replay's name, NOT a hash store name the other tools would trust",
               STORE_XATTR_NAME in xattr_names(table) and not has_fingerprint_xattr(table),
               str(xattr_names(table)))
         if record is not None:
@@ -1483,7 +1483,7 @@ def test_checksum_xattr_mirror():
 
         r = run(args + [playlist])
         check("replay catches the rot anyway: the trailer is what it trusts",
-              memo(r)[0] == 0, f"{memo(r)} in: {r.stderr}")
+              hash_store(r)[0] == 0, f"{hash_store(r)} in: {r.stderr}")
         check("it says so", "integrity check" in r.stderr, r.stderr)
         check("the cache verdict is unaffected", summary(r) == (3, 0, 0), r.stderr)
         check("and the index was rebuilt with a fresh record",
@@ -1508,9 +1508,9 @@ def main() -> int:
     test_truncation()
     test_foreign_host()
     test_algorithm_split()
-    test_memo_off()
-    test_memo_xattr()
-    test_memo_refresh()
+    test_hash_store_off()
+    test_hash_store_xattr()
+    test_hash_store_refresh()
     test_dry_run()
     test_cold_dry_run_writes_nothing()
     test_dry_run_xattr_purity()

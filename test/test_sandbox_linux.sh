@@ -236,7 +236,7 @@ else
         check $r "$call is denied with EACCES, even inside a write grant" "sandboxed: $out; unsandboxed: $plain"
     done
     case "$out" in *"getxattr ENODATA"*|*"getxattr ENOTSUP"*) r=0 ;; *) r=1 ;; esac
-    check $r "getxattr still works (reading memos is allowed)" "$out"
+    check $r "getxattr still works (reading stored hashes is allowed)" "$out"
     case "$out" in *"io_uring_setup ENOSYS"*) r=0 ;; *) r=1 ;; esac
     check $r "io_uring is unavailable (ENOSYS)" "sandboxed: $out; unsandboxed: $plain"
     case "$out" in *"TIOCSTI EACCES"*) r=0 ;; *) r=1 ;; esac
@@ -250,17 +250,17 @@ else
 fi
 
 # A playlist file: in stdin mode replay ignores --cache and never gets that far.
-cat > "$WORK_DIR/memo.json" << EOF
+cat > "$WORK_DIR/hash_store.json" << EOF
 [{ "action": "execute", "tool": "/bin/true" }]
 EOF
-out="$("$REPLAY" --sandbox --cache-dir "$ALLOWED/cache" --cache-memo xattr "$WORK_DIR/memo.json" 2>&1)"
+out="$("$REPLAY" --sandbox --cache-dir "$ALLOWED/cache" --hash-store xattr "$WORK_DIR/hash_store.json" 2>&1)"
 rc=$?
 test "$rc" -ne 0
-check $? "--cache-memo xattr with the sandbox is refused" "$out"
+check $? "--hash-store xattr with the sandbox is refused" "$out"
 case "$out" in *"cannot be used with the sandbox on Linux"*) r=0 ;; *) r=1 ;; esac
 check $r "the refusal says why" "$out"
 
-# gate writes its memo by making a read-only input writable for the call and restoring
+# gate writes its stored hash by making a read-only input writable for the call and restoring
 # the mode afterwards, which changes the input's ctime. Under the sandbox the write
 # could only fail, so gate must not try: the input's ctime stays put.
 GATE="$(/usr/bin/dirname -- "$REPLAY")/gate"
@@ -276,7 +276,7 @@ else
     out="$("$GATE" -c "$ALLOWED/gate-cache-plain" -i "$ALLOWED/ro-plain.txt" -- /bin/true 2>&1)"
     after="$(/usr/bin/stat -c '%z' "$ALLOWED/ro-plain.txt")"
     test "$before" != "$after"
-    check $? "control: unsandboxed gate writes its memo, changing a read-only input's ctime" "before $before, after $after; $out"
+    check $? "control: unsandboxed gate writes its stored hash, changing a read-only input's ctime" "before $before, after $after; $out"
 
     before="$(/usr/bin/stat -c '%z %a' "$ALLOWED/ro-sandboxed.txt")"
     /bin/sleep 0.05

@@ -20,7 +20,7 @@
 // Globals required by FileHashing.h and by fingerprint.cpp (both declare them extern).
 // Mirrors gate/main.cpp:37-40. Set from the command line before execution starts.
 FileHashAlgorithm g_hash = FileHashAlgorithm::CRC32C;
-// Only the CacheMemo::Xattr branch below reads this, but fingerprint.cpp declares it
+// Only the HashStore::Xattr branch below reads this, but fingerprint.cpp declares it
 // extern and is linked into replay through FingerprintLib, so the definition stays.
 // Defaults to Off, matching the default backend: main sets it for real whenever the
 // cache is enabled, and any path that ever fingerprints without going through that
@@ -29,9 +29,9 @@ XattrMode g_xattr_mode = XattrMode::Off;
 bool g_verbose = false;
 double g_traversal_time = 0.0;
 
-// Memoization backend selection - see TaskFingerprint.h.
-CacheMemo g_memo_backend = CacheMemo::Off;
-bool g_memo_refresh = false;
+// Hash store selection - see TaskFingerprint.h.
+HashStore g_hash_store = HashStore::Off;
+bool g_hash_store_refresh = false;
 FingerprintStore *g_fingerprint_store = nullptr;
 
 namespace
@@ -315,7 +315,7 @@ void store_hash_value(FileInfo &info, uint64_t value)
 		info.hash.blake3 = value;
 }
 
-// Fills in info.hash for one file, honoring the selected memoization backend.
+// Fills in info.hash for one file, honoring the selected hash store.
 // The xattr branch keeps the exact policy of the engine's process_matched_file_async
 // (fingerprint.cpp), so the "public.fingerprint.*" format stays shared with gate.
 // Returns false when the file's content could not be read, so the caller can degrade the
@@ -334,20 +334,20 @@ bool hash_one_file(HashedFile &entry)
 		return true;
 	}
 
-	if((g_memo_backend == CacheMemo::Sidecar) && (g_fingerprint_store != nullptr))
+	if((g_hash_store == HashStore::Sidecar) && (g_fingerprint_store != nullptr))
 	{
-		uint64_t memoized = 0;
-		if(!g_memo_refresh && g_fingerprint_store->lookup(entry.info, memoized))
+		uint64_t stored = 0;
+		if(!g_hash_store_refresh && g_fingerprint_store->lookup(entry.info, stored))
 		{
-			store_hash_value(entry.info, memoized);
+			store_hash_value(entry.info, stored);
 			// Recorded even though nothing was computed: the store evicts what a run
 			// does not mention, and a file that hits on every run must not age out.
-			g_fingerprint_store->record(entry.info, memoized);
+			g_fingerprint_store->record(entry.info, stored);
 			return true; // the file was never opened
 		}
 
 		// Never record a hash that was not actually computed. The 0 left behind by a
-		// failed read would be memoized as this file's content and reused on every
+		// failed read would be stored as this file's content and reused on every
 		// later run, so one transient EMFILE would pin it until size or mtime moved.
 		if(!compute_file_hash(entry.path, entry.info))
 			return false;
@@ -379,7 +379,7 @@ bool hash_one_file(HashedFile &entry)
 	{
 		hashed = compute_file_hash(entry.path, entry.info);
 	}
-	// Only memoize a hash that was really computed. Persisting the 0 left behind by a
+	// Only store a hash that was really computed. Persisting the 0 left behind by a
 	// failed read would make every later run hit that xattr record and reuse the 0
 	// without reopening the file, until its size or mtime changes.
 	if(writeXattr && hashed)

@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "fingerprint.h"     // FileHashAlgorithm, XattrMode
-#include "TaskCacheTypes.h"  // CacheMemo
+#include "TaskCacheTypes.h"  // HashStore
 
 class FingerprintStore;
 
@@ -30,18 +30,18 @@ extern FileHashAlgorithm g_hash;
 extern bool g_verbose;
 extern double g_traversal_time;
 
-// The xattr memoization's own mode. Still declared extern by fingerprint.cpp, which is
+// The fingerprint xattr's own mode. Still declared extern by fingerprint.cpp, which is
 // linked into replay through FingerprintLib, so the definition has to stay here even
-// though replay now reaches it only through the CacheMemo::Xattr branch.
+// though replay now reaches it only through the HashStore::Xattr branch.
 extern XattrMode g_xattr_mode;
 
-// Which memoization backend hash_one_file uses, and whether it must ignore what is
-// already memoized. Globals rather than context members because the per-file hashing
+// Which hash store hash_one_file uses, and whether it must ignore the hashes it
+// already holds. Globals rather than context members because the per-file hashing
 // path is a free function shared with the fingerprint engine and carries no context.
-extern CacheMemo g_memo_backend;
-extern bool g_memo_refresh;
+extern HashStore g_hash_store;
+extern bool g_hash_store_refresh;
 
-// The sidecar store, owned by main and non-null only under CacheMemo::Sidecar.
+// The sidecar store, owned by main and non-null only under HashStore::Sidecar.
 // Borrowed here; every method it exposes is thread-safe.
 extern FingerprintStore *g_fingerprint_store;
 

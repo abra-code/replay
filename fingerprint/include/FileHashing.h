@@ -2,7 +2,7 @@
 //  FileHashing.h
 //  fingerprint
 //
-//  Stateless per-file hashing and xattr memoization helpers.
+//  Stateless per-file hashing and fingerprint xattr helpers.
 //
 //  These were originally private to fingerprint.cpp. They keep no state of
 //  their own beyond the process-wide configuration globals (g_hash, g_verbose)
@@ -42,7 +42,7 @@ extern bool g_verbose;
 inline constexpr const char* kCrc32CXattrName = REPLAY_XATTR_PREFIX "public.fingerprint.crc32c";
 inline constexpr const char* kBlake3XattrName = REPLAY_XATTR_PREFIX "public.fingerprint.blake3";
 
-// The xattr hash memoization is an optimization: failing to write it is never fatal,
+// The fingerprint xattr is an optimization: failing to write it is never fatal,
 // it only costs a re-hash next time. Permission failures are routine and must stay
 // silent - a read-only source tree, a sandbox denying writes to inputs, a filesystem
 // without xattr support, or (in replay, where many tasks fingerprint a shared header

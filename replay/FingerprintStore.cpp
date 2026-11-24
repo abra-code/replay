@@ -44,7 +44,7 @@ constexpr uint32_t kAlgoCrc32c = 0;
 constexpr uint32_t kAlgoBlake3 = 1;
 
 // Where the published image records its own checksum. replay's own name, not one of the
-// public.fingerprint.* names the gate and fingerprint tools memoize from - see
+// public.fingerprint.* names the gate and fingerprint tools keep their hashes in - see
 // mirror_checksum_xattr for why that distinction is the whole point.
 inline constexpr const char *kStoreChecksumXattrName = REPLAY_XATTR_PREFIX "public.replay.store-crc32c";
 
@@ -325,7 +325,7 @@ struct MappedStore
 void report(bool verbose, const char *what, const std::string &path)
 {
 	if(verbose)
-		LogError("memo: %s: %s\n", what, path.c_str());
+		LogError("hash store: %s: %s\n", what, path.c_str());
 }
 
 // Opens, maps and fully validates the store at path. Any failure leaves outMap empty,
@@ -770,7 +770,7 @@ void read_journal(const std::string &path, uint32_t wantAlgo, const uint8_t *wan
 // trailer exists to prevent, reintroduced beside the file for a different reader; and
 // it would be wrong precisely when someone is looking, because the reason to point
 // fingerprint at this file is to investigate corruption. Under our own name nothing
-// treats it as a memo, and it stays inspectable with `xattr -p`.
+// treats it as a stored hash, and it stays inspectable with `xattr -p`.
 //
 // So: this says "at publication the bytes hashed to X", never "the bytes hash to X".
 // Nothing in replay reads it back, and nothing should ever skip the trailer because of
@@ -930,7 +930,7 @@ using namespace fpstore;
 
 // One stripe of this run's records. Sharded rather than thread_local because GCD worker
 // threads come and go mid-run, and a thread-local registry would need destructor
-// plumbing to survive that. An uncontended lock is 20-40 ns against the 13 us the memo
+// plumbing to survive that. An uncontended lock is 20-40 ns against the 13 us the store
 // saves per file, and 64 stripes keep contention off the hot path.
 struct alignas(64) FingerprintStore::Shard
 {
@@ -1017,7 +1017,7 @@ FingerprintStore::Open(const std::string &cacheDir, FileHashAlgorithm algorithm,
 	store_host_id(hostUuid, rawUuid);
 
 	// Everything that allocates goes inside the guard, path construction included:
-	// the contract this promises is that running without a memo is always available as
+	// the contract this promises is that running without a hash store is always available as
 	// a fallback, and throwing out of Open would break it for the one caller who cannot
 	// retry - a process that is out of memory before it has started any work.
 	std::unique_ptr<FingerprintStore> store;
@@ -1209,7 +1209,7 @@ FingerprintStore::save()
 {
 	// Called after the whole build has already succeeded. Sorting, merging and building
 	// the image all allocate, and an escaping bad_alloc here would terminate the process
-	// after the work it was protecting is done. Losing the memo costs a re-hash.
+	// after the work it was protecting is done. Losing the store costs a re-hash.
 	try
 	{
 		save_internal();
@@ -1419,7 +1419,7 @@ FingerprintStore::save_internal()
 			{
 				if(mVerbose)
 				{
-					LogError("memo: appended %zu records to the journal\n",
+					LogError("hash store: appended %zu records to the journal\n",
 						(size_t)newSlots.size());
 				}
 				// The overlay this object still holds is now a run out of date. Nothing
@@ -1639,7 +1639,7 @@ FingerprintStore::save_internal()
 	unlink(mJournalPath.c_str());
 
 	if(mVerbose)
-		LogError("memo: rewrote the store with %zu entries\n", (size_t)inserted);
+		LogError("hash store: rewrote the store with %zu entries\n", (size_t)inserted);
 
 	// Published. A second save() would only rewrite the same bytes.
 	mDirty.store(false, std::memory_order_relaxed);

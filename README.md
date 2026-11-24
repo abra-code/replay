@@ -199,7 +199,7 @@ The help texts below say where Linux behaves differently; in short:
   operation fails with EACCES (sometimes EXDEV) instead of EPERM, with other
   error text. File metadata (`stat`, `chmod`, `chown`, timestamps) is not
   covered. Extended attribute writes are denied to everything under the
-  sandbox, so a sandboxed replay writes no fingerprint memos. Programs that
+  sandbox, so a sandboxed replay writes no fingerprint xattrs. Programs that
   set user or group IDs lose those privileges. Details in
   [sandbox/README.md](sandbox/README.md#linux).
 - **Extended attribute names** are in the `user.` namespace:
@@ -316,7 +316,7 @@ Options:
   --cache-refresh    Execute everything, ignoring stored entries, but record fresh ones. Implies --cache.
   --cache-env NAME   Fold the value of this environment variable into every task's input fingerprint.
                      May be repeated. Implies --cache.
-  --cache-memo sidecar|xattr|off   Where per-file content hashes are memoized between runs, so that
+  --hash-store sidecar|xattr|off   Where per-file content hashes are kept between runs, so that
                      unchanged files are not re-read. "sidecar" (default) keeps them in a compact index
                      in --cache-dir: it works when the source tree is read-only, which is the usual case
                      under --sandbox, and costs about a tenth of what "xattr" costs per fingerprinted
@@ -324,7 +324,7 @@ Options:
                      (user.public.fingerprint.* on Linux), shared with the gate and fingerprint
                      tools, and needs the files to be writable.
                      Implies --cache.
-  --cache-memo-refresh   Ignore what is memoized, recompute every file hash and rewrite the memo.
+  --hash-store-refresh   Ignore the stored hashes, recompute every file hash and store it again.
                      Implies --cache.
   --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay
                      auto-discovers declared paths from the playlist and adds them to the policy.
@@ -461,9 +461,9 @@ Incremental execution cache:
   After restructuring a playlist (especially removing a step that mutated earlier products),
   run once with --cache-refresh to re-execute everything and rebuild the manifest.
 
-  The per-file hash memoization (--cache-memo) records a content hash per file so that unchanged
+  The hash store (--hash-store) records a content hash per file so that unchanged
   files are not read again. The two backends answer the same question but trust different things,
-  because one of them writes to the very file it is memoizing and the other does not:
+  because one of them writes to the very file whose hash it stores and the other does not:
 
     sidecar  A compact index in the cache directory, keyed by device and inode and validated against
              size, modification time, CHANGE time and file type. Nothing is written to the inputs, so
@@ -486,7 +486,7 @@ Incremental execution cache:
              making a read-only one writable; another user's files are hashed every time. It
              trusts a file's inode, size and mtime only: a rewrite that restores all three (a tool
              preserving timestamps, touch -r) is invisible to it, so the file can look unchanged and
-             cause a wrong skip. Use --cache-memo-refresh (or off) when inputs are rewritten with
+             cause a wrong skip. Use --hash-store-refresh (or off) when inputs are rewritten with
              restored modification times.
 
   The sidecar keeps its data in two files, the index and a small append-only journal beside it, with a
@@ -509,8 +509,8 @@ Incremental execution cache:
   protects the index is the checksum in its trailer, inside the file and covering the index body, which
   replay verifies every time it opens the sidecar.
 
-  --dry-run reads the sidecar and never writes it, so a dry run leaves the memo byte-identical. With
-  "xattr" the memoization is turned off for the run instead: that backend has no read-only mode, so any
+  --dry-run reads the sidecar and never writes it, so a dry run leaves the store byte-identical. With
+  "xattr" the hash store is turned off for the run instead: that backend has no read-only mode, so any
   file that missed would have its record written (and a read-only file briefly chmod-ed) as part of the
   same pass. Turning it off costs a re-hash and keeps the dry run's promise to write nothing.
 
@@ -520,8 +520,8 @@ Incremental execution cache:
   spawning sees no difference between the three.
 
   With --sandbox, the cache directory is granted read-write in the sandbox automatically. The default
-  sidecar memoization lives there, so it keeps working when the input trees are read-only. Choosing
-  --cache-memo xattr under a sandbox means every memoization write to an input is denied and logged
+  sidecar hash store lives there, so it keeps working when the input trees are read-only. Choosing
+  --hash-store xattr under a sandbox means every hash written to an input is denied and logged
   as a kernel sandbox violation; the run stays correct, just noisier and slower. On Linux that
   combination is refused: the sandbox denies every xattr write.
 

@@ -191,7 +191,7 @@ static void process_matched_file_async(std::string path, FileInfo info) noexcept
                 hashed = compute_file_hash(path, fileInfo);
             }
 
-            // Never memoize a hash that was not computed: the 0 left behind by a failed
+            // Never store a hash that was not computed: the 0 left behind by a failed
             // read would be trusted by every later run, here and in replay's cache, which
             // shares this xattr namespace and FileInfoCore layout.
             if (write_xattr && hashed)

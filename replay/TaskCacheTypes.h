@@ -17,15 +17,15 @@ enum class CacheFormat
 	Plist
 };
 
-// Where per-file content hashes are memoized between runs (--cache-memo).
+// Where per-file content hashes are kept between runs (--hash-store).
 // Both backends answer the same question - "have this file's bytes changed since the
 // last run?" - but they trust different things, because one of them writes to the file
-// it is memoizing and the other does not. See FingerprintStore.h.
-enum class CacheMemo
+// whose hash it stores and the other does not. See FingerprintStore.h.
+enum class HashStore
 {
 	Sidecar, // a compact index in the cache directory; works on a read-only tree
 	Xattr,   // the file's own public.fingerprint.* attribute, shared with gate/fingerprint
-	Off      // no memoization: every declared file is re-read on every run
+	Off      // no hash store: every declared file is re-read on every run
 };
 
 enum class CacheOutcome

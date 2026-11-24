@@ -14,7 +14,7 @@ Scenarios:
   8.  declared env ("env": [NAME]): value change -> re-run; undeclared env change -> hit
   8b. global --cache-env: hit, value change, undefined name is a startup error
   9.  --cache-refresh forces execution but still records; --dry-run prints HIT/MISS,
-      executes nothing, writes no manifest and no memoization xattrs
+      executes nothing, writes no manifest and no fingerprint xattrs
   10. failed task is not cached: next run retries it, then hits once it succeeds
   11. playlist edit removing a step prunes its entry from the manifest
   12. --cache-hash blake3 invalidates a crc32c manifest wholesale
@@ -442,8 +442,8 @@ def test_refresh_and_dry_run():
         check("dry run under refresh reports (refresh)", "[cache] MISS (refresh) execute" in r6.stdout, r6.stdout)
 
         # A dry run must write NOTHING, including the transparent xattr hash
-        # memoization on fingerprinted files (which would also briefly chmod
-        # read-only files). Fresh file, so no earlier run has memoized it.
+        # hash store on fingerprinted files (which would also briefly chmod
+        # read-only files). Fresh file, so no earlier run has stored it.
         fresh = d / "fresh.txt"
         fresh.write_text("untouched")
         playlist2 = d / "pl2.json"
@@ -455,7 +455,7 @@ def test_refresh_and_dry_run():
         r7 = cached(playlist2, d / "cache2", "--dry-run")
         check("dry run exits 0 on a new task", r7.returncode == 0, r7.stderr)
         xattrs = " ".join(xattr_names(fresh))
-        check("dry run writes no memoization xattr", "public.fingerprint" not in xattrs, xattrs)
+        check("dry run writes no fingerprint xattr", "public.fingerprint" not in xattrs, xattrs)
 
 
 def test_failed_task_not_cached():

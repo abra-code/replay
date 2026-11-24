@@ -541,9 +541,9 @@ int main(int argc, char* argv[])
         // command's process group with setsid (Linux).
         ChildProcess::EndDescendantsAtExit();
 #if defined(__linux__)
-        // The Linux sandbox denies xattr writes (seccomp), so a memo write could only fail,
+        // The Linux sandbox denies xattr writes (seccomp), so an xattr write could only fail,
         // after write_xattr_fileinfo had flipped a read-only input writable and back, which
-        // bumps its ctime on every run. Keep reading existing memos, write none.
+        // bumps its ctime on every run. Keep reading existing fingerprint xattrs, write none.
         if (g_xattr_mode == XattrMode::On)
             g_xattr_mode = XattrMode::ReadOnly;
 #endif

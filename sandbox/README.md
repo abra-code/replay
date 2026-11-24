@@ -442,10 +442,10 @@ Landlock rules need an existing file or folder:
 
 ### The system call filter
 
-- **Extended attributes cannot be written or removed**, anywhere, also inside write grants (EACCES); reading them works. Otherwise a sandboxed command could attach a forged checksum memo to an input it may not write, and later runs would trust it. Effects:
-  - `replay --cache-memo xattr` is refused together with the sandbox; the default `sidecar` memo works.
+- **Extended attributes cannot be written or removed**, anywhere, also inside write grants (EACCES); reading them works. Otherwise a sandboxed command could attach a forged fingerprint xattr to an input it may not write, and later runs would trust it. Effects:
+  - `replay --hash-store xattr` is refused together with the sandbox; the default `sidecar` hash store works.
   - replay's `clone` and `copy` actions do not carry user extended attributes over to the copies (macOS does).
-  - `gate` reads the memos its inputs already have but writes none, so inputs without a memo are hashed again on every sandboxed run.
+  - `gate` reads the fingerprint xattrs its inputs already have but writes none, so inputs without one are hashed again on every sandboxed run.
   - Commands run by `execute` cannot set them: `cp -a` drops them without a message, `cp --preserve=xattr` fails.
 - **io_uring is unavailable** (ENOSYS), because its own operations would get past the filter. Programs that use it fall back to ordinary calls.
 - **`TIOCSTI` and `TIOCLINUX` are denied** (EACCES). They push characters into a terminal's input, which would let a command type into the user's shell. Other ioctl calls work.

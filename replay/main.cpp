@@ -52,8 +52,8 @@ enum
 	kOptCacheHash,
 	kOptCacheRefresh,
 	kOptCacheEnv,
-	kOptCacheMemo,
-	kOptCacheMemoRefresh,
+	kOptHashStore,
+	kOptHashStoreRefresh,
 };
 
 static struct option sLongOptions[] =
@@ -84,8 +84,11 @@ static struct option sLongOptions[] =
 	{"cache-hash",			required_argument,	NULL, kOptCacheHash},
 	{"cache-refresh",		no_argument,			NULL, kOptCacheRefresh},
 	{"cache-env",			required_argument,	NULL, kOptCacheEnv},
-	{"cache-memo",			required_argument,	NULL, kOptCacheMemo},
-	{"cache-memo-refresh",	no_argument,			NULL, kOptCacheMemoRefresh},
+	{"hash-store",			required_argument,	NULL, kOptHashStore},
+	{"hash-store-refresh",	no_argument,			NULL, kOptHashStoreRefresh},
+	// The earlier names, kept working.
+	{"cache-memo",			required_argument,	NULL, kOptHashStore},
+	{"cache-memo-refresh",	no_argument,			NULL, kOptHashStoreRefresh},
 	{"version",				no_argument,		NULL, 'V'},
 	{"help",				no_argument,		NULL, 'h'},
 	{NULL, 					0,					NULL,  0 }
@@ -144,7 +147,7 @@ DisplayHelp(void)
 		"  --cache-refresh    Execute everything, ignoring stored entries, but record fresh ones. Implies --cache.\n"
 		"  --cache-env NAME   Fold the value of this environment variable into every task's input fingerprint.\n"
 		"                     May be repeated. Implies --cache.\n"
-		"  --cache-memo sidecar|xattr|off   Where per-file content hashes are memoized between runs, so that\n"
+		"  --hash-store sidecar|xattr|off   Where per-file content hashes are kept between runs, so that\n"
 		"                     unchanged files are not re-read. \"sidecar\" (default) keeps them in a compact index\n"
 		"                     in --cache-dir: it works when the source tree is read-only, which is the usual case\n"
 		"                     under --sandbox, and costs about a tenth of what \"xattr\" costs per fingerprinted\n"
@@ -152,7 +155,7 @@ DisplayHelp(void)
 		"                     (user.public.fingerprint.* on Linux), shared with the gate and fingerprint\n"
 		"                     tools, and needs the files to be writable.\n"
 		"                     Implies --cache.\n"
-		"  --cache-memo-refresh   Ignore what is memoized, recompute every file hash and rewrite the memo.\n"
+		"  --hash-store-refresh   Ignore the stored hashes, recompute every file hash and store it again.\n"
 		"                     Implies --cache.\n"
 		"  --sandbox          Enable hard sandbox. When used with a playlist file (not stdin), replay\n"
 		"                     auto-discovers declared paths from the playlist and adds them to the policy.\n"
@@ -301,9 +304,9 @@ DisplayHelp(void)
 		"  After restructuring a playlist (especially removing a step that mutated earlier products),\n"
 		"  run once with --cache-refresh to re-execute everything and rebuild the manifest.\n"
 		"\n"
-		"  The per-file hash memoization (--cache-memo) records a content hash per file so that unchanged\n"
+		"  The hash store (--hash-store) records a content hash per file so that unchanged\n"
 		"  files are not read again. The two backends answer the same question but trust different things,\n"
-		"  because one of them writes to the very file it is memoizing and the other does not:\n"
+		"  because one of them writes to the very file whose hash it stores and the other does not:\n"
 		"\n"
 		"    sidecar  A compact index in the cache directory, keyed by device and inode and validated against\n"
 		"             size, modification time, CHANGE time and file type. Nothing is written to the inputs, so\n"
@@ -326,7 +329,7 @@ DisplayHelp(void)
 		"             making a read-only one writable; another user's files are hashed every time. It\n"
 		"             trusts a file's inode, size and mtime only: a rewrite that restores all three (a tool\n"
 		"             preserving timestamps, touch -r) is invisible to it, so the file can look unchanged and\n"
-		"             cause a wrong skip. Use --cache-memo-refresh (or off) when inputs are rewritten with\n"
+		"             cause a wrong skip. Use --hash-store-refresh (or off) when inputs are rewritten with\n"
 		"             restored modification times.\n"
 		"\n"
 		"  The sidecar keeps its data in two files, the index and a small append-only journal beside it, with a\n"
@@ -349,8 +352,8 @@ DisplayHelp(void)
 		"  protects the index is the checksum in its trailer, inside the file and covering the index body, which\n"
 		"  replay verifies every time it opens the sidecar.\n"
 		"\n"
-		"  --dry-run reads the sidecar and never writes it, so a dry run leaves the memo byte-identical. With\n"
-		"  \"xattr\" the memoization is turned off for the run instead: that backend has no read-only mode, so any\n"
+		"  --dry-run reads the sidecar and never writes it, so a dry run leaves the store byte-identical. With\n"
+		"  \"xattr\" the hash store is turned off for the run instead: that backend has no read-only mode, so any\n"
 		"  file that missed would have its record written (and a read-only file briefly chmod-ed) as part of the\n"
 		"  same pass. Turning it off costs a re-hash and keeps the dry run's promise to write nothing.\n"
 		"\n"
@@ -360,8 +363,8 @@ DisplayHelp(void)
 		"  spawning sees no difference between the three.\n"
 		"\n"
 		"  With --sandbox, the cache directory is granted read-write in the sandbox automatically. The default\n"
-		"  sidecar memoization lives there, so it keeps working when the input trees are read-only. Choosing\n"
-		"  --cache-memo xattr under a sandbox means every memoization write to an input is denied and logged\n"
+		"  sidecar hash store lives there, so it keeps working when the input trees are read-only. Choosing\n"
+		"  --hash-store xattr under a sandbox means every hash written to an input is denied and logged\n"
 		"  as a kernel sandbox violation; the run stays correct, just noisier and slower. On Linux that\n"
 		"  combination is refused: the sandbox denies every xattr write.\n"
 		"\n"
@@ -725,8 +728,8 @@ int main(int argc, const char * argv[])
 	context.cacheDir = ".replay-cache";
 	context.cacheFormat = CacheFormat::Json;
 	context.cacheHash = FileHashAlgorithm::CRC32C;
-	context.cacheMemo = CacheMemo::Sidecar;
-	context.cacheMemoRefresh = false;
+	context.hashStore = HashStore::Sidecar;
+	context.hashStoreRefresh = false;
 	context.cacheSession = nullptr;
 
 	std::vector<std::string> playlistKeys;
@@ -911,27 +914,27 @@ int main(int argc, const char * argv[])
 				context.cacheGlobalEnvNames.emplace_back(optarg);
 			break;
 
-			case kOptCacheMemo:
+			case kOptHashStore:
 			{
 				context.cacheEnabled = true;
 				std::string backend(optarg);
 				if(backend == "sidecar")
-					context.cacheMemo = CacheMemo::Sidecar;
+					context.hashStore = HashStore::Sidecar;
 				else if(backend == "xattr")
-					context.cacheMemo = CacheMemo::Xattr;
+					context.hashStore = HashStore::Xattr;
 				else if(backend == "off")
-					context.cacheMemo = CacheMemo::Off;
+					context.hashStore = HashStore::Off;
 				else
 				{
-					LogError("error: invalid --cache-memo \"%s\". Expected \"sidecar\", \"xattr\" or \"off\"\n", optarg);
+					LogError("error: invalid --hash-store \"%s\". Expected \"sidecar\", \"xattr\" or \"off\"\n", optarg);
 					return EXIT_FAILURE;
 				}
 			}
 			break;
 
-			case kOptCacheMemoRefresh:
+			case kOptHashStoreRefresh:
 				context.cacheEnabled = true;
-				context.cacheMemoRefresh = true;
+				context.hashStoreRefresh = true;
 			break;
 
 			case 'V':
@@ -1043,9 +1046,9 @@ int main(int argc, const char * argv[])
 				return EXIT_FAILURE;
 			}
 			sandboxAllowWrite.push_back(context.cacheDir);
-			// No memoization special case here any more: the default sidecar backend
+			// No hash store special case here any more: the default sidecar backend
 			// lives in the cache directory that was just granted read-write, so it
-			// keeps working when the input trees are read-only. Only --cache-memo
+			// keeps working when the input trees are read-only. Only --hash-store
 			// xattr writes to the inputs, and choosing it is now explicit.
 		}
 
@@ -1054,29 +1057,29 @@ int main(int argc, const char * argv[])
 		// The Linux sandbox denies every extended attribute write, so this backend could
 		// only fail there. The
 		// default sidecar keeps working: it lives in the cache folder.
-		if(sandboxRequested && context.cacheMemo == CacheMemo::Xattr)
+		if(sandboxRequested && context.hashStore == HashStore::Xattr)
 		{
-			LogError("error: --cache-memo xattr cannot be used with the sandbox on Linux, which denies extended "
-			         "attribute writes; use the default --cache-memo sidecar\n");
+			LogError("error: --hash-store xattr cannot be used with the sandbox on Linux, which denies extended "
+			         "attribute writes; use the default --hash-store sidecar\n");
 			return EXIT_FAILURE;
 		}
 #endif
 		g_hash = context.cacheHash;
 		g_verbose = context.verbose;
-		g_memo_backend = context.cacheMemo;
-		g_memo_refresh = context.cacheMemoRefresh;
+		g_hash_store = context.hashStore;
+		g_hash_store_refresh = context.hashStoreRefresh;
 
 		// The xattr backend's own mode. --dry-run promises to write nothing, and this
 		// backend has no read-only mode: a hit is a pure getxattr, but every file that
 		// MISSES has its record written by the same pass, briefly chmod-ing read-only
 		// files to do it. So a dry run turns it off entirely and re-hashes instead.
 		// The sidecar has no such coupling: a dry run reads it and simply never saves.
-		if(context.cacheMemo != CacheMemo::Xattr)
+		if(context.hashStore != HashStore::Xattr)
 			g_xattr_mode = XattrMode::Off;
 		else if(context.dryRun)
 			g_xattr_mode = XattrMode::Off;
 		else
-			g_xattr_mode = context.cacheMemoRefresh ? XattrMode::Refresh : XattrMode::On;
+			g_xattr_mode = context.hashStoreRefresh ? XattrMode::Refresh : XattrMode::On;
 	}
 
 	// Opened here, after the cache directory is resolved and before the sandbox is
@@ -1085,7 +1088,7 @@ int main(int argc, const char * argv[])
 	// PROCESS, not per playlist - it holds file metadata, not playlist state, so
 	// several --playlist-key runs share one load and one save.
 	std::unique_ptr<FingerprintStore> fingerprintStore;
-	if(context.cacheEnabled && (context.cacheMemo == CacheMemo::Sidecar))
+	if(context.cacheEnabled && (context.hashStore == HashStore::Sidecar))
 	{
 		fingerprintStore = FingerprintStore::Open(context.cacheDir, context.cacheHash, context.verbose);
 		g_fingerprint_store = fingerprintStore.get();
@@ -1270,7 +1273,7 @@ int main(int argc, const char * argv[])
 	// After every playlist has finished, so one process publishes the store once even
 	// when several --playlist-key runs contributed to it. --dry-run still READ the
 	// store - which is where most of its cost goes - it just never publishes, so a dry
-	// run leaves the memo byte-identical.
+	// run leaves the store byte-identical.
 	if(fingerprintStore != nullptr)
 	{
 		if(!context.dryRun)
@@ -1280,7 +1283,7 @@ int main(int argc, const char * argv[])
 			// The journal count is how many of the entries available to this run came
 			// from the append log rather than the table, which is what makes "did the
 			// incremental path actually work" visible without parsing the files.
-			LogError("memo: %zu hits, %zu computed, store %s (%zu table, %zu journalled)\n",
+			LogError("hash store: %zu hits, %zu computed, %s (%zu table, %zu journalled)\n",
 				fingerprintStore->hit_count(), fingerprintStore->computed_count(),
 				fingerprintStore->path().c_str(),
 				fingerprintStore->loaded_entry_count(), fingerprintStore->journal_entry_count());

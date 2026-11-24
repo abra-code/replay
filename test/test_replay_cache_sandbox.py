@@ -6,22 +6,22 @@ Scenarios:
   1. sandboxed cached run: cold run executes, warm run hits; the cache dir is
      created before the sandbox is applied (nested, nonexistent) and the
      manifest is written from inside the sandbox
-  2. the default sidecar memoization under --sandbox: a read-only input tree
-     still memoizes, because the index lives in the cache directory rather
-     than on the files - warm run hits in the memo, no fingerprint xattrs
+  2. the default sidecar hash store under --sandbox: a read-only input tree
+     still stores hashes, because the index lives in the cache directory rather
+     than on the files - warm run hits in the hash store, no fingerprint xattrs
      written anywhere, no xattr noise on stderr
-  3. explicit --cache-memo xattr under --sandbox: denied input-file xattr
+  3. explicit --hash-store xattr under --sandbox: denied input-file xattr
      writes are silent and non-fatal (run exits 0, second run still hits,
-     stderr clean), while outputs in read-write areas do get memoized
-  3b. read-only (chmod 444) input with explicit --cache-memo xattr: the denied
+     stderr clean), while outputs in read-write areas do get stored
+  3b. read-only (chmod 444) input with explicit --hash-store xattr: the denied
      lchmod/setxattr sequence leaves the file's mode unaltered
   4. --dry-run --cache --sandbox: a cold dry run creates no cache dir; a warm
      dry run reports HIT from inside the sandbox
   5. serial engine (-s) under --sandbox: warm run hits
   6. mutator fixed point under --sandbox: create -> edit chain fully skips on
      run 2; an input change still re-runs the chain (correctness intact)
-  7. no --sandbox: the memo default is still the sidecar (no xattrs on the
-     inputs), and --cache-memo xattr still reaches the files when asked -
+  7. no --sandbox: the hash store default is still the sidecar (no xattrs on the
+     inputs), and --hash-store xattr still reaches the files when asked -
      guarding the backend-selection logic against regressions
 
 Usage: python3 test_replay_cache_sandbox.py [/path/to/replay]
@@ -43,18 +43,18 @@ REPLAY         = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_REPLAY
 
 XATTR_NAMES = ("public.fingerprint.crc32c", "public.fingerprint.blake3")
 # Strings that must never appear on stderr of a cached sandboxed run: the xattr
-# memoization write path degrades silently on permission failures.
+# hash store write path degrades silently on permission failures.
 # Denials read EPERM on macOS (Seatbelt) and EACCES on Linux (Landlock).
 NOISE = ("setxattr", "lchmod", "EPERM", "Operation not permitted", "EACCES", "Permission denied", "Warning:")
 
 # The Linux sandbox denies every extended attribute write, so replay refuses
-# --cache-memo xattr together with --sandbox there (scenarios 3 and 3b check that).
-XATTR_MEMO_REFUSAL = "--cache-memo xattr cannot be used with the sandbox on Linux"
+# --hash-store xattr together with --sandbox there (scenarios 3 and 3b check that).
+XATTR_HASH_STORE_REFUSAL = "--hash-store xattr cannot be used with the sandbox on Linux"
 
 
-def check_xattr_memo_refused(label: str, proc) -> None:
-    check(f"{label}: Linux refuses --cache-memo xattr with --sandbox", proc.returncode != 0, proc.stderr)
-    check(f"{label}: the refusal says why", XATTR_MEMO_REFUSAL in proc.stderr, proc.stderr)
+def check_xattr_hash_store_refused(label: str, proc) -> None:
+    check(f"{label}: Linux refuses --hash-store xattr with --sandbox", proc.returncode != 0, proc.stderr)
+    check(f"{label}: the refusal says why", XATTR_HASH_STORE_REFUSAL in proc.stderr, proc.stderr)
 
 _pass = 0
 _fail = 0
@@ -99,13 +99,13 @@ def summary(proc: subprocess.CompletedProcess) -> tuple:
     return (-1, -1, -1)
 
 
-def memo_summary(proc: subprocess.CompletedProcess) -> tuple:
-    """Parses the 'memo: N hits, M computed, store PATH' stderr line, printed only
+def hash_store_summary(proc: subprocess.CompletedProcess) -> tuple:
+    """Parses the 'hash store: N hits, M computed, PATH' stderr line, printed only
     under --verbose. (-1, -1, '') if absent."""
     for line in proc.stderr.splitlines():
-        if line.startswith("memo: ") and " hits, " in line:
+        if line.startswith("hash store: ") and " hits, " in line:
             parts = line.split()
-            return (int(parts[1]), int(parts[3]), parts[6])
+            return (int(parts[2]), int(parts[4]), parts[6])
     return (-1, -1, "")
 
 
@@ -169,10 +169,10 @@ def test_sandbox_miss_hit():
               f"found {stderr_noise(r2)!r} in: {r2.stderr}")
 
 
-def test_sandbox_sidecar_memo_default():
-    print("\n=== Scenario 2: the default sidecar memo works on a read-only tree under --sandbox ===")
+def test_sandbox_sidecar_hash_store_default():
+    print("\n=== Scenario 2: the default sidecar hash store works on a read-only tree under --sandbox ===")
     # This is the case the sidecar exists for. The sandbox grants the input tree
-    # read-only, so the xattr backend could not memoize it at all; the sidecar
+    # read-only, so the xattr backend could not store it at all; the sidecar
     # lives in the cache directory, which IS granted read-write, so it can.
     with tempfile.TemporaryDirectory() as td:
         d = Path(td).resolve()
@@ -182,8 +182,8 @@ def test_sandbox_sidecar_memo_default():
 
         r1 = run(["--sandbox", "--cache", "--cache-dir", cache, "-v", playlist])
         check("cold verbose run exits 0", r1.returncode == 0, r1.stderr)
-        check("cold run computed every hash", memo_summary(r1)[:2] == (0, 2),
-              f"{memo_summary(r1)} in: {r1.stderr}")
+        check("cold run computed every hash", hash_store_summary(r1)[:2] == (0, 2),
+              f"{hash_store_summary(r1)} in: {r1.stderr}")
         check("the store was written from inside the sandbox", len(store_files(cache)) == 1,
               str(list(cache.iterdir()) if cache.exists() else "cache dir missing"))
         check("cold stderr free of xattr noise", stderr_noise(r1) == "",
@@ -191,8 +191,8 @@ def test_sandbox_sidecar_memo_default():
 
         r2 = run(["--sandbox", "--cache", "--cache-dir", cache, "-v", playlist])
         check("warm run hits the task", summary(r2) == (1, 0, 0), r2.stderr)
-        check("warm run hit the memo for every file, computing none",
-              memo_summary(r2)[:2] == (2, 0), f"{memo_summary(r2)} in: {r2.stderr}")
+        check("warm run hit the hash store for every file, computing none",
+              hash_store_summary(r2)[:2] == (2, 0), f"{hash_store_summary(r2)} in: {r2.stderr}")
         check("no fingerprint xattr on the read-only input", not has_fingerprint_xattr(in_file),
               str(xattr_names(in_file)))
         check("no fingerprint xattr on the output", not has_fingerprint_xattr(out_file),
@@ -204,16 +204,16 @@ def test_sandbox_sidecar_memo_default():
 
 
 def test_sandbox_xattr_explicit_on():
-    print("\n=== Scenario 3: explicit --cache-memo xattr: denied writes are silent, run unaffected ===")
+    print("\n=== Scenario 3: explicit --hash-store xattr: denied writes are silent, run unaffected ===")
     with tempfile.TemporaryDirectory() as td:
         d = Path(td).resolve()
         playlist, in_file, out_file = make_tree(d)
         cache = d / "cache"
-        args = ["--sandbox", "--cache-memo", "xattr", "--cache-dir", cache]
+        args = ["--sandbox", "--hash-store", "xattr", "--cache-dir", cache]
 
         r1 = run(args + [playlist])
         if IS_LINUX:
-            check_xattr_memo_refused("scenario 3", r1)
+            check_xattr_hash_store_refused("scenario 3", r1)
             check("scenario 3: nothing ran", not out_file.exists(), str(out_file))
             return
         check("run 1 exits 0 despite denied input xattr writes", r1.returncode == 0, r1.stderr)
@@ -222,15 +222,15 @@ def test_sandbox_xattr_explicit_on():
               f"found {stderr_noise(r1)!r} in: {r1.stderr}")
         check("sandbox denied the input xattr write silently",
               not has_fingerprint_xattr(in_file), str(xattr_names(in_file)))
-        check("output in the read-write area was memoized",
+        check("output in the read-write area was stored",
               has_fingerprint_xattr(out_file), str(xattr_names(out_file)))
         check("the xattr backend writes no sidecar store", store_files(cache) == [],
               str(store_files(cache)))
 
         r2 = run(args + ["-v", playlist])
         check("run 2 hits", summary(r2) == (1, 0, 0), r2.stderr)
-        check("no memo summary line without a sidecar store",
-              memo_summary(r2) == (-1, -1, ""), r2.stderr)
+        check("no hash store summary line without a sidecar store",
+              hash_store_summary(r2) == (-1, -1, ""), r2.stderr)
 
 
 def test_sandbox_xattr_readonly_input_mode_preserved():
@@ -243,11 +243,11 @@ def test_sandbox_xattr_readonly_input_mode_preserved():
         playlist, in_file, out_file = make_tree(d)
         in_file.chmod(0o444)
         cache = d / "cache"
-        args = ["--sandbox", "--cache-memo", "xattr", "--cache-dir", cache]
+        args = ["--sandbox", "--hash-store", "xattr", "--cache-dir", cache]
 
         r1 = run(args + [playlist])
         if IS_LINUX:
-            check_xattr_memo_refused("scenario 3b", r1)
+            check_xattr_hash_store_refused("scenario 3b", r1)
             mode1 = in_file.stat().st_mode & 0o7777
             check("scenario 3b: input mode unchanged", mode1 == 0o444, oct(mode1))
             return
@@ -335,9 +335,9 @@ def test_sandbox_mutator_fixed_point():
         check("new post-edit state", gen.read_text() == "v2 edited")
 
 
-def test_no_sandbox_memo_default_is_sidecar():
-    print("\n=== Scenario 7: without --sandbox the memo default is still the sidecar ===")
-    # The sandbox no longer changes the memo backend at all, so the same default
+def test_no_sandbox_hash_store_default_is_sidecar():
+    print("\n=== Scenario 7: without --sandbox the hash store default is still the sidecar ===")
+    # The sandbox no longer changes the hash store backend at all, so the same default
     # has to hold here. Both halves matter: the sidecar must not write xattrs,
     # and the xattr backend must still reach the files when it is asked for.
     with tempfile.TemporaryDirectory() as td:
@@ -357,11 +357,11 @@ def test_no_sandbox_memo_default_is_sidecar():
         playlist, in_file, out_file = make_tree(d)
         cache = d / "cache"
 
-        r2 = run(["--cache-memo", "xattr", "--cache-dir", cache, playlist])
-        check("--cache-memo xattr exits 0", r2.returncode == 0, r2.stderr)
-        check("--cache-memo xattr gave the input the fingerprint xattr",
+        r2 = run(["--hash-store", "xattr", "--cache-dir", cache, playlist])
+        check("--hash-store xattr exits 0", r2.returncode == 0, r2.stderr)
+        check("--hash-store xattr gave the input the fingerprint xattr",
               has_fingerprint_xattr(in_file), str(xattr_names(in_file)))
-        check("--cache-memo xattr wrote no sidecar store", store_files(cache) == [],
+        check("--hash-store xattr wrote no sidecar store", store_files(cache) == [],
               str(store_files(cache)))
 
 
@@ -376,13 +376,13 @@ def main() -> int:
     print(f"replay: {REPLAY}")
 
     test_sandbox_miss_hit()
-    test_sandbox_sidecar_memo_default()
+    test_sandbox_sidecar_hash_store_default()
     test_sandbox_xattr_explicit_on()
     test_sandbox_xattr_readonly_input_mode_preserved()
     test_sandbox_dry_run()
     test_sandbox_serial()
     test_sandbox_mutator_fixed_point()
-    test_no_sandbox_memo_default_is_sidecar()
+    test_no_sandbox_hash_store_default_is_sidecar()
 
     print(f"\nNumber of successful tests: {_pass}")
     print(f"Number of failed tests:     {_fail}")

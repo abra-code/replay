@@ -1,14 +1,14 @@
 #pragma once
-// Sidecar memoization of per-file content hashes, for the incremental execution cache.
+// The sidecar hash store: per-file content hashes, for the incremental execution cache.
 //
-// The xattr memoization (FileHashing.h, shared with the gate and fingerprint tools) keeps
+// The fingerprint xattr (FileHashing.h, shared with the gate and fingerprint tools) keeps
 // a file's {inode, size, mtime, hash} record in the file's own extended attributes. That
 // is elegant - the record travels with the inode - but it needs the file to be writable,
 // which a sandboxed build of a read-only source tree is not, and it costs a getxattr
 // syscall per file (~13 us warm, against 1.4 us for the lstat that precedes it).
 //
 // This module keeps the same records in one mmap'd open-addressed table under the cache
-// directory instead. Nothing is written to the inputs, so a read-only tree memoizes
+// directory instead. Nothing is written to the inputs, so a read-only tree keeps its hashes
 // normally, and a probe is a couple of cache misses rather than a syscall. Measured on a
 // 200k-entry table: 0.86 ms to open and map, ~0.01 us per probe.
 //
@@ -88,7 +88,7 @@ public:
 	// what this store exists to avoid. Recording hits keeps the epochs exact and makes
 	// the merge one uniform pass.
 	//
-	// contentHash must be a hash that was really computed (or really memoized): storing
+	// contentHash must be a hash that was really computed (or really stored): storing
 	// the 0 left behind by a failed read would pin the file's recorded content at 0 for
 	// every later run, the same rule FileHashing.h states for the xattr backend.
 	//
@@ -109,7 +109,7 @@ public:
 	//     an in-place truncation), and the journal is cleared afterwards.
 	//
 	// Call once, after the scheduler has drained and after any end-of-run fingerprinting
-	// has finished. Never throws and never fails the run: losing the memo costs a re-hash.
+	// has finished. Never throws and never fails the run: losing the store costs a re-hash.
 	void save();
 
 	// Entries in the table as loaded. Advisory - it is the header's own count, which is
@@ -126,7 +126,7 @@ public:
 	size_t hit_count() const;
 
 	// Files whose hash this run had to compute: every record() that was not preceded by
-	// a successful lookup(). Under --cache-memo-refresh, that is all of them.
+	// a successful lookup(). Under --hash-store-refresh, that is all of them.
 	size_t computed_count() const;
 
 	const std::string &path() const { return mPath; }
