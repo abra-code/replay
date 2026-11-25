@@ -1,0 +1,54 @@
+# macOS: builds the four tools as a release does (./build.sh: Release, universal arm64 and
+# x86_64) on an Apple silicon runner, and runs the test suites (test/test_all.sh) on them.
+#
+# Runs on pushes to every branch and on pull requests. Documentation changes run it too:
+# test_readme_help_sync.py checks README.md against the tools' help.
+
+name: macOS
+
+on:
+  # Branches only: a tag push would run it too.
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request cancels the run still going, except on
+# master, where every commit keeps its result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  build-and-test:
+    name: Build and test
+    # macOS 27 with Xcode 27 (a preview image until GitHub names a macos-27 one): the sandbox
+    # code is tested on the system it ships for.
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      # The image's default Xcode moves with each image update; pin the one the code is built with.
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      # Actions are named by commit, which cannot be moved as a tag can; the comment names its release.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # test_mcp_server.py validates the tools' output against their schemas with jsonschema.
+      # A virtual environment first on PATH, since the image's Python refuses pip installs.
+      - name: Install jsonschema
+        run: |
+          /usr/bin/env python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python3" -m pip install --quiet jsonschema
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Test
+        run: test/test_all.sh build/Release

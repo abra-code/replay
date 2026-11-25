@@ -1,0 +1,86 @@
+# Linux: builds the four tools, debug and release, on x86_64 and aarch64 runners in the Swift
+# image pinned in linux/swift-image (Ubuntu 24.04, the system releases are built on), and runs
+# the test suites (test/test_all.sh) in that container, as root. The same steps run on a Mac
+# with linux/build-and-test.sh --with docker.
+#
+# Runs on pushes to every branch and on pull requests. Documentation changes run it too:
+# test_readme_help_sync.py checks README.md against the tools' help.
+
+name: Linux
+
+on:
+  # Branches only: a tag push would run it too.
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request cancels the run still going, except on
+# master, where every commit keeps its result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  # The container image of the next job comes from linux/swift-image, so the pin stays in one file.
+  swift-image:
+    name: Read the pinned Swift image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.read.outputs.image }}
+    steps:
+      # Actions are named by commit, which cannot be moved as a tag can; the comment names its release.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: linux/swift-image
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Read linux/swift-image
+        id: read
+        run: |
+          image="$(/usr/bin/grep -v '^#' linux/swift-image | /usr/bin/head -n 1)"
+          if [ -z "$image" ]; then
+            echo "::error::no image reference in linux/swift-image"
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+  build-and-test:
+    name: Build and test (${{ matrix.arch }}, ${{ matrix.config }})
+    needs: swift-image
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        config: [debug, release]
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: ${{ needs.swift-image.outputs.image }}
+    timeout-minutes: 60
+    steps:
+      # What the test suites need beyond the Swift image; the same list as linux/Dockerfile.
+      - name: Install the test tools
+        run: |
+          apt-get -q -y -o Dpkg::Use-Pty=0 update
+          DEBIAN_FRONTEND=noninteractive apt-get -q -y -o Dpkg::Use-Pty=0 install --no-install-recommends python3 python3-jsonschema attr curl ca-certificates zip
+
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build
+        run: ./build-linux.sh ${{ matrix.config }}
+
+      - name: Test
+        run: test/test_all.sh ".build-linux/$(/usr/bin/uname -m)/${{ matrix.config }}"

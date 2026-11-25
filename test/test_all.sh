@@ -5,6 +5,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$SCRIPT_DIR/.."
 BUILD_DIR="${1:-$REPO_DIR/build/Release}"
 
+# Absolute: several suites change folder before they run the tools, so a relative build
+# folder (test/test_all.sh build/Release) would not be found there.
+ABSOLUTE_BUILD_DIR="$(CDPATH= cd -P -- "$BUILD_DIR" 2>/dev/null && pwd)"
+if [ -z "$ABSOLUTE_BUILD_DIR" ]; then
+    echo "Error: no build folder at $BUILD_DIR" >&2
+    exit 1
+fi
+BUILD_DIR="$ABSOLUTE_BUILD_DIR"
+
 BOLD='\033[1m'
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
