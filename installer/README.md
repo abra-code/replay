@@ -62,8 +62,8 @@ sh installer/makepkg.sh --identity "$ID" \
 ### Notarize
 
 ```sh
-xcrun notarytool submit dist/replay_3.0.0.pkg --keychain-profile <profile> --wait
-xcrun stapler staple dist/replay_3.0.0.pkg
+xcrun notarytool submit dist/replay_3.0.1.pkg --keychain-profile <profile> --wait
+xcrun stapler staple dist/replay_3.0.1.pkg
 ```
 
 ## Local smoke build
