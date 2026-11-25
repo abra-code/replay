@@ -1,0 +1,256 @@
+# Release: builds the release files of a tag and checks them, started by hand (Actions, Release,
+# Run workflow, with the tag):
+#   Linux, x86_64 and aarch64, each built natively in the Swift image pinned in linux/swift-image
+#     by linux/package.sh: replay_<version>_linux_<arch>.tar.gz and
+#     swift-runtime_<swift>_linux_<arch>.tar.gz, each with a .sha256 file. Every tarball is
+#     then checked by linux/release-check-inner.sh in clean containers of its architecture,
+#     as linux/release.sh does on a Mac: Ubuntu 24.04 with no Swift (the runtime tarball),
+#     Debian 13 with libswiftlang (Swift 6.0.3, the oldest runtime supported), Fedora 44 with
+#     swift-lang-runtime.
+#   macOS: the four tools built by ./build.sh (Release, universal), not signed with a
+#     Developer ID and not notarized (the linker's ad hoc signature only), in
+#     replay_<version>_macos_unsigned.zip with a .sha256 file. The signed and notarized
+#     installer package is made on a Mac (installer/).
+# Everything, with a SHA256SUMS file, is kept as the run's artifact release-<version>.
+# "attach" also uploads the files to the GitHub release of the tag, which must exist
+# (create it first, as a draft if it is not to be seen yet); files of the same name are
+# replaced. The build scripts come from the tag, so an older tag is built as it was.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build, such as v3.0.0 (its version must match common/include/replay_version.h)'
+        required: true
+        type: string
+      attach:
+        description: 'Upload to the GitHub release of the tag'
+        required: true
+        type: choice
+        default: none
+        options:
+          - none
+          - linux
+          - linux and macOS
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Read the tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.read.outputs.image }}
+      version: ${{ steps.read.outputs.version }}
+      swift: ${{ steps.read.outputs.swift }}
+      commit: ${{ steps.read.outputs.commit }}
+    steps:
+      # Actions are named by commit, which cannot be moved as a tag can; the comment names its release.
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Read the Swift image, the version and the commit
+        id: read
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          image="$(/usr/bin/grep -v '^#' linux/swift-image | /usr/bin/head -n 1)"
+          swift="$(printf '%s\n' "$image" | /usr/bin/sed -n 's/^swift:\([0-9][0-9.]*\)-.*/\1/p')"
+          version="$(/usr/bin/sed -n 's/^#define REPLAY_VERSION[[:space:]]*\([0-9][0-9.]*\)[[:space:]]*$/\1/p' common/include/replay_version.h)"
+          commit="$(/usr/bin/git rev-parse --short HEAD)"
+          if [ -z "$image" ] || [ -z "$swift" ] || [ -z "$version" ] || [ -z "$commit" ]; then
+            echo "::error::cannot read the image ('$image'), Swift version ('$swift'), replay version ('$version') or commit ('$commit')"
+            exit 1
+          fi
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::the tag $TAG does not match the version $version in common/include/replay_version.h (expected v$version)"
+            exit 1
+          fi
+          {
+            echo "image=$image"
+            echo "swift=$swift"
+            echo "version=$version"
+            echo "commit=$commit"
+          } >> "$GITHUB_OUTPUT"
+
+  linux-package:
+    name: Linux tarballs (${{ matrix.arch }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: ${{ needs.prepare.outputs.image }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      # A clean build in a new folder, as linux/release.sh does; the build information names
+      # the tag's commit.
+      - name: Build and pack
+        env:
+          REPLAY_SOURCE_COMMIT: commit ${{ needs.prepare.outputs.commit }}
+        run: linux/package.sh --out "$RUNNER_TEMP/dist" --scratch-path "$RUNNER_TEMP/build"
+
+      - name: Keep the tarballs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/dist
+          if-no-files-found: error
+
+  linux-check:
+    name: Check ${{ matrix.arch }} on ${{ matrix.system }}
+    needs: [prepare, linux-package]
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        system: ['ubuntu:24.04', 'debian:trixie', 'fedora:44']
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+          - system: 'ubuntu:24.04'
+            mode: bundled
+          - system: 'debian:trixie'
+            mode: debian
+          - system: 'fedora:44'
+            mode: fedora
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.system }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Get the tarballs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/dist
+
+      # The check installs as a user without root, which must read the scripts and the
+      # tarballs: copies in folders of their own, laid out as linux/release.sh mounts them.
+      - name: Check on a clean system
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SWIFT: ${{ needs.prepare.outputs.swift }}
+          ARCH: ${{ matrix.arch }}
+          MODE: ${{ matrix.mode }}
+        run: |
+          /bin/mkdir -p /check /release
+          /bin/cp linux/release-check-inner.sh linux/runtime-check-inner.sh linux/install.sh /check/
+          /bin/cp "$RUNNER_TEMP"/dist/* /release/
+          /bin/chmod -R a+rX /check /release
+          /bin/bash /check/release-check-inner.sh "$MODE" "/release/replay_${VERSION}_linux_$ARCH.tar.gz" "/release/swift-runtime_${SWIFT}_linux_$ARCH.tar.gz"
+
+  macos:
+    name: macOS tools (unsigned)
+    needs: prepare
+    # As the macOS workflow: macOS 27 with Xcode 27 (a preview image until GitHub names a
+    # macos-27 one), Xcode pinned.
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Pack
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          name="replay_${VERSION}_macos_unsigned"
+          stage="$RUNNER_TEMP/stage/$name"
+          /bin/mkdir -p "$stage" "$RUNNER_TEMP/dist"
+          /bin/cp build/Release/replay build/Release/dispatch build/Release/fingerprint build/Release/gate LICENSE "$stage/"
+          (cd "$RUNNER_TEMP/stage" && /usr/bin/ditto -c -k --keepParent "$name" "$RUNNER_TEMP/dist/$name.zip")
+          (cd "$RUNNER_TEMP/dist" && /usr/bin/shasum -a 256 "$name.zip" > "$name.zip.sha256")
+          /bin/cat "$RUNNER_TEMP/dist/$name.zip.sha256"
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos
+          path: ${{ runner.temp }}/dist
+          if-no-files-found: error
+
+  collect:
+    name: Collect${{ inputs.attach != 'none' && ' and attach' || '' }}
+    needs: [prepare, linux-package, linux-check, macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Get the files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/parts
+
+      - name: Gather them with SHA256SUMS
+        run: |
+          /bin/mkdir -p "$RUNNER_TEMP/release"
+          # Only this workflow's parts: a re-run also downloads the release-<version> artifact
+          # of an earlier attempt.
+          /bin/cp "$RUNNER_TEMP"/parts/linux-*/* "$RUNNER_TEMP"/parts/macos/* "$RUNNER_TEMP/release/"
+          cd "$RUNNER_TEMP/release" || exit 1
+          /usr/bin/sha256sum -c ./*.sha256 || exit 1
+          /usr/bin/sha256sum *.tar.gz *.zip > SHA256SUMS
+          /bin/cat SHA256SUMS
+
+      - name: Keep the release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ needs.prepare.outputs.version }}
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+
+      - name: Attach to the GitHub release
+        if: ${{ inputs.attach != 'none' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          ATTACH: ${{ inputs.attach }}
+        run: |
+          cd "$RUNNER_TEMP/release" || exit 1
+          files=(./*.tar.gz ./*.tar.gz.sha256 SHA256SUMS)
+          if [ "$ATTACH" = "linux and macOS" ]; then
+            files+=(./*.zip ./*.zip.sha256)
+          else
+            # SHA256SUMS lists only what is attached.
+            /usr/bin/grep -v '\.zip$' SHA256SUMS > SHA256SUMS.linux && /bin/mv SHA256SUMS.linux SHA256SUMS || exit 1
+          fi
+          /usr/bin/gh release upload "$TAG" "${files[@]}" --clobber -R "$GITHUB_REPOSITORY"

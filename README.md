@@ -192,6 +192,18 @@ Every tarball is then checked in clean containers of its architecture:
 The results go to `.build-linux/release/<version>/` with a `SHA256SUMS` file.
 The script prints the `gh release upload` command and does not run it.
 
+The Release workflow on GitHub does the same with nothing on the Mac and no emulation
+(Actions, Release, Run workflow, with the tag). It builds each architecture on
+a runner of that architecture in the pinned Swift image, checks every tarball
+in the same three clean containers, and also builds the macOS tools with
+`./build.sh`. Those tools are not signed with a Developer ID or notarized, so
+they come as a test archive, `replay_<version>_macos_unsigned.zip`; the
+installer package is made on a Mac. Everything, with `SHA256SUMS`, is kept as
+the run's artifact. Its `attach` choice uploads the Linux files, or the macOS
+archive too, to the GitHub release of the tag, which must exist first (a draft
+will do). The macOS tools from a browser download are quarantined, and macOS
+refuses to run them until `/usr/bin/xattr -dr com.apple.quarantine <folder>`.
+
 ### What differs from macOS
 
 The help texts below say where Linux behaves differently; in short:
