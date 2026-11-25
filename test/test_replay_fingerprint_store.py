@@ -78,7 +78,7 @@ from xattr_support import get_xattr, xattr_names
 # replay stores a hash only for a file whose last change is old enough to be told apart
 # from a later one (milliseconds on APFS and Linux ext4 or tmpfs, 2 seconds elsewhere);
 # the files these scenarios write are fresh. 0 lets them be stored at once, which is
-# what the format scenarios check. Scenarios 1b and 1c set their own age.
+# what the format scenarios check. Scenarios 1b, 1c and 11 set their own age.
 os.environ["REPLAY_HASH_STORE_TEST_MIN_AGE_MS"] = "0"
 
 SCRIPT_DIR     = Path(__file__).parent.resolve()
@@ -945,6 +945,10 @@ def test_touch_r_regression():
     # The headline correctness difference. Both halves are asserted on purpose:
     # the xattr behavior is a documented limitation, not an accident, and if it
     # ever changes this test should be the thing that says so.
+    # A real minimum age, not the 0 of the other scenarios: with none, a file written, read
+    # by run 1 and rewritten within one timer tick keeps the same ctime on a kernel that
+    # stamps from the coarse clock, its hash is stored all the same, and run 2 wrongly hits.
+    # 20 ms is at least two ticks at 100 Hz or faster; the source is aged past it first.
     for backend, expect_rerun in (("sidecar", True), ("xattr", False)):
         with tempfile.TemporaryDirectory() as td:
             d = Path(td).resolve()
@@ -952,14 +956,15 @@ def test_touch_r_regression():
             cache = d / "cache"
             args = ["--hash-store", backend, "--cache-dir", cache]
             source = src / "in0.txt"
+            time.sleep(0.03)
 
-            r1 = run(args + [playlist])
+            r1 = run_min_age(args + [playlist], 20)
             check(f"[{backend}] run 1 executed", summary(r1) == (0, 1, 0), r1.stderr)
             check(f"[{backend}] output is v1", (out / "out0.txt").read_text() == "payload 0 v1")
 
             rewrite_preserving_mtime(source, "payload 0 v2")
 
-            r2 = run(args + [playlist])
+            r2 = run_min_age(args + [playlist], 20)
             executed = summary(r2) == (0, 1, 0)
             if expect_rerun:
                 check(f"[{backend}] a mtime-preserving rewrite still re-runs the task",

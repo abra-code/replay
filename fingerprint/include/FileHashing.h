@@ -174,7 +174,11 @@ bool compute_file_hash(const std::string &path, FileInfo &info)
 // system (platform_file_time_step):
 //   Fine    APFS, stamped from the precise clock: 1 ms.
 //   Tick    Linux ext4 and tmpfs, stamped from the coarse clock: two of its steps (8 ms
-//           at 250 Hz, 20 ms at 100 Hz), measured against that same clock. ext2/3/4
+//           at 250 Hz, 20 ms at 100 Hz), measured against that same clock: every later
+//           stamp is at least its reading at the read, however far it lags the precise
+//           clock. Since Linux 6.13 a time read after the change is precise, ahead of
+//           the coarse clock; it is stored once that clock is two steps past it, and the
+//           kernel stamps any change after such a read later than it. ext2/3/4
 //           with small inodes keep whole seconds; a change time with no fraction of a
 //           second is taken for that and gets the Coarse age.
 //   Coarse anything else (HFS+ 1 s, FAT 2 s, network and FUSE file systems): 2 s.
@@ -229,7 +233,11 @@ inline PlatformTimeStep file_time_step(const std::string& path, const FileInfo& 
 // A shorter age in milliseconds from REPLAY_HASH_STORE_TEST_MIN_AGE_MS, at most 2000, or
 // -1 when it is not set: the test suites that check the hash store's format set 0, so
 // that the files a run has just written are stored by that run; those that check the
-// rule itself can set 2000 for the Coarse age on every file system.
+// rule itself can set 2000 for the Coarse age on every file system. The age it sets is
+// measured against the precise clock at the decision (may_store_hash), not the file
+// clock at the read: the suites write their files moments before a run, and since
+// Linux 6.13 those files carry precise times ahead of the coarse clock. It therefore
+// gives up the guarantee for a file rewritten during the read; tests only.
 inline int64_t test_min_age_to_store_hash_ns() noexcept
 {
     static const int64_t min_age_ns = []() noexcept -> int64_t {
@@ -253,11 +261,14 @@ inline int64_t test_min_age_to_store_hash_ns() noexcept
 inline bool may_store_hash(const std::string& path, const FileInfo& info, int64_t changed_ns,
                            int64_t read_start_ns) noexcept
 {
+    int64_t min_age = test_min_age_to_store_hash_ns();
+    if (min_age >= 0)
+        read_start_ns = platform_precise_clock_ns(); // the test override's clock, see above
+
     int64_t age = 0;
     if (__builtin_sub_overflow(read_start_ns, changed_ns, &age) || (age < 0))
         return false;
 
-    int64_t min_age = test_min_age_to_store_hash_ns();
     if (min_age < 0)
     {
         switch (file_time_step(path, info))

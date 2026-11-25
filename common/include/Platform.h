@@ -107,8 +107,12 @@ inline int64_t platform_timespec_ns(const struct timespec &ts) noexcept
 
 // The clock file times are stamped from, in nanoseconds, or INT64_MIN when it cannot be
 // read. macOS stamps from the precise clock. Linux stamps from the coarse one, which lags
-// the precise clock by up to a timer tick: against the precise clock a file just written
-// would look up to a tick older than it is.
+// the precise clock by a timer tick or more: against the precise clock a file just written
+// would look a tick or more older than it is. Every later stamp is at least this clock's
+// reading, however far it lags. Since Linux 6.13 a time read after the change is taken
+// from the precise clock instead (multigrain timestamps), so a file just written and
+// looked at can carry a time ahead of this clock; such a time is still followed only by
+// later ones.
 inline int64_t platform_file_clock_ns() noexcept
 {
 	struct timespec now;
@@ -118,6 +122,16 @@ inline int64_t platform_file_clock_ns() noexcept
 	int status = clock_gettime(CLOCK_REALTIME_COARSE, &now);
 #endif
 	if (status != 0)
+		return INT64_MIN;
+	return platform_timespec_ns(now);
+}
+
+// The precise clock, in nanoseconds, or INT64_MIN when it cannot be read. No file time is
+// ahead of it.
+inline int64_t platform_precise_clock_ns() noexcept
+{
+	struct timespec now;
+	if (clock_gettime(CLOCK_REALTIME, &now) != 0)
 		return INT64_MIN;
 	return platform_timespec_ns(now);
 }
