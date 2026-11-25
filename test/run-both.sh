@@ -1,17 +1,18 @@
 #!/bin/bash
-# Build and run the test suite on macOS, then on Linux, and pass only if both pass.
-# There is no CI, so this is the cross-platform check before a commit that touches
-# shared code. Runs on a Mac.
+# Build and run the test suite on macOS, then on Linux, and pass only if both pass: the
+# cross-platform check before a commit that touches shared code, on the Mac, before CI runs
+# the same on GitHub after the push. Runs on a Mac.
 #
 # Usage: test/run-both.sh [Debug|Release] [--docker] [--linux-only|--macos-only]
 #   Debug|Release  the build configuration for both platforms (default Debug)
 #   --docker       run the Linux half in Docker (linux/docker.sh, Ubuntu 24.04, 4 KiB
-#                  pages) instead of the agent-vm box (linux/agent-vm.sh, Debian 13,
-#                  16 KiB pages)
+#                  pages). Default: the agent-vm box (linux/agent-vm.sh, Debian 13, 16 KiB
+#                  pages) when agent-vm is installed, else Docker; linux/build-and-test.sh
+#                  decides and runs the Linux half
 #   --linux-only, --macos-only  run one half
 #
-# The Linux half skips what is not ported yet; test/test_all.sh lists each skip with
-# the plan phase that removes it.
+# The Linux half skips what does not apply there; test/test_all.sh lists each skip with its
+# reason.
 
 SCRIPT_DIR="$(CDPATH= cd -P -- "$(/usr/bin/dirname -- "$0")" && pwd)"
 REPO_DIR="$(CDPATH= cd -P -- "$SCRIPT_DIR/.." && pwd)"
@@ -44,11 +45,11 @@ fi
 
 host_os="$(/usr/bin/uname -s)"
 if [ "$host_os" != "Darwin" ]; then
-    echo "error: run this on a Mac; on Linux run linux/build.sh and test/test_all.sh directly" >&2
+    echo "error: run this on a Mac; on Linux run linux/build-and-test.sh" >&2
     exit 2
 fi
 
-# linux/build.sh takes the configuration in lower case.
+# The Linux configuration in lower case, as linux/build.sh names its build folders.
 if [ "$CONFIG" = "Debug" ]; then
     LINUX_CONFIG="debug"
 else
@@ -78,43 +79,18 @@ run_macos() {
     return 0
 }
 
+# linux/build-and-test.sh builds and runs the suites in the box or the container, and says
+# which; its own messages tell a failed build from failed suites.
 run_linux() {
-    local runner
-    local build_dir
-    local scratch_args
+    local with="auto"
     if [ "$USE_DOCKER" -eq 1 ]; then
-        runner="$REPO_DIR/linux/docker.sh"
-        local machine
-        machine="$(/usr/bin/uname -m)"
-        if [ "$machine" = "arm64" ]; then
-            machine="aarch64"
-        fi
-        # docker.sh mounts the repository at /src; linux/build.sh then builds into
-        # .build-linux/<machine> there.
-        build_dir="/src/.build-linux/$machine/$LINUX_CONFIG"
-        scratch_args=""
-    else
-        runner="$REPO_DIR/linux/agent-vm.sh"
-        # The box shares the repository at its own path. Its build products go on the
-        # box's disk: the shared folder is slow with many small files.
-        build_dir="/home/agent/build-linux/$LINUX_CONFIG"
-        scratch_args="--scratch-path /home/agent/build-linux"
+        with="docker"
     fi
-
-    echo "=== Linux: linux/build.sh $LINUX_CONFIG $scratch_args"
-    # scratch_args is empty or two words, so it is left unquoted on purpose.
-    "$runner" linux/build.sh "$LINUX_CONFIG" $scratch_args
+    echo "=== Linux: linux/build-and-test.sh --with $with $LINUX_CONFIG"
+    "$REPO_DIR/linux/build-and-test.sh" --with "$with" "$LINUX_CONFIG"
     local status=$?
     if [ "$status" -ne 0 ]; then
-        echo "error: the Linux build failed (status $status)" >&2
-        LINUX_RESULT="build failed"
-        return 1
-    fi
-    echo "=== Linux: test/test_all.sh $build_dir"
-    "$runner" test/test_all.sh "$build_dir"
-    status=$?
-    if [ "$status" -ne 0 ]; then
-        LINUX_RESULT="suite failed"
+        LINUX_RESULT="failed (status $status)"
         return 1
     fi
     LINUX_RESULT="passed"
