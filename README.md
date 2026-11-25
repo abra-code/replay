@@ -26,9 +26,19 @@ interchangeable. Pick by what you are doing.
 source <(/usr/bin/curl -fsSL 'https://raw.githubusercontent.com/abra-code/replay/refs/heads/master/install.sh')
 ```
 
-Clones the repository, builds with Swift Package Manager, installs all four
-tools into `~/.local/bin`, and adds that directory to `PATH` in `~/.zshrc` if
-it is not there already. Needs the Xcode command line tools.
+Clones the latest release (the tag GitHub's "latest release" points to), builds
+it with Swift Package Manager, installs all four tools into `~/.local/bin`, and
+adds that directory to `PATH` in `~/.zshrc` if it is not there already. Needs
+the Xcode command line tools. To build another branch or tag, `master` for the
+newest code, set `REPLAY_INSTALL_REF`:
+
+```
+REPLAY_INSTALL_REF=master source <(/usr/bin/curl -fsSL 'https://raw.githubusercontent.com/abra-code/replay/refs/heads/master/install.sh')
+```
+
+The script runs in your shell, since it is sourced, but leaves nothing behind
+in it except the `PATH` entry: no functions, variables or shell options. It
+needs zsh; sourced from another shell, it stops with a message.
 
 The binaries this produces are for **this machine's architecture only**, which
 is the right answer here: the build happens on the machine that will run them,
