@@ -209,9 +209,11 @@ def test_slow_parallel() -> None:
           f"rc={result.returncode} stderr={result.stderr[:200]}")
 
     # With true concurrency all N_SLOW actions should finish close to SLOW_SECS,
-    # not N_SLOW * SLOW_SECS (serial). Allow generous headroom for CI.
+    # not N_SLOW * SLOW_SECS (serial). The bound is half the serial time: it still
+    # catches serial execution, and leaves room for starting 100 processes on a
+    # small CI machine (a GitHub macOS runner took longer than 8x the single sleep).
     serial_bound = N_SLOW * SLOW_SECS
-    parallel_bound = SLOW_SECS * 8   # 8× the single-sleep duration
+    parallel_bound = serial_bound / 2
 
     check(f"slow-parallel: finished in {parallel_bound:.1f}s (not serial {serial_bound:.0f}s)",
           elapsed < parallel_bound,
