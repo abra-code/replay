@@ -16,7 +16,7 @@ interchangeable. Pick by what you are doing.
 | `swift build -c release` | Swift Package Manager | this machine only | `.build/release` |
 | `./build.sh` | xcodebuild | universal for Release | `build/Release` |
 | `installer/` | PackageBuilder.app | whatever it is handed | `installer/dist/*.pkg` |
-| `./build-linux.sh` (Linux) | Swift Package Manager | this machine only | `.build-linux/<machine>/<config>` |
+| `linux/build.sh` (Linux) | Swift Package Manager | this machine only | `.build-linux/<machine>/<config>` |
 
 `install.sh`, `./build.sh` and `installer/` are for macOS. On Linux, see [On Linux](#on-linux); `install.sh` there points to `linux/install.sh`.
 
@@ -93,7 +93,7 @@ releases page from the first Linux release on (see [Release](#release)).
 
 - **Distribution:** glibc 2.39 or newer. Ubuntu 24.04 and later, Debian 13,
   current Fedora, RHEL 10 and its rebuilds. Not Alpine (musl).
-- **To build:** a swift.org Swift toolchain, 6.2 or newer (`build-linux.sh` refuses an
+- **To build:** a swift.org Swift toolchain, 6.2 or newer (`linux/build.sh` refuses an
   older one); release builds use the one named in `linux/swift-image` (6.2.4 today).
 - **To run:** a Swift runtime. The tools look for it, in this order, in
   `/usr/libexec/swift/lib/swift/linux` (the `libswiftlang` package of Debian 13
@@ -111,10 +111,13 @@ releases page from the first Linux release on (see [Release](#release)).
 ### Build
 
 ```
-./build-linux.sh                # debug, into .build-linux/<machine>/debug
-./build-linux.sh release        # release, into .build-linux/<machine>/release
-./build-linux.sh --help         # the other options
+linux/build.sh                  # debug, into .build-linux/<machine>/debug
+linux/build.sh release          # release, into .build-linux/<machine>/release
+linux/build.sh --help           # the other options
 ```
+
+On a Mac, `linux/build-and-test.sh` runs it in an agent-vm box or a Docker
+container, and the test suites after it.
 
 The script prints where the products went and the runtime search list built
 into them. Copy `replay`, `dispatch`, `fingerprint` and `gate` to a folder on

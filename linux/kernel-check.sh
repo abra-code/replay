@@ -99,7 +99,7 @@ BUILD_DIR="$REPO_DIR/.build-linux/aarch64/$CONFIG"
 
 if [ "$BUILD" -eq 1 ]; then
     echo "== Building ($CONFIG) in Docker"
-    "$LINUX_DIR/docker.sh" --arch aarch64 ./build-linux.sh "$CONFIG"
+    "$LINUX_DIR/docker.sh" --arch aarch64 linux/build.sh "$CONFIG"
     status=$?
     if [ "$status" -ne 0 ]; then
         echo "Error: the Docker build failed with status $status" >&2

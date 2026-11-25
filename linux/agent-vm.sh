@@ -4,7 +4,7 @@
 #
 # Usage: linux/agent-vm.sh [--box NAME] [--setup] [command [args...]]
 #   Default command: an interactive login shell in the box.
-#   Example: linux/agent-vm.sh ./build-linux.sh debug --scratch-path /home/agent/build-linux
+#   Example: linux/agent-vm.sh linux/build.sh debug --scratch-path /home/agent/build-linux
 #   --setup  make what is missing: the Debian 13 image replay-debian13, the image
 #            replay-build from it (linux/agent-vm/swift-toolchain/recipe.json), and the box
 #   --box    the box to use (default replay-linux; created from replay-build by --setup)

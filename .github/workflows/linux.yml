@@ -80,7 +80,7 @@ jobs:
           persist-credentials: false
 
       - name: Build
-        run: ./build-linux.sh ${{ matrix.config }}
+        run: linux/build.sh ${{ matrix.config }}
 
       - name: Test
         run: test/test_all.sh ".build-linux/$(/usr/bin/uname -m)/${{ matrix.config }}"

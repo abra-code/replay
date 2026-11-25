@@ -3,7 +3,7 @@
 #
 # Usage: linux/docker.sh [--arch aarch64|x86_64] [--seccomp-unconfined] [command [args...]]
 #   Default command: an interactive bash.
-#   Example: linux/docker.sh ./build-linux.sh release
+#   Example: linux/docker.sh linux/build.sh release
 #
 # The image is built from linux/Dockerfile on top of the Swift image pinned in
 # linux/swift-image, and tagged replay-linux-test:<arch>. Docker's layer cache makes the

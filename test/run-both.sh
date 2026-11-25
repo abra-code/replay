@@ -44,11 +44,11 @@ fi
 
 host_os="$(/usr/bin/uname -s)"
 if [ "$host_os" != "Darwin" ]; then
-    echo "error: run this on a Mac; on Linux run ./build-linux.sh and test/test_all.sh directly" >&2
+    echo "error: run this on a Mac; on Linux run linux/build.sh and test/test_all.sh directly" >&2
     exit 2
 fi
 
-# build-linux.sh takes the configuration in lower case.
+# linux/build.sh takes the configuration in lower case.
 if [ "$CONFIG" = "Debug" ]; then
     LINUX_CONFIG="debug"
 else
@@ -89,7 +89,7 @@ run_linux() {
         if [ "$machine" = "arm64" ]; then
             machine="aarch64"
         fi
-        # docker.sh mounts the repository at /src; build-linux.sh then builds into
+        # docker.sh mounts the repository at /src; linux/build.sh then builds into
         # .build-linux/<machine> there.
         build_dir="/src/.build-linux/$machine/$LINUX_CONFIG"
         scratch_args=""
@@ -101,9 +101,9 @@ run_linux() {
         scratch_args="--scratch-path /home/agent/build-linux"
     fi
 
-    echo "=== Linux: ./build-linux.sh $LINUX_CONFIG $scratch_args"
+    echo "=== Linux: linux/build.sh $LINUX_CONFIG $scratch_args"
     # scratch_args is empty or two words, so it is left unquoted on purpose.
-    "$runner" ./build-linux.sh "$LINUX_CONFIG" $scratch_args
+    "$runner" linux/build.sh "$LINUX_CONFIG" $scratch_args
     local status=$?
     if [ "$status" -ne 0 ]; then
         echo "error: the Linux build failed (status $status)" >&2

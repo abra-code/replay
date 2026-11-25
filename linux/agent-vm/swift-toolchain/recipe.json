@@ -1,7 +1,7 @@
 {
   "version": 1,
   "guest": "linux",
-  "description": "The swift.org Swift toolchain in /usr, and the packages replay's Linux build and tests need (build-linux.sh, test suite). For Debian 13 images. The defaults match the Docker pin in linux/swift-image; for another version or platform set swift, platform and sha256 together. A box of it needs no network: the build reads nothing from the internet.",
+  "description": "The swift.org Swift toolchain in /usr, and the packages replay's Linux build and tests need (linux/build.sh, test suite). For Debian 13 images. The defaults match the Docker pin in linux/swift-image; for another version or platform set swift, platform and sha256 together. A box of it needs no network: the build reads nothing from the internet.",
   "parameters": {
     "swift": {
       "description": "The Swift release, e.g. 6.2.4 (keep it equal to linux/swift-image)",

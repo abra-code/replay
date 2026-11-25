@@ -14,7 +14,7 @@
 #   2. Installs (once) the swift.org toolchain pinned below into /usr, with the script of the
 #      agent-vm recipe (linux/agent-vm/swift-toolchain/files/install-swift.sh), checked
 #      against its SHA-256. Ubuntu 24.04 is the system release builds are made on (plan D3).
-#   3. For each configuration: builds the tools (build-linux.sh, .build-linux/x86_64/<config>),
+#   3. For each configuration: builds the tools (linux/build.sh, .build-linux/x86_64/<config>),
 #      then runs test_sandbox_linux.sh and test_all.sh (which includes
 #      test_crc32c_variants.sh, the x86_64 CRC32C variants this CPU can run).
 #
@@ -171,7 +171,7 @@ for config in $CONFIGS; do
 
     echo ""
     echo "== [$config] Building"
-    "$REPO_DIR/build-linux.sh" "$config"
+    "$REPO_DIR/linux/build.sh" "$config"
     status=$?
     record "$status" "[$config] build"
     if [ "$status" -ne 0 ] || [ ! -x "$BUILD_DIR/replay" ]; then

@@ -163,7 +163,7 @@ build_and_test_here() {
     esac
     echo ""
     echo "== $config: building in $scratch"
-    "$REPO_DIR/build-linux.sh" "$config" --scratch-path "$scratch"
+    "$REPO_DIR/linux/build.sh" "$config" --scratch-path "$scratch"
     local build_status=$?
     if [ "$build_status" -ne 0 ]; then
         echo "Error: the $config build failed with status $build_status" >&2

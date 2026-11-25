@@ -8,7 +8,7 @@
 #
 # Usage: linux/runtime-check.sh [--arch aarch64|x86_64] [debug|release] [debian|fedora]...
 #   Default: this machine's architecture, debug, both distributions.
-#   Build first: linux/docker.sh ./build-linux.sh [debug|release]
+#   Build first: linux/docker.sh linux/build.sh [debug|release]
 
 ARCH=""
 CONFIG="debug"
@@ -85,7 +85,7 @@ REPO_DIR="$(CDPATH= cd -P -- "$LINUX_DIR/.." && pwd)"
 # Check only the per-architecture folder here; the inner script checks each tool, inside
 # the container where the binaries run.
 if [ ! -d "$REPO_DIR/.build-linux/$ARCH" ]; then
-    echo "Error: $REPO_DIR/.build-linux/$ARCH not found. Build first: linux/docker.sh --arch $ARCH ./build-linux.sh $CONFIG" >&2
+    echo "Error: $REPO_DIR/.build-linux/$ARCH not found. Build first: linux/docker.sh --arch $ARCH linux/build.sh $CONFIG" >&2
     exit 1
 fi
 

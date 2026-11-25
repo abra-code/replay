@@ -127,7 +127,7 @@ if [ -z "$SCRATCH_PATH" ]; then
 fi
 BIN_DIR="$SCRATCH_PATH/release"
 if [ "$BUILD" -eq 1 ]; then
-    "$REPO_DIR/build-linux.sh" release --scratch-path "$SCRATCH_PATH"
+    "$REPO_DIR/linux/build.sh" release --scratch-path "$SCRATCH_PATH"
     status=$?
     if [ "$status" -ne 0 ]; then
         echo "Error: the release build failed with status $status" >&2

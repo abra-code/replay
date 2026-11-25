@@ -1,8 +1,8 @@
 #!/bin/bash
 # Build the four replay tools on Linux with Swift Package Manager.
 #
-# Runs on Linux only: inside the test container (linux/docker.sh ./build-linux.sh) or on a
-# Linux machine with the Swift toolchain pinned in linux/swift-image. Products go to
+# Runs on Linux only, with the Swift toolchain pinned in linux/swift-image. From a Mac,
+# linux/build-and-test.sh runs it in an agent-vm box or a Docker container. Products go to
 # .build-linux/<machine>/<config>/ (replay, dispatch, fingerprint, gate).
 #
 # The Linux-only compiler and linker flags live here, not in Package.swift, because SwiftPM
@@ -92,20 +92,21 @@ esac
 
 OS_NAME="$(/usr/bin/uname -s)"
 if [ "$OS_NAME" != "Linux" ]; then
-    echo "Error: build-linux.sh runs on Linux only (this is $OS_NAME)." >&2
-    echo "On macOS, run it in the test container: linux/docker.sh ./build-linux.sh" >&2
+    echo "Error: linux/build.sh runs on Linux only (this is $OS_NAME)." >&2
+    echo "On macOS, build and test in an agent-vm box or a Docker container: linux/build-and-test.sh" >&2
     exit 1
 fi
 
-SCRIPT_DIR="$(CDPATH= cd -P -- "$(/usr/bin/dirname -- "$0")" && pwd)"
-if [ -z "$SCRIPT_DIR" ] || [ ! -f "$SCRIPT_DIR/Package.swift" ]; then
-    echo "Error: cannot find Package.swift next to build-linux.sh" >&2
+LINUX_DIR="$(CDPATH= cd -P -- "$(/usr/bin/dirname -- "$0")" && pwd)"
+REPO_DIR="$(CDPATH= cd -P -- "$LINUX_DIR/.." && pwd)"
+if [ -z "$LINUX_DIR" ] || [ -z "$REPO_DIR" ] || [ ! -f "$REPO_DIR/Package.swift" ]; then
+    echo "Error: cannot find Package.swift above linux/" >&2
     exit 1
 fi
 
 if [ -z "$SCRATCH_PATH" ]; then
     MACHINE="$(/usr/bin/uname -m)"
-    SCRATCH_PATH="$SCRIPT_DIR/.build-linux/$MACHINE"
+    SCRATCH_PATH="$REPO_DIR/.build-linux/$MACHINE"
 fi
 
 if [ ! -x "$SWIFT" ]; then
@@ -159,7 +160,7 @@ fi
 NON_ASCII_CFSTR="$(LC_ALL=C /usr/bin/grep -rnE \
     --include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' --include='*.mm' \
     --exclude-dir=.git --exclude-dir=.build --exclude-dir=.build-linux --exclude-dir=build --exclude-dir=private \
-    'CFSTR\("([^"\\]|\\[^uUx])*([^ -~]|\\[uUx])' "$SCRIPT_DIR")"
+    'CFSTR\("([^"\\]|\\[^uUx])*([^ -~]|\\[uUx])' "$REPO_DIR")"
 status=$?
 if [ "$status" -eq 0 ]; then
     echo "Error: non-ASCII text in CFSTR literals, which is broken on Linux (use a string created at run time):" >&2
@@ -171,7 +172,7 @@ if [ "$status" -ne 1 ]; then
     exit 1
 fi
 
-SWIFT_ARGS=(build -c "$CONFIG" --package-path "$SCRIPT_DIR" --scratch-path "$SCRATCH_PATH")
+SWIFT_ARGS=(build -c "$CONFIG" --package-path "$REPO_DIR" --scratch-path "$SCRATCH_PATH")
 if [ -n "$JOBS" ]; then
     SWIFT_ARGS+=(-j "$JOBS")
 fi
