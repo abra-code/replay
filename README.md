@@ -232,9 +232,16 @@ The help texts below say where Linux behaves differently; in short:
 For contributors: a `CFSTR` constant with non-ASCII text has the wrong length
 on Linux (it counts UTF-8 bytes), so non-ASCII strings must be created at run
 time. The `linux/` folder has the development and test setups:
+- `linux/build-and-test.sh [debug|release|both]`: builds and runs the suites
+  in whichever Linux environment is at hand. On a Mac, an agent-vm box when
+  agent-vm is installed, else a Docker container (Colima, a Lima machine made
+  from `template:docker`, Docker Desktop); on Linux, in place. `--with
+  agent-vm|docker` picks one. `--arch x86_64` runs in Docker, emulated on
+  Apple silicon.
 - `linux/docker.sh`: a container with the pinned toolchain and this
   repository at `/src`.
-- `linux/agent-vm.sh`: an agent-vm virtual machine.
+- `linux/agent-vm.sh`: an agent-vm virtual machine (Debian 13 on ARM, the
+  pinned swift.org toolchain); `linux/agent-vm.sh --setup` makes it.
 - `linux/kernel-check.sh`: the suites on a newer kernel than Docker's, in an
   agent-vm machine.
 - `linux/runtime-check.sh`: the built tools on the Debian and Fedora runtimes.
