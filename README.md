@@ -305,8 +305,9 @@ Usage:
 
 Options:
 
-  -k, --playlist-key KEY   Use a key in root dictionary of the playlist file for action steps array.
-                     If absent, the playlist file root container is assumed to be an array of action steps.
+  -k, --playlist-key KEY   Run the playlist (an array of action steps) stored under KEY in the root dictionary
+                     of the playlist file. Required when the root is a dictionary, as in the examples below.
+                     Without it the root must be an array of action steps.
                      The key may be specified multiple times to execute more than one playlist in the file.
   -s, --serial       Execute actions serially in the order specified in the playlist (slow).
                      Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast).
@@ -417,6 +418,14 @@ Playlist format:
   More than one playlist may be present in a root dictionary. For example, you may want preparation steps
   in one playlist to be executed by "replay" invocation with --serial option
   and have another concurrent playlist with the bulk of work executed by a second "replay" invocation
+
+    replay --playlist-key "Shepherd Playlist" shepherd.json   (root: {"Shepherd Playlist": [ steps ]})
+    replay steps.json                                       (root: [ steps ])
+
+  A root dictionary without --playlist-key, a key the file does not have, a playlist with items but no
+  action steps, and a file that cannot be read or parsed are errors: "replay" says which (naming the
+  playlists the file holds, if any) and exits with a failure status. An empty playlist is not an error:
+  nothing is run.
 
 Environment variables expansion:
 
@@ -731,7 +740,7 @@ Param interpretation per action
 [execute]+/bin/sh+-c+/bin/ls ${HOME} | /usr/bin/grep ".txt"
 - [echo] requires one string after separator. Supported modifiers are raw=true and newline=false
 
-Example JSON playlist:
+Example JSON playlist (a root dictionary holding one playlist, "Shepherd Playlist"):
 
 {
   "Shepherd Playlist": [
@@ -762,7 +771,7 @@ Example JSON playlist:
   ],
 }
 
-Example plist playlist:
+Example plist playlist (the same, as a property list):
 
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -810,6 +819,7 @@ Example plist playlist:
 
 Example execution:
 
+  replay --dry-run --playlist-key "Shepherd Playlist" shepherd.json
   replay --dry-run --playlist-key "Shepherd Playlist" shepherd.plist
 
 In the above example playlist some output files are inputs to later actions.

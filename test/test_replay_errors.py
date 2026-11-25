@@ -4,7 +4,8 @@ test_replay_errors.py — tests for error handling and lesser-covered features.
 
 Scenarios:
   1. --max-tasks with stdin streaming — verify concurrency limit doesn't drop tasks
-  2. --playlist-key with a missing key — error message printed, graceful exit
+  2. the playlist file and --playlist-key: a dictionary root needs a key; a missing key, a key for an
+     array root and an unreadable file fail; an empty playlist does not
   3. create file blob (valid base64) — file created with correct binary content
   4. create file blob (streaming format, blob=true) — same via pipe
   5. edit regex back-references \\1/\\2 in replacement string
@@ -99,33 +100,88 @@ def test_max_tasks_streaming() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Scenario 2: --playlist-key with a key that does not exist
+# Scenario 2: the playlist file and --playlist-key
 # ---------------------------------------------------------------------------
 
-def test_missing_playlist_key() -> None:
-    print("\n--- Scenario 2: --playlist-key with non-existent key ---")
-
-    playlist_dict = {
-        "Steps": [{"action": "echo", "text": "hello"}]
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(playlist_dict, f)
+def run_playlist_file(content: bytes, suffix: str, args: list) -> subprocess.CompletedProcess:
+    """Runs replay on a playlist file holding content, with args before the path."""
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=suffix, delete=False) as f:
+        f.write(content)
         path = f.name
     try:
-        result = subprocess.run(
-            [str(REPLAY), "--playlist-key", "NonExistentKey", path],
-            capture_output=True, text=True, timeout=10,
-        )
+        return subprocess.run([str(REPLAY)] + list(args) + [path],
+                              capture_output=True, text=True, timeout=10)
     finally:
         os.unlink(path)
 
-    # Current behavior: LogError to stderr, exits 0 (treated as "nothing to run")
-    check("error message mentions the missing key name",
-          "NonExistentKey" in result.stderr,
-          f"stderr: {result.stderr[:200]}")
-    check("error message says 'Invalid or empty playlist'",
-          "Invalid" in result.stderr or "empty" in result.stderr or "No steps" in result.stderr,
-          f"stderr: {result.stderr[:200]}")
+
+def test_playlist_file_and_key() -> None:
+    print("\n--- Scenario 2: the playlist file and --playlist-key ---")
+    import plistlib
+
+    steps = [{"action": "echo", "text": "hello from Steps"}]
+    other = [{"action": "echo", "text": "hello from Other"}]
+    dict_json = json.dumps({"Steps": steps, "Other": other, "Note": "not a playlist"}).encode()
+    dict_plist = plistlib.dumps({"Steps": steps, "Other": other})
+    array_json = json.dumps(steps).encode()
+
+    def report(r):
+        return f"rc={r.returncode} stdout={r.stdout[:150]!r} stderr={r.stderr[:300]!r}"
+
+    r = run_playlist_file(dict_json, ".json", ["--playlist-key", "Steps"])
+    check("a key of a root dictionary runs its playlist (exit 0)",
+          r.returncode == 0 and "hello from Steps" in r.stdout and "hello from Other" not in r.stdout, report(r))
+
+    r = run_playlist_file(dict_json, ".json", ["--playlist-key", "NonExistentKey"])
+    check("a missing key fails", r.returncode != 0, report(r))
+    check("the message names the missing key and the file's playlists, not other keys",
+          "NonExistentKey" in r.stderr and '"Other", "Steps"' in r.stderr and "Note" not in r.stderr, report(r))
+
+    for label, content, suffix in (("JSON", dict_json, ".json"), ("plist", dict_plist, ".plist")):
+        r = run_playlist_file(content, suffix, [])
+        check(f"{label}: a root dictionary without --playlist-key fails and runs nothing",
+              r.returncode != 0 and "hello" not in r.stdout, report(r))
+        check(f"{label}: the message says to pass --playlist-key and lists the playlists",
+              "--playlist-key" in r.stderr and '"Other", "Steps"' in r.stderr, report(r))
+
+    r = run_playlist_file(array_json, ".json", ["--playlist-key", "Steps"])
+    check("a key for a root array fails and says to run it without one",
+          r.returncode != 0 and "without --playlist-key" in r.stderr, report(r))
+
+    r = run_playlist_file(array_json, ".json", [])
+    check("a root array runs without a key (exit 0)",
+          r.returncode == 0 and "hello from Steps" in r.stdout, report(r))
+
+    r = run_playlist_file(b"[]", ".json", [])
+    check("an empty playlist is not an error (exit 0) and says it is empty",
+          r.returncode == 0 and "empty" in r.stderr, report(r))
+
+    r = run_playlist_file(json.dumps({"Steps": []}).encode(), ".json", ["--playlist-key", "Steps"])
+    check("an empty playlist under a key is not an error (exit 0)", r.returncode == 0, report(r))
+
+    r = run_playlist_file(b'["a", "b"]', ".json", [])
+    check("a root array with items but no action step fails and says so",
+          r.returncode != 0 and "2 item(s) but no action step" in r.stderr, report(r))
+
+    r = run_playlist_file(b'{"S": ["a"]}', ".json", ["--playlist-key", "S"])
+    check("a playlist under a key with items but no action step fails",
+          r.returncode != 0 and "1 item(s) but no action step" in r.stderr, report(r))
+
+    r = run_playlist_file(b'{"A": [], "A": [], "B": []}', ".json", [])
+    check("a key repeated in the JSON object is listed once",
+          r.returncode != 0 and '("A", "B")' in r.stderr, report(r))
+
+    r = run_playlist_file(b'[ {"action": "echo", "text": "x" ', ".json", [])
+    check("a file that does not parse fails and says what it expected",
+          r.returncode != 0 and "is not a JSON or plist file" in r.stderr, report(r))
+
+    r = run_playlist_file(dict_json, ".json", ["--playlist-key", "Missing", "--playlist-key", "Steps"])
+    check("without --stop-on-error a missing key fails the run, the other playlist still runs",
+          r.returncode != 0 and "hello from Steps" in r.stdout, report(r))
+
+    r = run_playlist_file(dict_json, ".json", ["--stop-on-error", "--playlist-key", "Missing", "--playlist-key", "Steps"])
+    check("with --stop-on-error a missing key stops before the next playlist",
+          r.returncode != 0 and "hello from Steps" not in r.stdout, report(r))
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +344,7 @@ if not REPLAY.exists():
 print(f"Using replay: {REPLAY}")
 
 test_max_tasks_streaming()
-test_missing_playlist_key()
+test_playlist_file_and_key()
 test_blob_valid_json()
 test_blob_valid_streaming()
 test_edit_regex_backreferences()

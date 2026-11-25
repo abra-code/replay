@@ -4,6 +4,7 @@
 #include "CFArr.h"
 #include "CFDict.h"
 #include "CFStr.h"
+#include <algorithm>
 #include <filesystem>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -94,6 +95,111 @@ static std::vector<ActionStep> json_steps_from_array(Json::Val arr,
 // ---------------------------------------------------------------------------
 // PlaylistDoc public accessors
 // ---------------------------------------------------------------------------
+
+PlaylistDoc::RootKind PlaylistDoc::root_kind() const noexcept
+{
+    if (cfRoot != nullptr)
+    {
+        if (CFType<CFArrayRef>::DynamicCast(cfRoot.Get()) != nullptr)
+            return RootKind::Array;
+        if (CFType<CFDictionaryRef>::DynamicCast(cfRoot.Get()) != nullptr)
+            return RootKind::Dictionary;
+        return RootKind::None;
+    }
+    if (jsonDoc != nullptr && jsonDoc->valid())
+    {
+        auto root = jsonDoc->root();
+        if (root.is_arr())
+            return RootKind::Array;
+        if (root.is_obj())
+            return RootKind::Dictionary;
+    }
+    return RootKind::None;
+}
+
+std::vector<std::string> PlaylistDoc::playlist_keys() const
+{
+    std::vector<std::string> keys;
+    if (cfRoot != nullptr)
+    {
+        CFDictionaryRef dict = CFType<CFDictionaryRef>::DynamicCast(cfRoot.Get());
+        if (dict == nullptr)
+            return keys;
+        CFIndex count = CFDictionaryGetCount(dict);
+        std::vector<const void*> dictKeys((size_t)count);
+        std::vector<const void*> dictValues((size_t)count);
+        CFDictionaryGetKeysAndValues(dict, dictKeys.data(), dictValues.data());
+        for (CFIndex i = 0; i < count; i++)
+        {
+            CFStringRef key = CFType<CFStringRef>::DynamicCast((CFTypeRef)dictKeys[(size_t)i]);
+            if ((key != nullptr) && (CFType<CFArrayRef>::DynamicCast((CFTypeRef)dictValues[(size_t)i]) != nullptr))
+                keys.push_back(CFStr::ToString(key));
+        }
+    }
+    else if (jsonDoc != nullptr && jsonDoc->valid())
+    {
+        auto root = jsonDoc->root();
+        if (!root.is_obj())
+            return keys;
+        Json::ObjIter iter(root);
+        while (iter.has_next())
+        {
+            auto key = iter.next_key();
+            auto name = key.get_str();
+            if (name.has_value() && Json::ObjIter::val(key).is_arr())
+                keys.emplace_back(*name);
+        }
+    }
+    // A JSON object may repeat a key (yyjson keeps both); name each playlist once.
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    return keys;
+}
+
+bool PlaylistDoc::has_playlist(const std::string& key) const
+{
+    if (cfRoot != nullptr)
+    {
+        CFDictionaryRef dict = CFType<CFDictionaryRef>::DynamicCast(cfRoot.Get());
+        if (dict == nullptr)
+            return false;
+        CFStr cfKey(key);
+        return CFType<CFArrayRef>::DynamicCast(CFDictionaryGetValue(dict, cfKey.Get())) != nullptr;
+    }
+    if (jsonDoc != nullptr && jsonDoc->valid())
+    {
+        auto root = jsonDoc->root();
+        return root.is_obj() && root.obj_get(key).is_arr();
+    }
+    return false;
+}
+
+size_t PlaylistDoc::item_count(const std::string* key) const
+{
+    if (cfRoot != nullptr)
+    {
+        CFArrayRef arr = nullptr;
+        if (key == nullptr)
+            arr = CFType<CFArrayRef>::DynamicCast(cfRoot.Get());
+        else
+        {
+            CFDictionaryRef dict = CFType<CFDictionaryRef>::DynamicCast(cfRoot.Get());
+            if (dict != nullptr)
+            {
+                CFStr cfKey(*key);
+                arr = CFType<CFArrayRef>::DynamicCast(CFDictionaryGetValue(dict, cfKey.Get()));
+            }
+        }
+        return (arr != nullptr) ? (size_t)CFArrayGetCount(arr) : 0;
+    }
+    if (jsonDoc != nullptr && jsonDoc->valid())
+    {
+        auto root = jsonDoc->root();
+        auto arr = (key == nullptr) ? root : (root.is_obj() ? root.obj_get(*key) : Json::Val{});
+        return arr.is_arr() ? arr.arr_size() : 0;
+    }
+    return 0;
+}
 
 std::vector<ActionStep> PlaylistDoc::root_steps() const
 {
@@ -243,8 +349,10 @@ PlaylistDoc LoadPlaylist(const char* playlistPath, ReplayContext* context)
         }
         else
         {
-            context->lastError.set("error: unknown or invalid playlist type", 1);
-            LogError("error: unknown or invalid playlist type. Only .plist and .json playlists are supported\n");
+            std::string message = std::string("error: playlist file \"") + absPath +
+                "\" is not a JSON or plist file with an array or a dictionary at its root";
+            context->lastError.set(message, 1);
+            LogError("%s\n", message.c_str());
         }
     }
 

@@ -109,8 +109,9 @@ DisplayHelp(void)
 		"\n"
 		"Options:\n"
 		"\n"
-		"  -k, --playlist-key KEY   Use a key in root dictionary of the playlist file for action steps array.\n"
-		"                     If absent, the playlist file root container is assumed to be an array of action steps.\n"
+		"  -k, --playlist-key KEY   Run the playlist (an array of action steps) stored under KEY in the root dictionary\n"
+		"                     of the playlist file. Required when the root is a dictionary, as in the examples below.\n"
+		"                     Without it the root must be an array of action steps.\n"
 		"                     The key may be specified multiple times to execute more than one playlist in the file.\n"
 		"  -s, --serial       Execute actions serially in the order specified in the playlist (slow).\n"
 		"                     Default behavior is to execute actions concurrently, if possible, after dependency analysis (fast).\n"
@@ -224,6 +225,14 @@ DisplayHelp(void)
 		"  More than one playlist may be present in a root dictionary. For example, you may want preparation steps\n"
 		"  in one playlist to be executed by \"replay\" invocation with --serial option\n"
 		"  and have another concurrent playlist with the bulk of work executed by a second \"replay\" invocation\n"
+		"\n"
+		"    replay --playlist-key \"Shepherd Playlist\" shepherd.json   (root: {\"Shepherd Playlist\": [ steps ]})\n"
+		"    replay steps.json                                       (root: [ steps ])\n"
+		"\n"
+		"  A root dictionary without --playlist-key, a key the file does not have, a playlist with items but no\n"
+		"  action steps, and a file that cannot be read or parsed are errors: \"replay\" says which (naming the\n"
+		"  playlists the file holds, if any) and exits with a failure status. An empty playlist is not an error:\n"
+		"  nothing is run.\n"
 		"\n"
 	);
 
@@ -558,7 +567,7 @@ DisplayHelp(void)
 	);
 
 	printf(
-		"Example JSON playlist:\n"
+		"Example JSON playlist (a root dictionary holding one playlist, \"Shepherd Playlist\"):\n"
 		"\n"
 		"{\n"
 		"  \"Shepherd Playlist\": [\n"
@@ -592,7 +601,7 @@ DisplayHelp(void)
 	);
 	
 	printf(
-		"Example plist playlist:\n"
+		"Example plist playlist (the same, as a property list):\n"
 		"\n"
 		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
 		"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
@@ -643,6 +652,7 @@ DisplayHelp(void)
 	printf(
 		"Example execution:\n"
 		"\n"
+		"  replay --dry-run --playlist-key \"Shepherd Playlist\" shepherd.json\n"
 		"  replay --dry-run --playlist-key \"Shepherd Playlist\" shepherd.plist\n"
 		"\n"
 		"In the above example playlist some output files are inputs to later actions.\n"
@@ -712,6 +722,21 @@ ProcessPlaylist(const std::vector<ActionStep>& playlist, ReplayContext *context)
 	}
 
 	context->outputSerializer->flush();
+}
+
+// The playlists a root dictionary holds, quoted and comma separated, for an error message;
+// empty when it holds none.
+static std::string
+QuotedPlaylistKeys(const PlaylistDoc& doc)
+{
+	std::string text;
+	for (const auto& key : doc.playlist_keys())
+	{
+		if (!text.empty())
+			text += ", ";
+		text += "\"" + key + "\"";
+	}
+	return text;
 }
 
 
@@ -1246,20 +1271,48 @@ int main(int argc, const char * argv[])
 	{
 		StreamActionsFromStdIn(&context);
 	}
+	else if (!playlistDoc.valid())
+	{
+		// LoadPlaylist has said why the file could not be read.
+		safe_exit(EXIT_FAILURE);
+	}
 	else if (!playlistKeys.empty())
 	{
-		if (!playlistDoc.valid())
-		{
-			LogError("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
-			safe_exit(EXIT_SUCCESS);
-		}
-
+		// A key the file does not have is an error, so the run ends with a failure status;
+		// with --stop-on-error no later playlist runs.
 		for (const auto& key : playlistKeys)
 		{
+			if (!playlistDoc.has_playlist(key))
+			{
+				std::string message = "error: playlist file \"" + std::string(playlistPath) +
+					"\" has no playlist named \"" + key + "\"";
+				if (playlistDoc.root_kind() == PlaylistDoc::RootKind::Array)
+					message += ": its root is an array of action steps, run it without --playlist-key";
+				else
+				{
+					std::string keys = QuotedPlaylistKeys(playlistDoc);
+					message += keys.empty() ? ": it holds no playlist (an array of action steps under a key)"
+					                        : ": its playlists are " + keys;
+				}
+				LogError("%s\n", message.c_str());
+				context.lastError.set(message);
+				if (context.stopOnError)
+					break;
+				continue;
+			}
 			auto steps = playlistDoc.steps_for_key(key);
 			if (steps.empty())
 			{
-				LogError("Invalid or empty playlist for key \"%s\". No steps to replay\n", key.c_str());
+				size_t items = playlistDoc.item_count(&key);
+				if (items == 0)
+				{
+					LogError("Playlist \"%s\" in \"%s\" is empty: no steps to replay\n", key.c_str(), playlistPath);
+					continue;
+				}
+				std::string message = "error: playlist \"" + key + "\" in \"" + std::string(playlistPath) + "\" holds " +
+					std::to_string(items) + " item(s) but no action step: each step is a dictionary";
+				LogError("%s\n", message.c_str());
+				context.lastError.set(message);
 				if (context.stopOnError)
 					break;
 				continue;
@@ -1268,18 +1321,32 @@ int main(int argc, const char * argv[])
 			ProcessPlaylist(steps, &context);
 		}
 	}
+	else if (playlistDoc.root_kind() == PlaylistDoc::RootKind::Dictionary)
+	{
+		// The usual form: a dictionary of named playlists, which needs --playlist-key.
+		std::string keys = QuotedPlaylistKeys(playlistDoc);
+		if (keys.empty())
+			LogError("error: playlist file \"%s\" has a dictionary at its root but no playlist in it "
+			         "(an array of action steps under a key)\n", playlistPath);
+		else
+			LogError("error: playlist file \"%s\" has a dictionary of playlists at its root: name the one to run "
+			         "with --playlist-key (%s)\n", playlistPath, keys.c_str());
+		safe_exit(EXIT_FAILURE);
+	}
 	else
 	{
-		if (!playlistDoc.valid())
-		{
-			LogError("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
-			safe_exit(EXIT_SUCCESS);
-		}
 		auto steps = playlistDoc.root_steps();
 		if (steps.empty())
 		{
-			LogError("Invalid or empty playlist \"%s\". No steps to replay\n", playlistPath);
-			safe_exit(EXIT_SUCCESS);
+			size_t items = playlistDoc.item_count(nullptr);
+			if (items == 0)
+			{
+				LogError("Playlist \"%s\" is empty: no steps to replay\n", playlistPath);
+				safe_exit(EXIT_SUCCESS);
+			}
+			LogError("error: playlist \"%s\" holds %zu item(s) but no action step: each step is a dictionary\n",
+			         playlistPath, items);
+			safe_exit(EXIT_FAILURE);
 		}
 		ProcessPlaylist(steps, &context);
 	}
