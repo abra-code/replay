@@ -138,6 +138,14 @@ list_xattr_names() {
     fi
 }
 
+# Sets a file's modification time well into the past. A hash is stored (the fingerprint
+# xattr) only for a file whose last change is old enough to be told apart from a later
+# one (up to 2 seconds, depending on the file system), so a test that expects the
+# xattr written settles its file first.
+settle_file() {
+    /usr/bin/touch -t 202601010000 "$@"
+}
+
 source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_basic_tests.sh"
 source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_xattr_tests.sh"
 source "${SCRIPT_DIR}/test_fingerprint_functions/fingerprint_glob_tests.sh"
@@ -222,6 +230,7 @@ test_symlinks
 test_xattr_caching
 test_xattr_refresh
 test_xattr_clear
+test_xattr_recent_file
 test_xattr_not_owned
 test_hash_algorithms
 test_fingerprint_stability

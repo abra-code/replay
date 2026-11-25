@@ -12,6 +12,7 @@ Both routes follow symlinks, as /usr/bin/xattr does without -s.
 import os
 import subprocess
 import sys
+import time
 
 IS_LINUX = sys.platform.startswith("linux")
 PLATFORM_PREFIX = "user." if IS_LINUX else ""
@@ -61,3 +62,16 @@ def get_xattr(path, name: str):
         return bytes.fromhex(proc.stdout.replace(" ", "").replace("\n", ""))
     except ValueError:
         return None
+
+
+def settle(*paths) -> None:
+    """Sets each file's modification time an hour into the past. replay stores a
+    file's hash (in the hash store or the fingerprint xattr) only when its last change
+    is old enough to be told apart from a later one (up to 2 seconds, depending on the
+    file system), so a test that expects a freshly written file stored settles it
+    first. The change time (ctime) cannot be set back: replay's hash store, which ages
+    it too, still waits for that. Not symlinks themselves: utime follows them, which is
+    what a test of the target wants."""
+    t = time.time() - 3600
+    for p in paths:
+        os.utime(str(p), (t, t))

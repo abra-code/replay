@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <sys/xattr.h>
 #include "Platform.h"
+#include <time.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -26,7 +27,9 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 
 #include "blake3.h"
 #include "fingerprint.h"
@@ -159,6 +162,119 @@ bool compute_file_hash(const std::string &path, FileInfo &info)
 
     close(fd);
     return hashed;
+}
+
+// A stored hash (the fingerprint xattr, or replay's hash store) is trusted while the
+// file's recorded times and size match. File times move in steps, and a file rewritten at
+// the same size within the step of its last change keeps the same times, so a hash read
+// in that step and stored would be handed back for the new content. A hash is therefore
+// stored only when the file's last change is old enough to be in an earlier step than
+// any change after the read; a newer file is hashed again next time and stored then. A
+// change time in the future never qualifies. How old is old enough depends on the file
+// system (platform_file_time_step):
+//   Fine    APFS, stamped from the precise clock: 1 ms.
+//   Tick    Linux ext4 and tmpfs, stamped from the coarse clock: two of its steps (8 ms
+//           at 250 Hz, 20 ms at 100 Hz), measured against that same clock. ext2/3/4
+//           with small inodes keep whole seconds; a change time with no fraction of a
+//           second is taken for that and gets the Coarse age.
+//   Coarse anything else (HFS+ 1 s, FAT 2 s, network and FUSE file systems): 2 s.
+inline constexpr int64_t kMinAgeToStoreHashFineNs = 1000000LL;
+inline constexpr int64_t kMinAgeToStoreHashCoarseNs = 2000000000LL;
+
+// The clock file times are stamped from. Take it before reading the content whose hash
+// may be stored.
+inline int64_t file_clock_ns() noexcept
+{
+    return platform_file_clock_ns();
+}
+
+// The time step of the file system holding path, looked up once per device.
+inline PlatformTimeStep file_time_step(const std::string& path, const FileInfo& info) noexcept
+{
+    // Never destroyed: a worker thread may still be hashing while exit() runs the
+    // destructors of statics.
+    static std::mutex& steps_mutex = *new std::mutex;
+    static std::unordered_map<dev_t, PlatformTimeStep>& steps = *new std::unordered_map<dev_t, PlatformTimeStep>;
+    try
+    {
+        {
+            std::lock_guard<std::mutex> guard(steps_mutex);
+            auto found = steps.find(info.dev);
+            if (found != steps.end())
+                return found->second;
+        }
+        // statfs follows a symbolic link, and its target can be on another file system
+        // than the link, whose device keys this cache. The directory holding the link is
+        // on the link's own.
+        std::string where = path;
+        if (info.is_symlink())
+        {
+            size_t slash = path.find_last_of('/');
+            if (slash == std::string::npos)
+                where = ".";
+            else
+                where = path.substr(0, (slash == 0) ? 1 : slash);
+        }
+        PlatformTimeStep step = platform_file_time_step(where.c_str());
+        std::lock_guard<std::mutex> guard(steps_mutex);
+        steps.emplace(info.dev, step);
+        return step;
+    }
+    catch (...)
+    {
+        return PlatformTimeStep::Coarse;
+    }
+}
+
+// A shorter age in milliseconds from REPLAY_HASH_STORE_TEST_MIN_AGE_MS, at most 2000, or
+// -1 when it is not set: the test suites that check the hash store's format set 0, so
+// that the files a run has just written are stored by that run; those that check the
+// rule itself can set 2000 for the Coarse age on every file system.
+inline int64_t test_min_age_to_store_hash_ns() noexcept
+{
+    static const int64_t min_age_ns = []() noexcept -> int64_t {
+        const char* text = getenv("REPLAY_HASH_STORE_TEST_MIN_AGE_MS");
+        if (text != nullptr)
+        {
+            char* end = nullptr;
+            long long ms = strtoll(text, &end, 10);
+            if ((end != text) && (*end == '\0') && (ms >= 0) && (ms <= kMinAgeToStoreHashCoarseNs / 1000000LL))
+                return (int64_t)(ms * 1000000LL);
+        }
+        return -1;
+    }();
+    return min_age_ns;
+}
+
+// changed_ns: the file time the store validates that moves on every change - mtime for
+// the fingerprint xattr, the later of mtime and ctime for replay's hash store, which also
+// tells apart a rewrite that puts the old mtime back. read_start_ns: file_clock_ns()
+// taken before the content was read.
+inline bool may_store_hash(const std::string& path, const FileInfo& info, int64_t changed_ns,
+                           int64_t read_start_ns) noexcept
+{
+    int64_t age = 0;
+    if (__builtin_sub_overflow(read_start_ns, changed_ns, &age) || (age < 0))
+        return false;
+
+    int64_t min_age = test_min_age_to_store_hash_ns();
+    if (min_age < 0)
+    {
+        switch (file_time_step(path, info))
+        {
+            case PlatformTimeStep::Fine:
+                min_age = kMinAgeToStoreHashFineNs;
+                break;
+            case PlatformTimeStep::Tick:
+                min_age = ((changed_ns % 1000000000LL) != 0) ? (2 * platform_file_clock_step_ns())
+                                                              : kMinAgeToStoreHashCoarseNs;
+                break;
+            case PlatformTimeStep::Coarse:
+                min_age = kMinAgeToStoreHashCoarseNs;
+                break;
+        }
+    }
+    return age >= min_age;
 }
 
 // returns true if file info stored in xattr is the same as current iteration info & stores the hash in appropriate current_file_info.hash

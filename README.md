@@ -494,6 +494,14 @@ Incremental execution cache:
              cause a wrong skip. Use --hash-store-refresh (or off) when inputs are rewritten with
              restored modification times.
 
+  File times move in steps, so a file rewritten at the same size within the step of its last change
+  keeps the same times, and a hash stored then would be handed back for the new content. Both
+  backends therefore store a hash only when the file's last change (for the sidecar the later of
+  mtime and ctime) is old enough to be in an earlier step: 1 ms on APFS, two timer ticks on Linux
+  ext4 and tmpfs (8 ms at 250 Hz), 2 s elsewhere (HFS+ 1 s steps, FAT 2 s, network file systems).
+  A newer file is still hashed, and the task cache uses that hash as usual; it is only read again
+  on the next run and stored then.
+
   The sidecar keeps its data in two files, the index and a small append-only journal beside it, with a
   lock file alongside. A run that changes nothing writes neither of the two. A run that changes a few
   files appends only those records to the journal, so an incremental build does not rewrite an index
@@ -967,6 +975,10 @@ When no glob pattern is specified, all files under provided directories are fing
 With --xattr=ON the tool caches computed file hashes and saves FileInfo in "public.fingerprint.crc32c"
 or "public.fingerprint.blake3" xattr for files, depending on hash choice and then reads it back on next
 fingerprinting if file inode, size and modification dates are unchanged.
+File times move in steps, so a same-size rewrite within the step of the last change keeps the same
+time. The xattr is therefore written only when the file's mtime is old enough to be in an earlier step:
+1 ms on APFS, two timer ticks on Linux ext4 and tmpfs, 2 s elsewhere. A newer file is hashed again
+next time and stored then.
 On Linux the names are in the "user." namespace: "user.public.fingerprint.crc32c" and
 "user.public.fingerprint.blake3".
 FileInfo is a 32 byte structure:

@@ -8,6 +8,7 @@ test_xattr_caching() {
     log_info "Testing extended attribute caching for performance optimization"
     
     echo "xattr test" > "$TEST_DIR/xattr_file.txt"
+    settle_file "$TEST_DIR/xattr_file.txt"
     
     # First run - compute hash and write xattr
     log_info "First run: computing hash and writing to xattr (--xattr=on)"
@@ -44,6 +45,7 @@ test_xattr_refresh() {
     log_info "Testing --xattr=refresh to force recomputation and update cache"
     
     echo "refresh test" > "$TEST_DIR/refresh_file.txt"
+    settle_file "$TEST_DIR/refresh_file.txt"
     
     # Initial run
     log_info "Initial run with --xattr=on"
@@ -71,12 +73,18 @@ test_xattr_clear() {
     log_info "Testing --xattr=clear to remove cached attributes"
     
     echo "clear test" > "$TEST_DIR/clear_file.txt"
+    settle_file "$TEST_DIR/clear_file.txt"
     
     # Write xattr
     log_info "Writing xattr with --xattr=on"
     log_cmd "${FINGERPRINT_BIN} --xattr=on \"$TEST_DIR/clear_file.txt\" (write xattr)"
     ${FINGERPRINT_BIN} --xattr=on "$TEST_DIR/clear_file.txt" > /dev/null 2>&1
-    
+    # Without a written xattr the check below would pass without clearing anything.
+    if [ -z "$(list_xattr_names "$TEST_DIR/clear_file.txt" | /usr/bin/grep "public.fingerprint")" ]; then
+        log_fail "Xattr was not written before the clear"
+        return
+    fi
+
     # Clear xattr
     log_info "Clearing xattr with --xattr=clear"
     log_cmd "${FINGERPRINT_BIN} --xattr=clear \"$TEST_DIR/clear_file.txt\""
@@ -91,6 +99,30 @@ test_xattr_clear() {
 }
 
 
+# A file modified moments ago gets no fingerprint xattr: file times move in steps, so its
+# next same-size rewrite could keep the same time and the stored hash would be handed
+# back for the new content. The 2 second age of a coarse file system is forced here; APFS
+# and Linux ext4 or tmpfs need only milliseconds. Rewritten at once, the file must still
+# fingerprint differently, under the file system's own age.
+test_xattr_recent_file() {
+    log_test "Xattr not written on a file modified moments ago"
+    /bin/mkdir -p "$TEST_DIR/recent"
+    echo "original" > "$TEST_DIR/recent/file.txt"
+    local fp_before
+    fp_before=$(REPLAY_HASH_STORE_TEST_MIN_AGE_MS=2000 ${FINGERPRINT_BIN} --xattr=on "$TEST_DIR/recent" 2>&1 | /usr/bin/grep "Fingerprint:" | /usr/bin/awk '{print $2}')
+    local names
+    names=$(list_xattr_names "$TEST_DIR/recent/file.txt" | /usr/bin/grep "public.fingerprint")
+    if [ -z "$names" ]; then
+        log_pass "A file modified moments ago gets no fingerprint xattr"
+    else
+        log_fail "A file modified moments ago gets no fingerprint xattr (got: $names)"
+    fi
+    echo "modified" > "$TEST_DIR/recent/file.txt"
+    local fp_after
+    fp_after=$(${FINGERPRINT_BIN} --xattr=on "$TEST_DIR/recent" 2>&1 | /usr/bin/grep "Fingerprint:" | /usr/bin/awk '{print $2}')
+    assert_not_equal "$fp_before" "$fp_after" "A same-size rewrite right after fingerprinting changes the fingerprint"
+}
+
 # The fingerprint xattr is written only on files of the user running fingerprint: another user's
 # file keeps its attributes and its mode. Needs root to give a file away; skipped
 # otherwise.
@@ -103,6 +135,7 @@ test_xattr_not_owned() {
         return
     fi
     echo "not owned" > "$TEST_DIR/not_owned.txt"
+    settle_file "$TEST_DIR/not_owned.txt"
     /bin/chmod 444 "$TEST_DIR/not_owned.txt"
     local chown_bin=/bin/chown
     if [ -x /usr/sbin/chown ]; then

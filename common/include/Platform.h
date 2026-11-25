@@ -20,8 +20,13 @@
 #include <climits>
 #include <string>
 
+#include <time.h>
+
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#include <sys/mount.h>
+#else
+#include <sys/vfs.h>
 #endif
 
 // Extended attribute names. Linux only accepts names in a namespace, and "user." is the
@@ -98,6 +103,69 @@ inline const struct timespec &platform_stat_ctime(const struct stat &st) noexcep
 inline int64_t platform_timespec_ns(const struct timespec &ts) noexcept
 {
 	return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+// The clock file times are stamped from, in nanoseconds, or INT64_MIN when it cannot be
+// read. macOS stamps from the precise clock. Linux stamps from the coarse one, which lags
+// the precise clock by up to a timer tick: against the precise clock a file just written
+// would look up to a tick older than it is.
+inline int64_t platform_file_clock_ns() noexcept
+{
+	struct timespec now;
+#if defined(__APPLE__)
+	int status = clock_gettime(CLOCK_REALTIME, &now);
+#else
+	int status = clock_gettime(CLOCK_REALTIME_COARSE, &now);
+#endif
+	if (status != 0)
+		return INT64_MIN;
+	return platform_timespec_ns(now);
+}
+
+// How finely a file system stamps file times, as far as it matters for telling two
+// changes of a file apart by their times.
+enum class PlatformTimeStep
+{
+	Fine,    // APFS: the precise clock, nanoseconds
+	Tick,    // Linux ext4 and tmpfs: the coarse clock, one timer tick (or whole seconds
+	         // for ext2/3/4 with small inodes, which share the magic; see the caller)
+	Coarse,  // anything else, unknown, or not measured: HFS+ 1 s, FAT 2 s, network, FUSE
+};
+
+// The file system of path (followed if it is a symbolic link), Coarse when it cannot be
+// told.
+inline PlatformTimeStep platform_file_time_step(const char *path) noexcept
+{
+	struct statfs fs;
+	if (statfs(path, &fs) != 0)
+		return PlatformTimeStep::Coarse;
+#if defined(__APPLE__)
+	if (strcmp(fs.f_fstypename, "apfs") == 0)
+		return PlatformTimeStep::Fine;
+	return PlatformTimeStep::Coarse;
+#else
+	constexpr unsigned long kExtSuperMagic = 0xEF53;
+	constexpr unsigned long kTmpfsMagic = 0x01021994;
+	unsigned long type = (unsigned long)fs.f_type;
+	if ((type == kExtSuperMagic) || (type == kTmpfsMagic))
+		return PlatformTimeStep::Tick;
+	return PlatformTimeStep::Coarse;
+#endif
+}
+
+// One step of platform_file_clock_ns() on Linux (a timer tick), 0 on macOS, or 10 ms when
+// it cannot be read (the longest tick, at 100 Hz).
+inline int64_t platform_file_clock_step_ns() noexcept
+{
+#if defined(__APPLE__)
+	return 0;
+#else
+	struct timespec res;
+	if (clock_getres(CLOCK_REALTIME_COARSE, &res) != 0)
+		return 10000000LL;
+	int64_t step = platform_timespec_ns(res);
+	return (step > 0) ? step : 10000000LL;
+#endif
 }
 
 // Creation time in seconds, or 0 when the file system does not record one.

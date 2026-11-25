@@ -70,9 +70,16 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from xattr_support import get_xattr, xattr_names
+
+# replay stores a hash only for a file whose last change is old enough to be told apart
+# from a later one (milliseconds on APFS and Linux ext4 or tmpfs, 2 seconds elsewhere);
+# the files these scenarios write are fresh. 0 lets them be stored at once, which is
+# what the format scenarios check. Scenarios 1b and 1c set their own age.
+os.environ["REPLAY_HASH_STORE_TEST_MIN_AGE_MS"] = "0"
 
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 REPO_DIR       = SCRIPT_DIR.parent
@@ -399,6 +406,97 @@ def test_created_and_hits():
         check("warm run hit the hash store and computed nothing",
               hash_store(r2)[0] > 0 and hash_store(r2)[1] == 0, f"{hash_store(r2)} in: {r2.stderr}")
         check("outputs are correct", (out / "out2.txt").read_text() == "payload 2 v1")
+
+
+def run_min_age(args: list, min_age_ms) -> subprocess.CompletedProcess:
+    """run() with REPLAY_HASH_STORE_TEST_MIN_AGE_MS set to min_age_ms, or unset (replay's
+    own rule for each file system) when min_age_ms is None."""
+    env = dict(os.environ)
+    env.pop("REPLAY_HASH_STORE_TEST_MIN_AGE_MS", None)
+    if min_age_ms is not None:
+        env["REPLAY_HASH_STORE_TEST_MIN_AGE_MS"] = str(min_age_ms)
+    return subprocess.run([str(REPLAY)] + [str(a) for a in args],
+                          capture_output=True, text=True, timeout=120, env=env)
+
+
+def run_default_age(args: list) -> subprocess.CompletedProcess:
+    return run_min_age(args, None)
+
+
+def run_coarse_age(args: list) -> subprocess.CompletedProcess:
+    """The 2 second age of a coarse file system, on any file system."""
+    return run_min_age(args, 2000)
+
+
+def test_recent_files_not_stored():
+    print("\n=== Scenario 1b: files modified moments ago are hashed but not stored ===")
+    # File times move in steps, so a file rewritten at the same size within the step of its
+    # last change keeps the same times. Its hash is stored only once that step has surely
+    # passed: 2 seconds on a coarse file system, forced here on any; until then every run
+    # reads it again.
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td).resolve()
+        playlist, src, out, inputs = make_tree(d, 2)
+        cache = d / "cache"
+        args = ["--cache", "--cache-dir", cache, "-v"]
+
+        r1 = run_coarse_age(args + [playlist])
+        check("cold run exits 0", r1.returncode == 0, r1.stderr)
+        check("cold run computed every file", hash_store(r1)[:2] == (0, distinct_files(2)),
+              f"{hash_store(r1)} in: {r1.stderr}")
+        path = store_path(cache)
+        check("no file was stored: all were written moments ago",
+              path is None or Store(path).count == 0, str(store_paths(cache)))
+
+        # The same size, at once: nothing stored can stand in for the new content.
+        inputs[0].write_text("payload 0 v2")
+        r2 = run_coarse_age(args + [playlist])
+        check("a same-size rewrite right after a run executes its task again",
+              summary(r2) == (1, 1, 0), r2.stderr)
+        check("and its output has the new content", (out / "out0.txt").read_text() == "payload 0 v2")
+
+        # The hash store ages ctime too, which cannot be set back: wait the 2 seconds out.
+        time.sleep(2.1)
+        r3 = run_coarse_age(args + [playlist])
+        check("settled files: every task hits", summary(r3) == (2, 0, 0), r3.stderr)
+        table = store_path(cache)
+        jrnl = journal_path(cache)
+        stored = (Store(table).count if table else 0) + (Journal(jrnl).entries if jrnl else 0)
+        check("settled files are stored", stored == distinct_files(2),
+              f"{stored} stored, {store_paths(cache)} in: {r3.stderr}")
+        r4 = run_coarse_age(args + [playlist])
+        check("the next run computes nothing", hash_store(r4)[1] == 0, f"{hash_store(r4)} in: {r4.stderr}")
+
+
+def test_default_age_keeps_runs_correct():
+    print("\n=== Scenario 1c: under each file system's own age, reruns hit and rewrites are seen ===")
+    # Same-size rewrites that put the old mtime back (cp -p, touch -r, a build pinning
+    # timestamps), each followed at once by a run: only ctime tells them apart, and it
+    # moves in the same steps as mtime. Before the later of the two times was aged, a
+    # quarter of these runs on Linux ext4 gave the old output.
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td).resolve()
+        playlist, src, out, inputs = make_tree(d, 1)
+        cache = d / "cache"
+        args = ["--cache", "--cache-dir", cache]
+        pinned = 1767225600  # 2026-01-01
+        os.utime(inputs[0], (pinned, pinned))
+
+        r1 = run_default_age(args + [playlist])
+        check("cold run exits 0", r1.returncode == 0, r1.stderr)
+        r2 = run_default_age(args + [playlist])
+        check("an immediate rerun hits", summary(r2) == (1, 0, 0), r2.stderr)
+
+        stale = []
+        for i in range(40):
+            text = f"payload 0 v{i % 10}"  # the same size every time
+            inputs[0].write_text(text)
+            os.utime(inputs[0], (pinned, pinned))
+            r = run_default_age(args + [playlist])
+            if r.returncode != 0 or (out / "out0.txt").read_text() != text:
+                stale.append(i)
+        check("every same-size rewrite with its mtime put back is seen", not stale,
+              f"stale after rewrites {stale}")
 
 
 def test_entry_count():
@@ -1503,6 +1601,8 @@ def main() -> int:
     print(f"replay: {REPLAY}")
 
     test_created_and_hits()
+    test_recent_files_not_stored()
+    test_default_age_keeps_runs_correct()
     test_entry_count()
     test_corruption()
     test_truncation()

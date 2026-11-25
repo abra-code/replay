@@ -29,12 +29,20 @@ Exit:  0 = all checks passed, 1 = one or more failures
 """
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 from xattr_support import IS_LINUX, xattr_names
+
+# replay stores a hash only for a file whose last change is old enough to be told apart
+# from a later one (milliseconds on APFS and Linux ext4 or tmpfs, 2 seconds elsewhere);
+# the files these scenarios write are fresh. 0 lets them be stored at once, which is
+# what these scenarios check (the rule itself is checked in
+# test_replay_fingerprint_store.py).
+os.environ["REPLAY_HASH_STORE_TEST_MIN_AGE_MS"] = "0"
 
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 REPO_DIR       = SCRIPT_DIR.parent

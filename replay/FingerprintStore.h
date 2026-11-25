@@ -98,6 +98,11 @@ public:
 	// because both were observed together.
 	void record(const FileInfo &info, uint64_t contentHash);
 
+	// Counts a file whose hash was computed but must not be recorded: one modified too
+	// recently to be told apart from its next same-size rewrite (may_store_hash in
+	// FileHashing.h). It shows in computed_count() and leaves the store as it was.
+	void count_unrecorded();
+
 	// Publishes what this run learned, by whichever of the two routes fits:
 	//
 	//   - nothing differs from what is already on disk: no write at all, which is the

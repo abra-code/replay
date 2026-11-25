@@ -103,4 +103,14 @@ On Linux the names are in the `user.` namespace: `user.public.fingerprint.crc32c
 
 On subsequent runs, cached values are used if file inode, size, and mtime are unchanged. This significantly speeds up repeated fingerprinting.
 
+File times move in steps, so a file rewritten at the same size within the step of its last change keeps the same time, and a hash stored then would be handed back for the new content. The xattr is therefore written only when the file's mtime is old enough to be in an earlier step than any later change:
+
+| File system | Time step | Age needed before the read |
+|---|---|---|
+| APFS | nanoseconds | 1 ms |
+| Linux ext4, tmpfs | one timer tick (4 ms at 250 Hz, 10 ms at 100 Hz) | two ticks of the kernel's coarse clock |
+| anything else (HFS+, FAT, network, FUSE, ext with whole-second times) | up to 2 s | 2 s |
+
+A newer file is hashed again on the next run and stored then. gate and replay's hash store follow the same rule; replay's sidecar store ages the later of mtime and ctime, since it also checks ctime.
+
 The fingerprint xattr is written (and removed with `--xattr=clear`) only on files that belong to the user running the tool; a read-only file of that user is made writable for the moment of the write and then restored. Another user's file keeps its attributes and its mode: a fingerprint xattr already on it is still read, and otherwise its hash is computed on every run. Running as root therefore writes the xattr only on root's own files. gate and replay's `--hash-store xattr` follow the same rule.

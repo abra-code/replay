@@ -186,6 +186,7 @@ static void process_matched_file_async(std::string path, FileInfo info) noexcept
             }
 
             bool hashed = true;
+            int64_t read_start_ns = file_clock_ns();
             if (needs_hash)
             {
                 hashed = compute_file_hash(path, fileInfo);
@@ -193,10 +194,15 @@ static void process_matched_file_async(std::string path, FileInfo info) noexcept
 
             // Never store a hash that was not computed: the 0 left behind by a failed
             // read would be trusted by every later run, here and in replay's cache, which
-            // shares this xattr namespace and FileInfoCore layout.
+            // shares this xattr namespace and FileInfoCore layout. Nor one of a file
+            // modified too recently to be told apart from its next same-size rewrite
+            // (may_store_hash); refresh then removes the record it cannot replace.
             if (write_xattr && hashed)
             {
-                write_xattr_fileinfo(path, fileInfo);
+                if (may_store_hash(path, fileInfo, fileInfo.mtime_ns, read_start_ns))
+                    write_xattr_fileinfo(path, fileInfo);
+                else if (g_xattr_mode == XattrMode::Refresh)
+                    clear_xattr_fileinfo(path, fileInfo);
             }
             
             add_to_matched_files(std::move(path), std::move(fileInfo));

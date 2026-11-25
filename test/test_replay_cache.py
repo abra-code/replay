@@ -54,7 +54,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from xattr_support import xattr_names
+from xattr_support import settle, xattr_names
 
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 REPO_DIR       = SCRIPT_DIR.parent
@@ -443,9 +443,10 @@ def test_refresh_and_dry_run():
 
         # A dry run must write NOTHING, including the transparent xattr hash
         # hash store on fingerprinted files (which would also briefly chmod
-        # read-only files). Fresh file, so no earlier run has stored it.
+        # read-only files). A new file, so no earlier run has stored it.
         fresh = d / "fresh.txt"
         fresh.write_text("untouched")
+        settle(fresh)  # old enough to be stored, so a missing xattr shows the dry run wrote none
         playlist2 = d / "pl2.json"
         playlist2.write_text(json.dumps([
             {"action": "execute", "tool": "/bin/sh",

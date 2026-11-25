@@ -1187,6 +1187,12 @@ FingerprintStore::record(const FileInfo &info, uint64_t contentHash)
 	}
 }
 
+void
+FingerprintStore::count_unrecorded()
+{
+	mStores.fetch_add(1, std::memory_order_relaxed);
+}
+
 size_t
 FingerprintStore::hit_count() const
 {

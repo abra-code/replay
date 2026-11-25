@@ -81,6 +81,10 @@ static void print_usage(std::ostream& stream)
     stream << "With --xattr=ON the tool caches computed file hashes and saves FileInfo in \"public.fingerprint.crc32c\"\n";
     stream << "or \"public.fingerprint.blake3\" xattr for files, depending on hash choice and then reads it back on next\n";
     stream << "fingerprinting if file inode, size and modification dates are unchanged.\n";
+    stream << "File times move in steps, so a same-size rewrite within the step of the last change keeps the same\n";
+    stream << "time. The xattr is therefore written only when the file's mtime is old enough to be in an earlier step:\n";
+    stream << "1 ms on APFS, two timer ticks on Linux ext4 and tmpfs, 2 s elsewhere. A newer file is hashed again\n";
+    stream << "next time and stored then.\n";
     stream << "On Linux the names are in the \"user.\" namespace: \"user.public.fingerprint.crc32c\" and\n";
     stream << "\"user.public.fingerprint.blake3\".\n";
     stream << "FileInfo is a 32 byte structure:\n";

@@ -267,8 +267,11 @@ GATE="$(/usr/bin/dirname -- "$REPLAY")/gate"
 if [ ! -x "$GATE" ]; then
     echo "  skipped: no gate next to replay"
 else
+    # Modified long ago: a hash is stored only for a file whose last change is old
+    # enough to be told apart from a later one, so a fresh file could leave ctime alone.
     for name in ro-plain ro-sandboxed; do
         echo "$name" > "$ALLOWED/$name.txt"
+        /usr/bin/touch -t 202601010000 "$ALLOWED/$name.txt"
         /bin/chmod 444 "$ALLOWED/$name.txt"
     done
     before="$(/usr/bin/stat -c '%z' "$ALLOWED/ro-plain.txt")"

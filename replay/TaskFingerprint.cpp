@@ -349,10 +349,19 @@ bool hash_one_file(HashedFile &entry)
 		// Never record a hash that was not actually computed. The 0 left behind by a
 		// failed read would be stored as this file's content and reused on every
 		// later run, so one transient EMFILE would pin it until size or mtime moved.
+		int64_t readStartNs = file_clock_ns();
 		if(!compute_file_hash(entry.path, entry.info))
 			return false;
 
-		g_fingerprint_store->record(entry.info, current_hash_value(entry.info));
+		// Nor one of a file changed too recently to be told apart from its next same-size
+		// rewrite (may_store_hash, FileHashing.h): it is counted as computed and hashed
+		// again next run. The store validates ctime too, which is what tells apart a
+		// rewrite that puts the old mtime back, so the later of the two is aged.
+		int64_t changedNs = std::max(entry.info.mtime_ns, entry.info.ctime_ns);
+		if(may_store_hash(entry.path, entry.info, changedNs, readStartNs))
+			g_fingerprint_store->record(entry.info, current_hash_value(entry.info));
+		else
+			g_fingerprint_store->count_unrecorded();
 		return true;
 	}
 
@@ -375,16 +384,22 @@ bool hash_one_file(HashedFile &entry)
 	}
 
 	bool hashed = true;
+	int64_t readStartNs = file_clock_ns();
 	if(needsHash)
 	{
 		hashed = compute_file_hash(entry.path, entry.info);
 	}
 	// Only store a hash that was really computed. Persisting the 0 left behind by a
 	// failed read would make every later run hit that xattr record and reuse the 0
-	// without reopening the file, until its size or mtime changes.
+	// without reopening the file, until its size or mtime changes. Nor one of a file
+	// modified too recently to be told apart from its next same-size rewrite
+	// (may_store_hash); refresh then removes the record it cannot replace.
 	if(writeXattr && hashed)
 	{
-		write_xattr_fileinfo(entry.path, entry.info);
+		if(may_store_hash(entry.path, entry.info, entry.info.mtime_ns, readStartNs))
+			write_xattr_fileinfo(entry.path, entry.info);
+		else if(g_xattr_mode == XattrMode::Refresh)
+			clear_xattr_fileinfo(entry.path, entry.info);
 	}
 	return hashed;
 }
