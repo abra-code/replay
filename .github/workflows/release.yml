@@ -11,7 +11,8 @@
 #     Developer ID and not notarized (the linker's ad hoc signature only), in
 #     replay_<version>_macos_unsigned.zip with a .sha256 file. The signed and notarized
 #     installer package is made on a Mac (installer/).
-# Everything, with a SHA256SUMS file, is kept as the run's artifact release-<version>.
+# Each part is kept as an artifact of the run, replay-<version>-linux-<arch> and
+# replay-<version>-macos, and everything with a SHA256SUMS file as replay-<version>-all-release.
 # "attach" also uploads the files to the GitHub release of the tag, which must exist
 # (create it first, as a draft if it is not to be seen yet); files of the same name are
 # replaced. The build scripts come from the tag, so an older tag is built as it was.
@@ -115,7 +116,7 @@ jobs:
       - name: Keep the tarballs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux-${{ matrix.arch }}
+          name: replay-${{ needs.prepare.outputs.version }}-linux-${{ matrix.arch }}
           path: ${{ runner.temp }}/dist
           if-no-files-found: error
 
@@ -151,7 +152,7 @@ jobs:
       - name: Get the tarballs
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: linux-${{ matrix.arch }}
+          name: replay-${{ needs.prepare.outputs.version }}-linux-${{ matrix.arch }}
           path: ${{ runner.temp }}/dist
 
       # The check installs as a user without root, which must read the scripts and the
@@ -203,7 +204,7 @@ jobs:
       - name: Keep the archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: macos
+          name: replay-${{ needs.prepare.outputs.version }}-macos
           path: ${{ runner.temp }}/dist
           if-no-files-found: error
 
@@ -221,11 +222,13 @@ jobs:
           path: ${{ runner.temp }}/parts
 
       - name: Gather them with SHA256SUMS
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           /bin/mkdir -p "$RUNNER_TEMP/release"
-          # Only this workflow's parts: a re-run also downloads the release-<version> artifact
-          # of an earlier attempt.
-          /bin/cp "$RUNNER_TEMP"/parts/linux-*/* "$RUNNER_TEMP"/parts/macos/* "$RUNNER_TEMP/release/"
+          # Only this workflow's parts: a re-run also downloads the replay-<version>-all-release
+          # artifact of an earlier attempt.
+          /bin/cp "$RUNNER_TEMP/parts/replay-$VERSION-linux-"*/* "$RUNNER_TEMP/parts/replay-$VERSION-macos"/* "$RUNNER_TEMP/release/"
           cd "$RUNNER_TEMP/release" || exit 1
           /usr/bin/sha256sum -c ./*.sha256 || exit 1
           /usr/bin/sha256sum *.tar.gz *.zip > SHA256SUMS
@@ -234,7 +237,7 @@ jobs:
       - name: Keep the release files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-${{ needs.prepare.outputs.version }}
+          name: replay-${{ needs.prepare.outputs.version }}-all-release
           path: ${{ runner.temp }}/release
           if-no-files-found: error
 
