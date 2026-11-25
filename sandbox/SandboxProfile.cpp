@@ -311,6 +311,15 @@ std::string GenerateSbplProfile(const Config& config)
     else
         p += "\n(deny network*)\n";
 
+    // Apple's curl (LibreSSL) checks a server's certificate against /etc/ssl/cert.pem
+    // first and, when the chain ends at a root that file lacks (example.com's does),
+    // asks this service to check it against the system's trusted roots. bsd.sb does not
+    // allow looking it up (macOS 27), and then such a connection fails ("unable to get
+    // local issuer certificate", curl exit 60). App Sandbox allows it to every app.
+    // Only TLS clients were seen needing it, so it comes with the network.
+    if (config.allow_network)
+        p += "(allow mach-lookup (global-name \"com.apple.TrustEvaluationAgent\"))\n";
+
     // Unix sockets limited (the MCP server, --deny-unix-sockets): connecting is allowed
     // only to sockets inside the write grants, as Landlock does from ABI 9. Every DNS
     // lookup goes through mDNSResponder's socket, so it stays allowed (without it curl

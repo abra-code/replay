@@ -204,6 +204,8 @@ By default the sandbox allows network. Use `--deny-network` or `"allow_network":
 
 The profile always emits an explicit network rule — `(allow network*)` by default, `(deny network*)` when denied. There is no implicit fallback: the rule is always present.
 
+On macOS, with the network allowed, the profile also lets a command look up the certificate trust service, `(allow mach-lookup (global-name "com.apple.TrustEvaluationAgent"))`. Apple's `curl` checks a server's certificate against `/etc/ssl/cert.pem` first and asks this service only when the chain ends at a root that file lacks, as example.com's does; without the rule such a connection fails ("unable to get local issuer certificate", curl exit 60), while sites whose root is in the file still work. Apps under App Sandbox may look up this service too.
+
 ### Unix sockets (macOS)
 
 Seatbelt counts connecting to a Unix socket as network access, so `(allow network*)` lets a sandboxed command connect to any Unix socket its user may open, inside the grants or not: ssh-agent, gpg-agent, Docker and Colima, and the socket of a `replay --start-server` when `REPLAY_IPC_BACKEND=socket` is set. That server still refuses the command, which cannot read the server's token file; the default message port of that server is not reachable at all, because the profile does not allow looking it up.

@@ -354,7 +354,8 @@ echo "--allow-read $SSL_DIR: curl HTTPS succeeds (requires network)"
 echo ""
 # curl's TLS library reads its configuration (openssl.cnf) under $SSL_DIR during TLS
 # initialization. Without that path in the sandbox it fails before the first byte is
-# sent. Verifies the grant is enough.
+# sent. Verifies the grant is enough. On macOS example.com's root is not in
+# $SSL_DIR/cert.pem, so this also needs the profile's certificate trust service rule.
 
 cat > "$WORK_DIR/curl_https.json" << EOF
 [{
@@ -513,6 +514,13 @@ EOF
 	verify_succeeded "$?" "default: --verbose prints the profile (got: $output)"
 	echo "$output" | /usr/bin/grep -qF "(remote unix-socket)"
 	verify_failed "$?" "default: the profile has no Unix socket rule"
+	echo "$output" | /usr/bin/grep -qF '(global-name "com.apple.TrustEvaluationAgent")'
+	verify_succeeded "$?" "network allowed: the profile lets commands reach the certificate trust service (got: $output)"
+	output=$("$REPLAY_TOOL" --verbose --deny-network --allow-write "$WORK_DIR" "$WORK_DIR/unix_connect.json" 2>&1)
+	echo "$output" | /usr/bin/grep -qF "(deny network*)"
+	verify_succeeded "$?" "--deny-network: --verbose prints the profile (got: $output)"
+	echo "$output" | /usr/bin/grep -qF "TrustEvaluationAgent"
+	verify_failed "$?" "--deny-network: the profile has no certificate trust service rule"
 
 	# The grant rule names the resolved write dir (/tmp is /private/tmp), or it never matches.
 	resolved_work_dir="$(CDPATH= cd -P -- "$WORK_DIR" && pwd -P)"
